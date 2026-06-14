@@ -14,6 +14,7 @@ import fin.android.domain.TxKind
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
+import org.junit.Assert.assertTrue
 import org.junit.Test
 import java.math.BigDecimal
 import java.time.LocalDate
@@ -344,5 +345,33 @@ class GainsTest {
         assertEquals(100.0, detail.avgBuyPrice!!, tol)
         assertEquals(100.0, detail.unrealized!!, tol)
         assertEquals(0.10, detail.unrealizedPct!!, tol)
+    }
+
+    /**
+     * Period gains must reflect a security's price move over the window. 100 shares bought for
+     * 10000 (cash now 0); price 100 → 110 over the 7d window ⇒ +1000 (+10%). Guards against a flat
+     * series when the price history has the dates the window needs (the on-device "+0.0%" was a
+     * shallow-cache symptom, not a calculation bug — this proves the math).
+     */
+    @Test fun portfolioPeriodGainReflectsSecurityPriceMove() {
+        seq = 0
+        val today = d("2026-06-15")
+        val accounts = mapOf("pea" to Account("pea", "PEA", "EUR", TaxRule.Gains(BigDecimal("0.172"))))
+        val assets = mapOf("aa" to Asset("aa", AssetKind.SECURITY, "Alpha", ticker = "AA", ccy = "EUR", group = "g"))
+        val txs = mutableMapOf<String, Tx>()
+        listOf(
+            tx("2026-01-01", "pea", null, TxKind.deposit, "0", eur("10000")),
+            tx("2026-01-02", "pea", "aa", TxKind.buy, "100", eur("10000")),
+        ).forEach { txs[it.id] = it }
+        val book = Book(accounts = accounts, assets = assets, txs = txs, config = mapOf("currency" to "EUR"))
+        val market = MarketData(
+            prices = mapOf(
+                "aa" to PriceSeries(listOf(PricePoint(d("2026-06-08"), 100.0), PricePoint(d("2026-06-15"), 110.0))),
+            ),
+        )
+        val report = Gains.report(book, market, today = today)
+        val p7 = report.periods.first { it.label == "7d" }
+        assertEquals(1000.0, p7.absolute, tol)
+        assertEquals(0.10, p7.relative!!, tol)
     }
 }
