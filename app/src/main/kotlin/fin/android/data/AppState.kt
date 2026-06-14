@@ -2,6 +2,7 @@ package fin.android.data
 
 import fin.android.domain.Book
 import fin.android.remote.SyncState
+import fin.android.valuation.PerfMetrics
 import fin.android.valuation.Valuation
 
 /** Top-level app state the UI renders. */
@@ -18,6 +19,7 @@ sealed interface AppState {
     /** Unlocked: the valued portfolio, ready to view and mutate. */
     data class Ready(
         val valuation: Valuation,
+        val perf: PerfMetrics?,
         val book: Book,
         val sync: SyncState,
         val message: String?,
