@@ -97,10 +97,19 @@ private fun HeaderCard(d: AssetDetail) {
             d.isin?.let { DetailRow("ISIN", it) }
             DetailRow("Quantity", "${d.qty.stripTrailingZeros().toPlainString()} units")
             DetailRow(
-                "Price",
+                "Market price",
                 if (d.price != null) "${formatAmount(d.price)} ${d.assetCcy}" else "—",
             )
+            DetailRow(
+                "Avg buy price",
+                if (d.avgBuyPrice != null) formatMoney(d.avgBuyPrice, d.referenceCcy) else "—",
+            )
             DetailRow("Value", formatMoney(d.value, d.referenceCcy))
+            DetailRow(
+                "Cost basis",
+                if (d.costBasis != null) formatMoney(d.costBasis, d.referenceCcy) else "—",
+            )
+            UnrealizedRow(d)
             if (d.accounts.isNotEmpty()) DetailRow("Accounts", d.accounts.joinToString(", "))
         }
     }
@@ -205,6 +214,28 @@ private fun PeriodRow(p: AssetPeriodGain) {
             style = MaterialTheme.typography.bodyMedium,
             color = detailGainColor(p.absolute),
         )
+    }
+}
+
+/** Unrealized +/− value (current value − cost basis), coloured, with its percentage. */
+@Composable
+private fun UnrealizedRow(d: AssetDetail) {
+    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+        Text(
+            "+/− value",
+            style = MaterialTheme.typography.bodyMedium,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+        if (d.unrealized == null) {
+            Text("—", style = MaterialTheme.typography.bodyMedium)
+        } else {
+            val pct = d.unrealizedPct?.let { " (${formatGainPercent(it)})" } ?: ""
+            Text(
+                "${formatGainCell(d.unrealized)} ${d.referenceCcy}$pct",
+                style = MaterialTheme.typography.bodyMedium,
+                color = detailGainColor(d.unrealized),
+            )
+        }
     }
 }
 
