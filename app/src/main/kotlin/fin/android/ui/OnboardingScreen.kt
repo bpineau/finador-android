@@ -13,10 +13,13 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.ContentPaste
 import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.FilledTonalIconButton
+import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -52,11 +55,16 @@ fun OnboardingScreen(vm: AppViewModel) {
             .padding(24.dp),
         verticalArrangement = Arrangement.spacedBy(12.dp),
     ) {
-        Text("finador", style = MaterialTheme.typography.headlineMedium)
+        Text(
+            "finador",
+            style = MaterialTheme.typography.headlineMedium,
+            fontWeight = androidx.compose.ui.text.font.FontWeight.Bold,
+        )
         Text(
             "Connect a private GitHub repository. It holds only the encrypted ledger file — " +
                 "your data never leaves it in clear text.",
             style = MaterialTheme.typography.bodyMedium,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
         Spacer(Modifier.height(4.dp))
 
@@ -103,8 +111,8 @@ fun OnboardingScreen(vm: AppViewModel) {
                 keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password),
                 modifier = Modifier.weight(1f),
             )
-            OutlinedButton(onClick = { readClipboard(context)?.let { token = it } }) {
-                Text("Paste")
+            FilledTonalIconButton(onClick = { readClipboard(context)?.let { token = it } }) {
+                Icon(Icons.Filled.ContentPaste, contentDescription = "Paste token")
             }
         }
 
@@ -120,6 +128,7 @@ fun OnboardingScreen(vm: AppViewModel) {
         Text(
             "Stored once; unlocked by biometrics next time.",
             style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
 
         error?.let {
