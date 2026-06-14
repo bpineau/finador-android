@@ -10,8 +10,8 @@
         android:strokeWidth="8"
         android:strokeLineCap="round"
         android:strokeLineJoin="round" />
-    <!-- Latest-value marker in brand green. -->
+    <!-- Latest-value marker in the brand terracotta accent. -->
     <path
         android:pathData="M84,34 m-7,0 a7,7 0 1,0 14,0 a7,7 0 1,0 -14,0"
-        android:fillColor="#1E6E4E" />
+        android:fillColor="#C2613C" />
 </vector>
