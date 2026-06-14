@@ -41,13 +41,6 @@ import fin.android.valuation.PerfMetrics
 import fin.android.valuation.Position
 import fin.android.valuation.ValuationLine
 
-/** Semantic up/down colour for a figure: gain green / loss red / muted for null. */
-@Composable
-private fun gainColor(value: Double?): Color = when {
-    value == null -> MaterialTheme.colorScheme.onSurfaceVariant
-    value < 0 -> FinColors.current.loss
-    else -> FinColors.current.gain
-}
 
 private val ListPadding = androidx.compose.foundation.layout.PaddingValues(16.dp)
 
@@ -237,12 +230,12 @@ private fun PeriodCard(pg: PeriodGain, ccy: String, modifier: Modifier = Modifie
                 formatSignedPercent(pg.relative),
                 style = MaterialTheme.typography.titleMedium,
                 fontWeight = FontWeight.Bold,
-                color = gainColor(pg.relative),
+                color = gainLossColor(pg.relative),
             )
             Text(
                 "${formatGainCell(pg.absolute)} $ccy",
                 style = MaterialTheme.typography.bodySmall,
-                color = gainColor(pg.absolute),
+                color = gainLossColor(pg.absolute),
             )
         }
     }
@@ -293,7 +286,7 @@ private fun AssetGainRow(a: AssetGain, onAssetClick: (String) -> Unit) {
                 modifier = Modifier.weight(1f),
                 textAlign = TextAlign.End,
                 style = MaterialTheme.typography.bodyMedium,
-                color = gainColor(cell),
+                color = gainLossColor(cell),
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
             )
@@ -402,7 +395,7 @@ private fun PerfCard(perf: PerfMetrics) {
 private fun PerfRow(label: String, value: String, raw: Double?) {
     Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
         Text(label, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
-        Text(value, style = MaterialTheme.typography.bodyMedium, color = gainColor(raw))
+        Text(value, style = MaterialTheme.typography.bodyMedium, color = gainLossColor(raw))
     }
 }
 

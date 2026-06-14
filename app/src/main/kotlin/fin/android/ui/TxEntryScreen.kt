@@ -29,8 +29,10 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
 import fin.android.data.AppState
@@ -54,12 +56,14 @@ fun TxEntryScreen(vm: AppViewModel, ready: AppState.Ready, onDone: () -> Unit) {
     var account by remember { mutableStateOf(accounts.firstOrNull()) }
     var kind by remember { mutableStateOf(TxKind.buy) }
     var asset by remember { mutableStateOf<Asset?>(null) }
-    var dateText by remember { mutableStateOf(LocalDate.now().toString()) }
-    var qty by remember { mutableStateOf("") }
-    var amount by remember { mutableStateOf("") }
-    var ccy by remember { mutableStateOf(accounts.firstOrNull()?.ccy ?: "EUR") }
-    var note by remember { mutableStateOf("") }
-    var busy by remember { mutableStateOf(false) }
+    // Text fields survive config changes (rotation) so an in-progress entry isn't lost.
+    var dateText by rememberSaveable { mutableStateOf(LocalDate.now().toString()) }
+    var qty by rememberSaveable { mutableStateOf("") }
+    var amount by rememberSaveable { mutableStateOf("") }
+    var ccy by rememberSaveable { mutableStateOf(accounts.firstOrNull()?.ccy ?: "EUR") }
+    var ccyTouched by rememberSaveable { mutableStateOf(false) }
+    var note by rememberSaveable { mutableStateOf("") }
+    val busy by vm.busy.collectAsStateWithLifecycle() // resets on success AND failure
     var error by remember { mutableStateOf<String?>(null) }
 
     val isCash = kind in cashKinds
@@ -92,7 +96,7 @@ fun TxEntryScreen(vm: AppViewModel, ready: AppState.Ready, onDone: () -> Unit) {
                 optionLabel = { it.name },
                 onSelected = {
                     account = it
-                    ccy = it.ccy
+                    if (!ccyTouched) ccy = it.ccy // don't clobber a currency the user typed
                 },
             )
 
@@ -145,7 +149,7 @@ fun TxEntryScreen(vm: AppViewModel, ready: AppState.Ready, onDone: () -> Unit) {
 
             OutlinedTextField(
                 value = ccy,
-                onValueChange = { ccy = it },
+                onValueChange = { ccy = it.uppercase(); ccyTouched = true },
                 label = { Text("Currency") },
                 singleLine = true,
                 modifier = Modifier.fillMaxWidth(),
@@ -168,7 +172,6 @@ fun TxEntryScreen(vm: AppViewModel, ready: AppState.Ready, onDone: () -> Unit) {
                 onClick = {
                     error = validate(account, kind, asset, dateText, qty, amount, ccy)
                     if (error != null) return@Button
-                    busy = true
                     val acc = account!!
                     val parsedDate = LocalDate.parse(dateText.trim(), DateTimeFormatter.ISO_LOCAL_DATE)
                     val parsedQty = if (kind == TxKind.buy || kind == TxKind.sell) {
@@ -186,7 +189,7 @@ fun TxEntryScreen(vm: AppViewModel, ready: AppState.Ready, onDone: () -> Unit) {
                         qty = parsedQty,
                         amount = parsedAmount,
                         ccy = ccy.trim().ifBlank { acc.ccy },
-                        note = note,
+                        note = note.trim(),
                         onSaved = { msg ->
                             // Return to overview, then surface the SyncOutcome message in a snackbar.
                             onDone()

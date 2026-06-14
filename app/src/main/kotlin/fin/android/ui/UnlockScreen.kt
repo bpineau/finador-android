@@ -39,7 +39,7 @@ fun UnlockScreen(vm: AppViewModel, activity: FragmentActivity) {
         BiometricManager.from(activity).canAuthenticate(ALLOWED) == BiometricManager.BIOMETRIC_SUCCESS
     }
     var prompted by remember { mutableStateOf(false) }
-    val error by vm.message.collectAsStateWithLifecycle()
+    val error by vm.onboardError.collectAsStateWithLifecycle()
 
     fun prompt() {
         prompted = true

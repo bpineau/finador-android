@@ -90,7 +90,16 @@ class Ledger internal constructor(
          */
         fun open(bytes: ByteArray, passphrase: String): Ledger {
             val raw = Log.open(bytes, passphrase)
-            return Ledger(raw.header, raw.keys, raw.entries, Replay.fold(raw.entries))
+            val book = try {
+                Replay.fold(raw.entries)
+            } catch (e: UnsupportedFormatException) {
+                throw e // unknown record kind — must stay distinct
+            } catch (e: Exception) {
+                // Authenticated but malformed payload (bad decimal/date/enum, missing field): the file
+                // is effectively corrupt. Honors the documented @throws instead of leaking a raw JVM exception.
+                throw BadPasswordOrCorruptException(e)
+            }
+            return Ledger(raw.header, raw.keys, raw.entries, book)
         }
 
         /** Creates a brand-new empty ledger (fresh salt + file id) — first-run / onboarding. */

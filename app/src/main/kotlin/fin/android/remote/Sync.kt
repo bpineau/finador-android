@@ -42,8 +42,11 @@ class Sync(
     /** Pulls into the working copy if online and stale (missing copy, past readPullAfter). */
     fun pullIfStale() {
         val st = state()
-        val fresh = workingCopy.exists() && st.lastPull != null &&
-            Duration.between(Instant.parse(st.lastPull), now()).abs() < readPullAfter
+        val sinceLastPull = st.lastPull?.let { Duration.between(Instant.parse(it), now()) }
+        // Fresh only within [0, readPullAfter): a future lastPull (clock skew / restored backup) is
+        // treated as stale rather than suppressing pulls forever.
+        val fresh = workingCopy.exists() && sinceLastPull != null &&
+            !sinceLastPull.isNegative && sinceLastPull < readPullAfter
         if (fresh) return
         try {
             val f = backend.fetch()
@@ -88,17 +91,25 @@ class Sync(
 
         require(workingCopy.exists()) { "no local copy to mutate and remote unavailable" }
         var local = fn(Ledger.open(workingCopy.readBytes(), passphrase))
-        writeCopy(local.toBytes())
+        var bytes = local.toBytes() // serialize once; re-derived only after a merge
+        writeCopy(bytes)
 
         repeat(MAX_PUSH_TRIES) {
             try {
-                val newSha = backend.push(local.toBytes(), st.sha, message)
+                val newSha = backend.push(bytes, st.sha, message)
                 saveState(st.copy(sha = newSha, lastPull = now().toString(), dirty = false))
                 return SyncOutcome(pushed = true, dirty = false, message = "synced")
             } catch (e: RemoteError.Conflict) {
-                val remote = backend.fetch()
+                // Going offline mid-reconcile must still honor the offline-dirty guarantee.
+                val remote = try {
+                    backend.fetch()
+                } catch (off: RemoteError.Offline) {
+                    saveState(st.copy(dirty = true))
+                    return SyncOutcome(pushed = false, dirty = true, message = "saved locally (offline) — will push later")
+                }
                 local = local.merge(Ledger.open(remote.data, passphrase), resolve)
-                writeCopy(local.toBytes())
+                bytes = local.toBytes()
+                writeCopy(bytes)
                 st = st.copy(sha = remote.version)
                 saveState(st)
             } catch (e: RemoteError.Offline) {
@@ -126,9 +137,13 @@ class Sync(
                 writeCopy(fetched.data)
                 saveState(st.copy(sha = fetched.version, lastPull = now().toString()))
             } else if (workingCopy.exists()) {
-                // remote missing but we have a local copy → first push
-                val newSha = backend.push(workingCopy.readBytes(), null, "finador-android: initial push")
-                saveState(st.copy(sha = newSha, lastPull = now().toString()))
+                // remote missing but we have a local copy → first push (guard offline like elsewhere)
+                try {
+                    val newSha = backend.push(workingCopy.readBytes(), null, "finador-android: initial push")
+                    saveState(st.copy(sha = newSha, lastPull = now().toString()))
+                } catch (e: RemoteError.Offline) {
+                    return SyncOutcome(pushed = false, dirty = false, message = "offline")
+                }
             }
             return SyncOutcome(pushed = false, dirty = false, message = "up to date")
         }
@@ -137,12 +152,18 @@ class Sync(
         var local = Ledger.open(workingCopy.readBytes(), passphrase)
         if (fetched != null) {
             local = local.merge(Ledger.open(fetched.data, passphrase), resolve)
-            writeCopy(local.toBytes())
             st = st.copy(sha = fetched.version)
         }
-        val newSha = backend.push(local.toBytes(), st.sha, "finador-android: sync")
-        saveState(st.copy(sha = newSha, lastPull = now().toString(), dirty = false))
-        return SyncOutcome(pushed = true, dirty = false, message = "synced")
+        val bytes = local.toBytes()
+        writeCopy(bytes)
+        return try {
+            val newSha = backend.push(bytes, st.sha, "finador-android: sync")
+            saveState(st.copy(sha = newSha, lastPull = now().toString(), dirty = false))
+            SyncOutcome(pushed = true, dirty = false, message = "synced")
+        } catch (e: RemoteError.Offline) {
+            saveState(st.copy(dirty = true))
+            SyncOutcome(pushed = false, dirty = true, message = "offline — will push later")
+        }
     }
 
     private fun writeCopy(data: ByteArray) {

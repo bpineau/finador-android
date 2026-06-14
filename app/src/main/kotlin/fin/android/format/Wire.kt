@@ -7,6 +7,10 @@ import kotlinx.serialization.json.JsonObject
 /** Shared JSON codec. Unknown fields of a known kind are tolerated (forward-compatible). */
 internal val wireJson = Json { ignoreUnknownKeys = true; encodeDefaults = false }
 
+/** The 12 ASCII bytes mixed into the head/trailer AAD — shared by the reader and the writer so they
+ *  can never drift on the trailer authentication. */
+internal val HEAD_LABEL: ByteArray = "finador-head".toByteArray(Charsets.US_ASCII)
+
 /** Record envelope: kind, creation timestamp (RFC3339Nano UTC), and the kind-specific payload. */
 @Serializable
 internal data class Envelope(val k: String, val ts: String, val d: JsonObject)

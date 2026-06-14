@@ -9,8 +9,6 @@ internal class Entry(val line: String, val tag: ByteArray, val env: Envelope)
 
 internal class RawLedger(val header: Header, val keys: Keys, val entries: List<Entry>)
 
-private val HEAD_LABEL = "finador-head".toByteArray(Charsets.US_ASCII)
-
 /**
  * Reads and authenticates the on-disk log: header → N records (chained via AAD) → head trailer.
  * Any cryptographic, base64 or JSON failure collapses to [BadPasswordOrCorruptException]; an
