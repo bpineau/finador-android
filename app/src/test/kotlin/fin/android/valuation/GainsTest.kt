@@ -353,6 +353,34 @@ class GainsTest {
      * series when the price history has the dates the window needs (the on-device "+0.0%" was a
      * shallow-cache symptom, not a calculation bug — this proves the math).
      */
+    /**
+     * Property detail: valued by statements (no price/periods). Initial 400000, revalued 450000 →
+     * value 450000, purchase 400000, +50000; tax from the account; full valuation history.
+     */
+    @Test fun assetDetailForProperty() {
+        seq = 0
+        val today = d("2026-06-15")
+        val accounts = mapOf("liv" to Account("liv", "Livret", "EUR", TaxRule.Value(BigDecimal("0.30"))))
+        val assets = mapOf("house" to Asset("house", AssetKind.PROPERTY, "Maison", ccy = "EUR", group = "immo"))
+        val txs = mutableMapOf<String, Tx>()
+        listOf(
+            tx("2025-01-01", "liv", "house", TxKind.statement, "0", eur("400000")),
+            tx("2026-06-01", "liv", "house", TxKind.statement, "0", eur("450000")),
+        ).forEach { txs[it.id] = it }
+        val book = Book(accounts = accounts, assets = assets, txs = txs, config = mapOf("currency" to "EUR"))
+
+        val detail = Gains.assetDetail(book, MarketData(), today = today, assetId = "house")!!
+        assertEquals("property", detail.kind)
+        assertEquals(450000.0, detail.value, tol)
+        assertEquals(400000.0, detail.costBasis!!, tol)
+        assertEquals(50000.0, detail.unrealized!!, tol)
+        assertEquals("value:30%", detail.taxRule)
+        assertEquals(2, detail.valuations.size)
+        assertTrue(detail.periods.isEmpty())
+        assertTrue(detail.priceHistory.isEmpty())
+        assertEquals(listOf("Livret"), detail.accounts)
+    }
+
     @Test fun portfolioPeriodGainReflectsSecurityPriceMove() {
         seq = 0
         val today = d("2026-06-15")
