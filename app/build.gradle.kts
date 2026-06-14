@@ -22,7 +22,12 @@ android {
 
     buildTypes {
         release {
-            isMinifyEnabled = false
+            isMinifyEnabled = true
+            isShrinkResources = true
+            proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
+            // Debug-signed so it can be installed locally (`./gradlew installRelease`) without a keystore.
+            // Replace with a real release key before any distribution.
+            signingConfig = signingConfigs.getByName("debug")
         }
     }
 

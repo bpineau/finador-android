@@ -1,6 +1,9 @@
 package fin.android.ui
 
 import androidx.compose.foundation.Canvas
+import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -15,9 +18,6 @@ import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
-import androidx.compose.material3.SegmentedButton
-import androidx.compose.material3.SegmentedButtonDefaults
-import androidx.compose.material3.SingleChoiceSegmentedButtonRow
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
@@ -30,6 +30,7 @@ import androidx.compose.runtime.setValue
 import java.time.LocalDate
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
@@ -135,7 +136,27 @@ private enum class ChartRange(val label: String) {
     }
 }
 
-@OptIn(ExperimentalMaterial3Api::class)
+/** Discreet inline range picker: small text pills, the selected one in a subtle filled chip. */
+@Composable
+private fun RangeChips(selected: Int, onSelect: (Int) -> Unit) {
+    Row(horizontalArrangement = Arrangement.spacedBy(2.dp), verticalAlignment = Alignment.CenterVertically) {
+        ChartRange.entries.forEachIndexed { i, r ->
+            val isSelected = i == selected
+            Text(
+                r.label,
+                style = MaterialTheme.typography.labelSmall,
+                color = if (isSelected) MaterialTheme.colorScheme.onSecondaryContainer
+                else MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier
+                    .clip(RoundedCornerShape(50))
+                    .then(if (isSelected) Modifier.background(MaterialTheme.colorScheme.secondaryContainer) else Modifier)
+                    .clickable { onSelect(i) }
+                    .padding(horizontal = 9.dp, vertical = 3.dp),
+            )
+        }
+    }
+}
+
 @Composable
 private fun Sparkline(d: AssetDetail) {
     val all = d.priceHistory
@@ -153,19 +174,17 @@ private fun Sparkline(d: AssetDetail) {
 
     Card(modifier = Modifier.fillMaxWidth()) {
         Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-            Text(
-                "Price (${d.referenceCcy})",
-                style = MaterialTheme.typography.labelMedium,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
-            SingleChoiceSegmentedButtonRow(Modifier.fillMaxWidth()) {
-                ChartRange.entries.forEachIndexed { i, r ->
-                    SegmentedButton(
-                        selected = i == rangeOrdinal,
-                        onClick = { rangeOrdinal = i },
-                        shape = SegmentedButtonDefaults.itemShape(i, ChartRange.entries.size),
-                    ) { Text(r.label) }
-                }
+            Row(
+                Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Text(
+                    "Price (${d.referenceCcy})",
+                    style = MaterialTheme.typography.labelMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                RangeChips(rangeOrdinal) { rangeOrdinal = it }
             }
             Canvas(modifier = Modifier.fillMaxWidth().height(120.dp)) {
                 val closes = pts.map { it.close }
