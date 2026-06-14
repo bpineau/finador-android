@@ -60,7 +60,7 @@ puis se propagent par sync.
 |---|---|---|
 | Langage | **Kotlin** (2.x stable) | natif Android, écosystème crypto/JSON mûr |
 | UI | **Jetpack Compose + Material 3** | déclaratif, charts en Canvas, zéro WebView |
-| Cible | **minSdk 26** (Android 8.0), targetSdk **latest stable (≥ 35)** | `java.time` + `java.util.Base64` natifs sans desugaring ; ~98 % du parc |
+| Cible | **minSdk 26** (Android 8.0), **compileSdk/targetSdk 36** (build-tools 36.1.0, installés) | `java.time` + `java.util.Base64` natifs sans desugaring ; ~98 % du parc |
 | Build | **Gradle Kotlin DSL + wrapper** (`./gradlew`), AGP latest stable | rien à installer hors JDK + SDK |
 | Async | **Coroutines + Flow** | I/O réseau/disque, état réactif |
 | DI | **manuel** (`AppContainer`, injection par constructeur) | minimaliste, testable, pas d'annotation-processing (pas de Hilt) |
@@ -91,24 +91,31 @@ développement plus haut.
 
 ---
 
-## 2. Outils à installer (macOS, Homebrew, gratuit)
+## 2. Environnement de dev (macOS, Homebrew, gratuit) — **installé**
 
+Environnement réellement en place (fait par l'utilisateur) :
 ```sh
-brew install --cask temurin@21        # JDK 21 LTS (Eclipse Temurin)
-brew install --cask android-studio    # IDE gratuit : SDK Android + émulateur + adb
+brew install --cask temurin@21
+brew install --cask android-commandlinetools
+brew install --cask android-studio
+export JAVA_HOME=$(/usr/libexec/java_home -v 21)
+export ANDROID_HOME="$(brew --prefix)/share/android-commandlinetools"
+export PATH="$PATH:$ANDROID_HOME/platform-tools:$ANDROID_HOME/emulator:$ANDROID_HOME/cmdline-tools/latest/bin"
+sdkmanager --licenses
+sdkmanager "platform-tools"
+sdkmanager "platforms;android-36"
+sdkmanager "build-tools;36.1.0"
+sdkmanager "emulator" "system-images;android-36;google_apis;arm64-v8a"
+echo no | avdmanager create avd -n test -k "system-images;android-36;google_apis;arm64-v8a"
 ```
 
-Post-install (une fois, dans Android Studio) :
-1. Laisser l'assistant installer le **SDK Android** (platform 35, build-tools, platform-tools).
-2. Accepter les licences SDK.
-3. Créer un **émulateur (AVD)** *ou* activer le **débogage USB** sur le téléphone physique.
-
-Variables d'environnement (ajoutées au shell) :
-```sh
-export ANDROID_HOME="$HOME/Library/Android/sdk"
-export JAVA_HOME="$(/usr/libexec/java_home -v 21)"
-export PATH="$ANDROID_HOME/platform-tools:$PATH"
-```
+Conséquences pour le projet :
+- `compileSdk = 36`, `targetSdk = 36`, build-tools `36.1.0`.
+- Le SDK est sous **`$(brew --prefix)/share/android-commandlinetools`** (pas `~/Library/Android/sdk`).
+  Le projet écrit `local.properties` avec `sdk.dir=` pointant là, et les commandes de build
+  exportent `ANDROID_HOME`/`JAVA_HOME` explicitement (le shell de build peut ne pas hériter de ces
+  exports s'ils ne sont pas dans le profil).
+- AVD nommé **`test`** (API 36, arm64-v8a) pour `emulator -avd test` + `installDebug`.
 
 Build & run en CLI (une fois le SDK installé) :
 ```sh
@@ -299,9 +306,12 @@ Recalculé depuis les transactions foldées (rien n'est stocké), comme finador 
 
 ## 8. UI (Compose) — écrans v1
 
-1. **Onboarding** : saisir `owner/repo` (+ path, branch), coller le **PAT GitHub** (stocké
-   Keystore), saisir la **passphrase** du `.fin` (option : mémoriser derrière BiometricPrompt).
-   Premier pull → déverrouillage.
+1. **Onboarding (une seule fois)** : saisir `owner/repo` (+ path, branch) ; **coller le PAT
+   GitHub** dans un champ texte (bouton « coller », masqué après saisie) → **stocké au Keystore**,
+   plus jamais à retaper ; saisir la **passphrase** du `.fin` une fois → **stockée au Keystore
+   derrière BiometricPrompt**. Premier pull → déverrouillage. **Aux ouvertures suivantes : seule
+   l'authentification biométrique** (empreinte/visage) déverrouille — ni PAT ni passphrase à
+   retaper. Repli code/PIN de l'appareil si la biométrie échoue.
 2. **Overview (patrimoine)** : total brut/impôt/net ; lignes equities/property/cash ; arbre par
    `group` ; sparkline globale ; bandeau état de sync (à jour / non poussé / hors-ligne).
 3. **Détail position** : valeur, coût, +/- value, labels (lecture), courbe ; liste des
@@ -320,11 +330,14 @@ Charts : dessin **Canvas** maison (ligne + sparkline), pas de WebView ni lib lou
 ## 9. Sécurité & gestion d'erreurs
 
 - **Repo = uniquement le `.fin` chiffré** : même fuité, opaque. Le **PAT** est un *fine-grained
-  token scopé à ce seul dépôt* (Contents: R/W), dans le **Keystore** (jamais en clair, jamais
-  loggué). Override possible : aucune en prod (pas d'env sur mobile) ; en dev, build-config.
-- **Passphrase** : prompt ; cache optionnel derrière **BiometricPrompt** avec TTL ; jamais sur
-  disque en clair. Mauvaise passphrase et fichier altéré = **même erreur** « bad password /
-  corrupt file » (indistinguables par design).
+  token scopé à ce seul dépôt* (Contents: R/W). On le **colle** dans un champ à l'onboarding, il
+  est **stocké au Keystore** (EncryptedSharedPreferences ; jamais en clair, jamais loggué, plus
+  jamais à retaper). Re-login depuis Settings si on le révoque/régénère.
+- **Passphrase** : saisie **une seule fois**, **stockée au Keystore derrière BiometricPrompt**.
+  Ensuite, **déverrouillage par biométrie seule** (repli code/PIN appareil) — jamais de re-saisie,
+  jamais sur disque en clair. La clé KDF n'est dérivée qu'après déverrouillage biométrique.
+  Mauvaise passphrase et fichier altéré = **même erreur** « bad password / corrupt file »
+  (indistinguables par design). « Oublier » dans Settings purge PAT + passphrase du Keystore.
 - **Refus stricts** : `v` inconnu → refus net ; `k` inconnu → erreur dure ; bornes Argon2 avant
   dérivation ; trailer/chaîne invalides → refus (troncature/altération).
 - **Réseau** : 401/403 → « token invalide ou permissions insuffisantes » (≠ hors-ligne) ;
@@ -365,14 +378,19 @@ La couche pure est gelée par des **vecteurs de référence** avant toute UI.
    Kotlin, zéro UI.
 2. **Write path** : diff-on-save, scellage, reseal, write atomique sur copie de travail ;
    round-trip ; `merge` (union+LWW+garde `id`).
-3. **Remote GitHub** : `GitHubBackend` (Contents API) + `Sync` (copie + `state.json`,
-   pull-avant/push-après, offline `dirty`, conflit→merge), PAT au Keystore. MockWebServer.
+3. **Remote GitHub + secrets** : `GitHubBackend` (Contents API) + `Sync` (copie + `state.json`,
+   pull-avant/push-après, offline `dirty`, conflit→merge) + **`SecretStore`** (Keystore /
+   EncryptedSharedPreferences : PAT **et** passphrase) avec **déverrouillage BiometricPrompt** dès
+   ce socle (exigence : PAT collé+stocké, passphrase stockée une fois puis biométrie seule).
+   MockWebServer.
 4. **Marché** : Yahoo + FT + Morningstar (multi-source par ISIN), FX via USD, cache `FINCACHE2`.
-5. **UI Compose** : onboarding, overview, détail position, saisie tx, sync, settings + charts Canvas.
-6. **Perf + polish** : TWR/XIRR/CAGR/vol/Sharpe/Sortino/maxDD ; indicateurs hors-ligne ; cache
-   passphrase biométrique.
+5. **UI Compose** : onboarding (coller PAT, saisir passphrase une fois, opt-in biométrie),
+   déverrouillage biométrique au lancement, overview, détail position, saisie tx, sync, settings
+   (re-login, « oublier ») + charts Canvas.
+6. **Perf + polish** (good-to-have) : TWR/XIRR/CAGR/vol/Sharpe/Sortino/maxDD ; indicateurs
+   hors-ligne fins ; raffinements visuels.
 
-v1 « expédiable » = phases 1–5 ; la 6 enrichit.
+v1 « expédiable » = phases 1–5 (biométrie incluse dès la phase 3) ; la 6 enrichit.
 
 ---
 
