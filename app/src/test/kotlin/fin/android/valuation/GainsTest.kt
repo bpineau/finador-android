@@ -196,4 +196,131 @@ class GainsTest {
         assertEquals("USD", a.ccy)
         assertEquals(80.0, a.d1!!, tol) // 10 × (110 − 100) × 0.8
     }
+
+    // ---- display-currency override: Gains.report(referenceCcy="USD") converts via FX ----
+
+    /**
+     * The SAME EUR security, valued once in EUR and once in USD. With FX value of 1 EUR = 1.25 USD,
+     * the USD per-asset gain must be the EUR one × 1.25, and the report's referenceCcy must be USD.
+     * EUR 1d gain = 10 × (110 − 108) = 20 → USD = 25.
+     */
+    @Test fun displayCurrencyOverrideConvertsGains() {
+        seq = 0
+        val today = d("2026-06-15")
+        val accounts = mapOf("cto" to Account("cto", "CTO", "EUR", TaxRule.None))
+        val assets = mapOf("aa" to Asset("aa", AssetKind.SECURITY, "Alpha", ticker = "AA", ccy = "EUR", group = "g"))
+        val txs = mutableMapOf<String, Tx>()
+        listOf(tx("2026-01-01", "cto", "aa", TxKind.buy, "10", eur("1000"))).forEach { txs[it.id] = it }
+        val book = Book(accounts = accounts, assets = assets, txs = txs, config = mapOf("currency" to "EUR"))
+        val market = MarketData(
+            prices = mapOf(
+                "aa" to PriceSeries(
+                    listOf(
+                        PricePoint(d("2026-06-14"), 108.0),
+                        PricePoint(d("2026-06-15"), 110.0),
+                    ),
+                ),
+            ),
+            // value of 1 EUR in USD = 1.25 (flat over the window).
+            fx = mapOf(
+                "EUR" to PriceSeries(
+                    listOf(PricePoint(d("2026-06-14"), 1.25), PricePoint(d("2026-06-15"), 1.25)),
+                ),
+            ),
+        )
+        val eurReport = Gains.report(book, market, referenceCcy = "EUR", today = today)
+        val usdReport = Gains.report(book, market, referenceCcy = "USD", today = today)
+        assertEquals("USD", usdReport.referenceCcy)
+        val eurGain = asset(eurReport, "AA").d1!!
+        val usdGain = asset(usdReport, "AA").d1!!
+        assertEquals(20.0, eurGain, tol)
+        assertEquals(eurGain * 1.25, usdGain, tol) // converted by the fx factor
+    }
+
+    // ---- assetDetail: periods, accounts, qty, value, and null for a non-held asset ----
+
+    /**
+     * One EUR security, 10 shares, ref = EUR. Closes: 1d-ago = 108, 7d-ago = 100, today = 110.
+     *   value = 10 × 110 = 1100.
+     *   1d: relative = 110/108 − 1, absolute = 10 × (110 − 108) = 20.
+     *   7d: relative = 110/100 − 1 = 0.10, absolute = 10 × (110 − 100) = 100.
+     *   accounts = ["CTO"]; qty = 10.
+     */
+    @Test fun assetDetailPeriodsAndHolding() {
+        seq = 0
+        val today = d("2026-06-15")
+        val accounts = mapOf("cto" to Account("cto", "CTO", "EUR", TaxRule.None))
+        val assets = mapOf("aa" to Asset("aa", AssetKind.SECURITY, "Alpha", ticker = "AA", isin = "X1", ccy = "EUR", group = "g"))
+        val txs = mutableMapOf<String, Tx>()
+        listOf(tx("2026-01-01", "cto", "aa", TxKind.buy, "10", eur("1000"))).forEach { txs[it.id] = it }
+        val book = Book(accounts = accounts, assets = assets, txs = txs, config = mapOf("currency" to "EUR"))
+        val market = MarketData(
+            prices = mapOf(
+                "aa" to PriceSeries(
+                    listOf(
+                        PricePoint(d("2026-06-08"), 100.0), // 7d ago
+                        PricePoint(d("2026-06-14"), 108.0), // 1d ago
+                        PricePoint(d("2026-06-15"), 110.0), // today
+                    ),
+                ),
+            ),
+        )
+        val detail = Gains.assetDetail(book, market, today = today, assetId = "aa")!!
+        assertEquals("Alpha", detail.name)
+        assertEquals("AA", detail.ticker)
+        assertEquals("X1", detail.isin)
+        assertEquals("EUR", detail.referenceCcy)
+        assertEquals(BigDecimal("10"), detail.qty)
+        assertEquals(110.0, detail.price!!, tol)
+        assertEquals(1100.0, detail.value, tol)
+        assertEquals(listOf("CTO"), detail.accounts)
+
+        val p1d = detail.periods.first { it.label == "1d" }
+        assertEquals(110.0 / 108.0 - 1, p1d.relative!!, tol)
+        assertEquals(20.0, p1d.absolute, tol)
+        val p7d = detail.periods.first { it.label == "7d" }
+        assertEquals(0.10, p7d.relative!!, tol)
+        assertEquals(100.0, p7d.absolute, tol)
+        // The price history is mapped to ref ccy (here EUR, fx=1) and kept.
+        assertEquals(3, detail.priceHistory.size)
+    }
+
+    /** A non-held / unknown asset yields null. */
+    @Test fun assetDetailNullForNonHeld() {
+        seq = 0
+        val today = d("2026-06-15")
+        val accounts = mapOf("cto" to Account("cto", "CTO", "EUR", TaxRule.None))
+        val assets = mapOf("aa" to Asset("aa", AssetKind.SECURITY, "Alpha", ticker = "AA", ccy = "EUR", group = "g"))
+        val book = Book(accounts = accounts, assets = assets, txs = emptyMap(), config = mapOf("currency" to "EUR"))
+        val market = MarketData(prices = mapOf("aa" to PriceSeries(listOf(PricePoint(today, 110.0)))))
+        assertNull(Gains.assetDetail(book, market, today = today, assetId = "aa")) // never bought → not held
+        assertNull(Gains.assetDetail(book, market, today = today, assetId = "zz")) // unknown id
+    }
+
+    /** assetDetail converts to a non-book display currency via FX (USD = EUR × 1.25). */
+    @Test fun assetDetailConvertsDisplayCurrency() {
+        seq = 0
+        val today = d("2026-06-15")
+        val accounts = mapOf("cto" to Account("cto", "CTO", "EUR", TaxRule.None))
+        val assets = mapOf("aa" to Asset("aa", AssetKind.SECURITY, "Alpha", ticker = "AA", ccy = "EUR", group = "g"))
+        val txs = mutableMapOf<String, Tx>()
+        listOf(tx("2026-01-01", "cto", "aa", TxKind.buy, "10", eur("1000"))).forEach { txs[it.id] = it }
+        val book = Book(accounts = accounts, assets = assets, txs = txs, config = mapOf("currency" to "EUR"))
+        val market = MarketData(
+            prices = mapOf(
+                "aa" to PriceSeries(
+                    listOf(PricePoint(d("2026-06-14"), 108.0), PricePoint(d("2026-06-15"), 110.0)),
+                ),
+            ),
+            fx = mapOf(
+                "EUR" to PriceSeries(
+                    listOf(PricePoint(d("2026-06-14"), 1.25), PricePoint(d("2026-06-15"), 1.25)),
+                ),
+            ),
+        )
+        val detail = Gains.assetDetail(book, market, referenceCcy = "USD", today = today, assetId = "aa")!!
+        assertEquals("USD", detail.referenceCcy)
+        assertEquals(1100.0 * 1.25, detail.value, tol) // 10 × 110 EUR × 1.25
+        assertEquals(20.0 * 1.25, detail.periods.first { it.label == "1d" }.absolute, tol)
+    }
 }

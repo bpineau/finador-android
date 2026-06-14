@@ -121,6 +121,18 @@ class AppViewModel(private val container: AppContainer) : ViewModel() {
         viewModelScope.launch { repo.forget() }
     }
 
+    /** Persists the display currency and refreshes quotes (so its FX series is fetched). */
+    fun setDisplayCurrency(code: String) {
+        viewModelScope.launch { repo.setDisplayCurrency(code) }
+    }
+
+    /** The current display-currency override ("EUR" when unset), for the Settings dropdown. */
+    fun displayCurrency(): String =
+        runCatching { container.loadConfig().displayCurrency }.getOrNull() ?: "EUR"
+
+    /** Builds the simplified per-asset detail for the detail screen; null if not a held security. */
+    fun assetDetail(assetId: String): fin.android.valuation.AssetDetail? = repo.assetDetail(assetId)
+
     /** Reads the persisted remote config for the Settings screen (no secrets). */
     fun repoSummary(): RepoSummary? {
         val cfg = runCatching { container.loadConfig() }.getOrNull() ?: return null

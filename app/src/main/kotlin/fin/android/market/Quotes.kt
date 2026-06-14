@@ -17,10 +17,13 @@ object Quotes {
         existing: MarketData?,
         from: LocalDate,
         now: LocalDate,
+        referenceCcy: String? = null,
         multi: MultiSource = MultiSource.default(),
         yahoo: Yahoo = Yahoo(),
     ): MarketData {
-        val referenceCcy = book.config["currency"] ?: "EUR"
+        // The effective display currency must have its FX series fetched too, so a value/gain
+        // shown in a non-book currency can be converted. Falls back to the book's, then EUR.
+        val refCcy = referenceCcy?.trim()?.uppercase()?.ifBlank { null } ?: book.config["currency"] ?: "EUR"
         val prices = LinkedHashMap(existing?.prices ?: emptyMap())
         val fx = LinkedHashMap(existing?.fx ?: emptyMap())
         val dividends = LinkedHashMap(existing?.dividends ?: emptyMap())
@@ -36,7 +39,7 @@ object Quotes {
             daily.currency?.let { currencies.add(it) }
         }
         for (account in book.accounts.values) currencies.add(account.ccy)
-        currencies.add(referenceCcy)
+        currencies.add(refCcy)
 
         for (ccy in currencies) {
             if (ccy == "USD") continue

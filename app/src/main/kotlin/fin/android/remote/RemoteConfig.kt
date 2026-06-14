@@ -22,6 +22,8 @@ data class RemoteConfig(
     val source: String = "local",
     val github: GithubConfig? = null,
     val readPullAfter: String = "1h",
+    /** Override for the currency every value/gain is shown in; null falls back to the book's. */
+    val displayCurrency: String? = null,
 ) {
     val isGithub: Boolean get() = source == "github" && github != null
 
