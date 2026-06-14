@@ -56,5 +56,9 @@ dependencies {
     implementation(libs.activity.compose)
     implementation(libs.kotlinx.serialization.json)
     implementation(libs.bouncycastle)
+    implementation(libs.okhttp)
+    implementation(libs.androidx.security.crypto)
+    implementation(libs.androidx.biometric)
     testImplementation(libs.junit)
+    testImplementation(libs.okhttp.mockwebserver)
 }

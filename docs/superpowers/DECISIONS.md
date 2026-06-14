@@ -23,5 +23,19 @@ questions ni confirmations). Chaque décision non triviale est tracée ici.
 - **Storage** : **GitHub uniquement** en v1 (pas de fichier local / SAF).
 - **Prérequis correctness** : audit `FORMAT.md` ↔ code Go lancé avant d'écrire la couche format.
 
+## Avancement (run autonome)
+
+- **Audit FORMAT.md ↔ code Go** : VERDICT « à jour » (12/12 zones, vecteurs KDF recalculés exacts,
+  sample.ledger déchiffré). Seul point relevé : les vecteurs §9 ne sont assertés par aucun test Go.
+  → *À faire (optionnel, defense-in-depth côté finador)* : ajouter un test golden Go. Différé en fin
+  de run ; côté Android les vecteurs sont déjà assertés + le gate cross-impl protège le contrat.
+- **Phase 0 (scaffold)** : OK. Gradle 8.13 wrapper, AGP 8.13.2, Kotlin 2.2.20, Compose BOM 2025.12.01.
+  `assembleDebug` vert. `argon2kt` → **Bouncy Castle** (pure-JVM, testable en host).
+- **Phase 1 (crypto + lecture)** : OK. 9 tests, vecteur KDF + sample.ledger exacts.
+- **Phase 2 (writer + merge)** : OK. 20 tests. Gate **cross-impl bidirectionnel vert**
+  (`scripts/crossimpl.sh`) : Go lit un .fin muté par Android (tx visible) ; Android lit un .fin créé
+  par Go. Backend Sync rendu **bloquant** (pas de coroutines dans la lib ; l'UI appelle sur IO).
+
 ## Décisions à venir (complétées au fil de l'eau)
-- (suite du run consignée ici)
+- Phase 3 : remote GitHub (Contents API), Sync (copie+state, pull/push/merge), SecretStore Keystore
+  + biométrie.
