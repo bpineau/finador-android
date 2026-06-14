@@ -93,9 +93,9 @@ class GitHubBackend(
         private val json = Json { ignoreUnknownKeys = true; encodeDefaults = false }
 
         fun defaultClient(): OkHttpClient = OkHttpClient.Builder()
-            .callTimeout(30, TimeUnit.SECONDS)
-            .connectTimeout(15, TimeUnit.SECONDS)
-            .readTimeout(30, TimeUnit.SECONDS)
+            .callTimeout(15, TimeUnit.SECONDS)
+            .connectTimeout(8, TimeUnit.SECONDS)
+            .readTimeout(15, TimeUnit.SECONDS)
             .build()
     }
 }

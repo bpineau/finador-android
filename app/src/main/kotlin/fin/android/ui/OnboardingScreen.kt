@@ -29,6 +29,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 
 @Composable
 fun OnboardingScreen(vm: AppViewModel) {
@@ -36,10 +37,11 @@ fun OnboardingScreen(vm: AppViewModel) {
     var owner by remember { mutableStateOf("") }
     var repo by remember { mutableStateOf("") }
     var path by remember { mutableStateOf("portfolio.fin") }
-    var branch by remember { mutableStateOf("main") }
+    var branch by remember { mutableStateOf("master") }
     var token by remember { mutableStateOf("") }
     var pass by remember { mutableStateOf("") }
-    var busy by remember { mutableStateOf(false) }
+    val busy by vm.busy.collectAsStateWithLifecycle()
+    val error by vm.message.collectAsStateWithLifecycle()
 
     val canConnect = owner.isNotBlank() && repo.isNotBlank() && token.isNotBlank() && pass.isNotBlank() && !busy
 
@@ -60,28 +62,28 @@ fun OnboardingScreen(vm: AppViewModel) {
 
         OutlinedTextField(
             value = owner,
-            onValueChange = { owner = it },
-            label = { Text("Owner") },
+            onValueChange = { owner = it.filterNot(Char::isWhitespace) },
+            label = { Text("Repository owner") },
             singleLine = true,
             modifier = Modifier.fillMaxWidth(),
         )
         OutlinedTextField(
             value = repo,
-            onValueChange = { repo = it },
+            onValueChange = { repo = it.filterNot(Char::isWhitespace) },
             label = { Text("Repository") },
             singleLine = true,
             modifier = Modifier.fillMaxWidth(),
         )
         OutlinedTextField(
             value = path,
-            onValueChange = { path = it },
+            onValueChange = { path = it.trim() },
             label = { Text("Path") },
             singleLine = true,
             modifier = Modifier.fillMaxWidth(),
         )
         OutlinedTextField(
             value = branch,
-            onValueChange = { branch = it },
+            onValueChange = { branch = it.filterNot(Char::isWhitespace) },
             label = { Text("Branch") },
             singleLine = true,
             modifier = Modifier.fillMaxWidth(),
@@ -120,12 +122,13 @@ fun OnboardingScreen(vm: AppViewModel) {
             style = MaterialTheme.typography.bodySmall,
         )
 
+        error?.let {
+            Text(it, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall)
+        }
+
         Spacer(Modifier.height(8.dp))
         Button(
-            onClick = {
-                busy = true
-                vm.onboard(owner, repo, path, branch, token, pass)
-            },
+            onClick = { vm.onboard(owner, repo, path, branch, token, pass) },
             enabled = canConnect,
             modifier = Modifier.fillMaxWidth(),
         ) {

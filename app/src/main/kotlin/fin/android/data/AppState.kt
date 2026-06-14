@@ -2,6 +2,7 @@ package fin.android.data
 
 import fin.android.domain.Book
 import fin.android.remote.SyncState
+import fin.android.valuation.GainsReport
 import fin.android.valuation.PerfMetrics
 import fin.android.valuation.Valuation
 
@@ -20,6 +21,7 @@ sealed interface AppState {
     data class Ready(
         val valuation: Valuation,
         val perf: PerfMetrics?,
+        val gains: GainsReport?,
         val book: Book,
         val sync: SyncState,
         val message: String?,
