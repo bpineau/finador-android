@@ -1,10 +1,19 @@
 package fin.android.format
 
+import fin.android.crypto.B64
+import fin.android.crypto.Ids
 import fin.android.domain.Book
+import fin.android.domain.Money
+import fin.android.domain.TxKind
+import kotlinx.serialization.json.jsonObject
+import java.math.BigDecimal
+import java.security.SecureRandom
+import java.time.LocalDate
 
 /**
  * An opened finador ledger: the validated header, the materialized [book], and (internally) the
- * derived keys and verbatim record entries needed later for diff-on-save and merge (Phase 2).
+ * derived keys and verbatim record entries needed for diff-on-save and merge. Instances are
+ * immutable; mutations return a new [Ledger].
  */
 class Ledger internal constructor(
     val header: Header,
@@ -12,6 +21,61 @@ class Ledger internal constructor(
     internal val entries: List<Entry>,
     val book: Book,
 ) {
+    /** Serializes to the on-disk `.fin` bytes (verbatim record prefix + freshly sealed trailer). */
+    fun toBytes(): ByteArray = Writer.serialize(header, keys, entries)
+
+    fun addTransaction(
+        date: LocalDate,
+        account: String,
+        asset: String?,
+        kind: TxKind,
+        qty: BigDecimal,
+        amount: Money,
+        note: String? = null,
+    ): Ledger = append(listOf(txEnvelope("tx", txDto(Ids.newId(), date, account, asset, kind, qty, amount, note))))
+
+    fun editTransaction(
+        id: String,
+        date: LocalDate,
+        account: String,
+        asset: String?,
+        kind: TxKind,
+        qty: BigDecimal,
+        amount: Money,
+        note: String? = null,
+    ): Ledger = append(listOf(txEnvelope("tx-edit", txDto(id, date, account, asset, kind, qty, amount, note))))
+
+    fun deleteTransaction(id: String): Ledger {
+        val d = wireJson.encodeToJsonElement(IdRefDto.serializer(), IdRefDto(id)).jsonObject
+        return append(listOf(Envelope("tx-del", Rfc3339.now(), d)))
+    }
+
+    /** Reconciles a diverged copy of the same ledger (union + last-writer-wins by ts). */
+    fun merge(other: Ledger, resolve: (Conflict) -> Int = { 0 }): Ledger = Merge.merge(this, other, resolve)
+
+    internal fun append(envs: List<Envelope>): Ledger {
+        val newEntries = Writer.append(header, keys, entries, envs)
+        return Ledger(header, keys, newEntries, Replay.fold(newEntries))
+    }
+
+    private fun txDto(
+        id: String, date: LocalDate, account: String, asset: String?,
+        kind: TxKind, qty: BigDecimal, amount: Money, note: String?,
+    ) = TxDto(
+        id = id,
+        date = date.toString(),
+        account = account,
+        asset = asset,
+        kind = kind.name,
+        qty = qty.toPlainString(),
+        amount = MoneyDto(amount.amount.toPlainString(), amount.ccy),
+        note = note,
+        importHash = null,
+    )
+
+    private fun txEnvelope(kind: String, dto: TxDto): Envelope =
+        Envelope(kind, Rfc3339.now(), wireJson.encodeToJsonElement(TxDto.serializer(), dto).jsonObject)
+
     companion object {
         /**
          * Opens and fully verifies a `.fin` byte stream under [passphrase].
@@ -20,8 +84,20 @@ class Ledger internal constructor(
          */
         fun open(bytes: ByteArray, passphrase: String): Ledger {
             val raw = Log.open(bytes, passphrase)
-            val book = Replay.fold(raw.entries)
-            return Ledger(raw.header, raw.keys, raw.entries, book)
+            return Ledger(raw.header, raw.keys, raw.entries, Replay.fold(raw.entries))
+        }
+
+        /** Creates a brand-new empty ledger (fresh salt + file id) — first-run / onboarding. */
+        fun create(passphrase: String, t: Int = 3, m: Int = 65536): Ledger {
+            val rng = SecureRandom()
+            val salt = ByteArray(16).also { rng.nextBytes(it) }
+            val id = ByteArray(16).also { rng.nextBytes(it) }
+            val p = minOf(4, Runtime.getRuntime().availableProcessors())
+            val rawLine =
+                """{"fmt":"finador-ledger","v":3,"kdf":"argon2id","t":$t,"m":$m,"p":$p,"salt":"${B64.encode(salt)}","id":"${B64.encode(id)}"}"""
+            val header = Header.parse(rawLine)
+            val keys = deriveKeys(passphrase, header)
+            return Ledger(header, keys, emptyList(), Book())
         }
     }
 }
