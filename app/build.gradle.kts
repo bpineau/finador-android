@@ -42,6 +42,13 @@ kotlin {
     }
 }
 
+// Forward cross-implementation test properties from the Gradle JVM into the forked test JVM.
+tasks.withType<Test>().configureEach {
+    listOf("crossimpl.out", "crossimpl.go.file", "crossimpl.go.pw").forEach { key ->
+        System.getProperty(key)?.let { systemProperty(key, it) }
+    }
+}
+
 dependencies {
     implementation(platform(libs.compose.bom))
     implementation(libs.compose.ui)
