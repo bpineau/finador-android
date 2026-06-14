@@ -17,3 +17,6 @@ local.properties
 
 # Never commit a real ledger or any secrets
 *.fin
+
+# cross-impl scratch artifacts
+build/crossimpl/
