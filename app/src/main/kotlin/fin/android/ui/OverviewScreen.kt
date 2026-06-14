@@ -26,6 +26,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import fin.android.data.AppState
+import fin.android.valuation.PerfMetrics
 import fin.android.valuation.Position
 import fin.android.valuation.ValuationLine
 
@@ -84,6 +85,10 @@ fun OverviewScreen(
                 }
             }
 
+            if (ready.perf != null) {
+                item { PerfCard(ready.perf) }
+            }
+
             if (v.lines.isNotEmpty()) {
                 item { SectionHeader("Breakdown") }
                 items(v.lines) { line -> LineRow(line, v.referenceCcy) }
@@ -140,6 +145,23 @@ private fun AmountRow(label: String, value: String) {
     Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
         Text(label, style = MaterialTheme.typography.bodyMedium)
         Text(value, style = MaterialTheme.typography.bodyMedium)
+    }
+}
+
+@Composable
+private fun PerfCard(perf: PerfMetrics) {
+    Card(modifier = Modifier.fillMaxWidth()) {
+        Column(Modifier.padding(20.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            Text("Performance", style = MaterialTheme.typography.labelMedium)
+            HorizontalDivider(Modifier.padding(vertical = 4.dp))
+            AmountRow("TWR", formatPercent(perf.twr))
+            AmountRow("XIRR", formatPercent(perf.xirr))
+            AmountRow("CAGR", formatPercent(perf.cagr))
+            AmountRow("Volatility", formatPercent(perf.volatility))
+            AmountRow("Sharpe", formatRatio(perf.sharpe))
+            AmountRow("Sortino", formatRatio(perf.sortino))
+            AmountRow("Max drawdown", formatPercent(perf.maxDrawdown))
+        }
     }
 }
 
