@@ -98,7 +98,7 @@ fun UnlockScreen(vm: AppViewModel, activity: FragmentActivity) {
 
         Spacer(Modifier.height(8.dp))
         FilledTonalButton(onClick = { vm.forget() }) {
-            Text("Reconfigure (different repo or token)")
+            Text("Reconfigure (repo or token)")
         }
     }
 }
