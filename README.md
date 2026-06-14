@@ -1,56 +1,56 @@
 # finador-android
 
-Client **Android natif** (Kotlin / Jetpack Compose) compagnon de
-[finador](../finador) (desktop CLI + web). Il lit et écrit **le même fichier `.fin`
-chiffré**, synchronisé via un **dépôt privé GitHub**, donc tu gères ton patrimoine
-indifféremment depuis le desktop et le mobile.
+A **native Android** client (Kotlin / Jetpack Compose) — the mobile companion to
+[finador](../finador) (desktop CLI + web). It reads and writes **the same encrypted
+`.fin` file**, synced through a **private GitHub repository**, so you manage your wealth
+interchangeably from desktop and mobile.
 
-- **Périmètre v1** : lecture complète (valeur brut/impôt/net, gains, détail par actif)
-  + saisie rapide de transactions. Création de comptes/assets reste au desktop.
-- **Compatibilité** : bit-à-bit avec `finador/docs/FORMAT.md` (vérifiée par les vecteurs
-  de test + un test cross-implémentation avec le binaire Go).
-- **Stockage** : GitHub uniquement (le `.fin` chiffré ne quitte jamais le dépôt en clair) ;
-  cotes marché récupérées sur l'appareil (Yahoo → FT → Morningstar), cache local chiffré.
+- **v1 scope**: full read (gross/tax/net value, gains, per-asset detail) + quick transaction
+  entry. Creating accounts/assets stays on the desktop.
+- **Compatibility**: bit-for-bit with `finador/docs/FORMAT.md` (verified by the format test
+  vectors and a cross-implementation test against the Go binary).
+- **Storage**: GitHub only (the encrypted `.fin` never leaves the repo in clear text); market
+  quotes fetched on-device (Yahoo → FT → Morningstar) with a local encrypted cache.
 
 ---
 
-## 1. Préparer l'environnement de dev (macOS, gratuit)
+## 1. Set up the dev environment (macOS, free)
 
-> Pour un dev **peu habitué à Android** : tu n'installes **pas** Gradle ni Android Studio
-> obligatoirement — le projet embarque un *wrapper* (`./gradlew`) qui télécharge la bonne
-> version de Gradle, et la ligne de commande suffit pour compiler/installer. Android Studio
-> reste pratique (éditeur, gestion des émulateurs, logs).
+> For a developer **new to Android**: you do **not** have to install Gradle or Android Studio —
+> the project ships a wrapper (`./gradlew`) that downloads the right Gradle version, and the
+> command line is enough to build/install. Android Studio is still handy (editor, emulator
+> manager, logs).
 
 ```sh
-# JDK 21 (Temurin) + outils Android (SDK en ligne de commande) + (optionnel) l'IDE
+# JDK 21 (Temurin) + Android command-line tools (SDK) + (optional) the IDE
 brew install --cask temurin@21
 brew install --cask android-commandlinetools
-brew install --cask android-studio          # optionnel mais confortable
+brew install --cask android-studio          # optional but convenient
 
-# Variables d'environnement (à mettre dans ~/.zshrc pour les rendre permanentes)
+# Environment variables (add to ~/.zshrc to make them permanent)
 export JAVA_HOME=$(/usr/libexec/java_home -v 21)
 export ANDROID_HOME="$(brew --prefix)/share/android-commandlinetools"
 export PATH="$PATH:$ANDROID_HOME/platform-tools:$ANDROID_HOME/emulator:$ANDROID_HOME/cmdline-tools/latest/bin"
 
-# Composants du SDK (accepter les licences puis installer)
-sdkmanager --licenses                                              # accepter (yes)
+# SDK components (accept the licenses, then install)
+sdkmanager --licenses                                              # accept (yes)
 sdkmanager "platform-tools"                                        # adb, fastboot
-sdkmanager "platforms;android-36"                                  # API cible
+sdkmanager "platforms;android-36"                                  # target API
 sdkmanager "build-tools;36.1.0"
 sdkmanager "emulator" "system-images;android-36;google_apis;arm64-v8a"
 
-# Créer un émulateur nommé "test"
+# Create an emulator named "test"
 echo no | avdmanager create avd -n test -k "system-images;android-36;google_apis;arm64-v8a"
 ```
 
-> **Apple Silicon** : prends bien les images `arm64-v8a` (rapides, virtualisation native).
-> Sur un Mac Intel, remplace par `x86_64`.
+> **Apple Silicon**: use the `arm64-v8a` images (fast, native virtualization).
+> On an Intel Mac, use `x86_64` instead.
 
-### Le SDK doit être trouvable par le build
+### The SDK must be discoverable by the build
 
-`./gradlew` localise le SDK via **`ANDROID_HOME`** (exporté ci-dessus) **ou** via un fichier
-`local.properties` à la racine (non versionné). Si tu n'exportes pas `ANDROID_HOME` dans ton
-shell, crée ce fichier une fois :
+`./gradlew` locates the SDK via **`ANDROID_HOME`** (exported above) **or** via a `local.properties`
+file at the repo root (not version-controlled). If you don't export `ANDROID_HOME` in your shell,
+create that file once:
 
 ```sh
 echo "sdk.dir=$(brew --prefix)/share/android-commandlinetools" > local.properties
@@ -58,89 +58,89 @@ echo "sdk.dir=$(brew --prefix)/share/android-commandlinetools" > local.propertie
 
 ---
 
-## 2. Compiler & tester
+## 2. Build & test
 
-Toujours avec `JAVA_HOME`/`ANDROID_HOME` exportés (cf. ci-dessus) :
+Always with `JAVA_HOME`/`ANDROID_HOME` exported (see above):
 
 ```sh
 cd /Users/ben/projects/finador-android
 
-./gradlew testDebugUnitTest      # tests unitaires (JVM, sans appareil) — la couche moteur
-./gradlew assembleDebug          # construit l'APK debug
-./gradlew installDebug           # installe sur l'appareil/émulateur connecté
+./gradlew testDebugUnitTest      # unit tests (JVM, no device) — the engine layer
+./gradlew assembleDebug          # build the debug APK
+./gradlew installDebug           # install on the connected device/emulator
 ```
 
-- **Première exécution** : longue (téléchargement de Gradle + dépendances). Ensuite c'est rapide.
-- Le **build debug** est celui du quotidien. Un **build release** optimisé (R8, plus rapide et
-  3× plus léger) existe aussi : `./gradlew installRelease` (signé avec la clé debug pour pouvoir
-  l'installer en local ; à remplacer par une vraie clé avant toute distribution).
+- **First run** is slow (downloads Gradle + dependencies). Subsequent runs are fast.
+- The **debug build** is for everyday work. An optimized **release build** (R8: faster, ~3× smaller)
+  also exists: `./gradlew installRelease` (debug-signed so it can be installed locally; replace with
+  a real release key before any distribution).
 
 ---
 
-## 3. Lancer sur l'émulateur
+## 3. Run on the emulator
 
-L'émulateur doit tourner **avant** `installDebug` (sinon : *"No connected devices"*).
-Dans **un terminal séparé** (il reste au premier plan) :
+The emulator must be running **before** `installDebug` (otherwise: *"No connected devices"*).
+In a **separate terminal** (it stays in the foreground):
 
 ```sh
 export ANDROID_HOME="$(brew --prefix)/share/android-commandlinetools"
-$ANDROID_HOME/emulator/emulator -avd test           # laisse tourner
-# liste des AVD : $ANDROID_HOME/emulator/emulator -list-avds
+$ANDROID_HOME/emulator/emulator -avd test           # leave it running
+# list AVDs: $ANDROID_HOME/emulator/emulator -list-avds
 ```
 
-Puis, une fois l'écran d'accueil Android affiché, dans le terminal du projet :
+Then, once the Android home screen is up, from the project terminal:
 
 ```sh
 ./gradlew installDebug
-adb shell am start -n fin.android/.ui.MainActivity   # (re)lancer sans réinstaller
+adb shell am start -n fin.android/.ui.MainActivity   # (re)launch without reinstalling
 ```
 
-Arrêter l'émulateur : ferme la fenêtre, ou `adb emu kill`.
-(Alternative GUI : Android Studio → *Device Manager* → ▶ — plus confortable.)
+Stop the emulator: close its window, or `adb emu kill`.
+(GUI alternative: Android Studio → *Device Manager* → ▶ — more convenient.)
 
 ---
 
-## 4. Lancer sur un vrai téléphone (ex. Galaxy S21)
+## 4. Run on a real phone (e.g. Galaxy S21)
 
-1. Active le **mode développeur** : *Réglages → À propos → appuie 7× sur "Numéro de build"*.
-2. Active **Débogage USB** : *Réglages → Options pour développeurs → Débogage USB*.
-3. Branche le téléphone en USB, accepte l'autorisation qui s'affiche.
-4. Vérifie qu'il est vu : `adb devices` (doit lister un appareil).
-5. `./gradlew installDebug` puis ouvre l'app depuis le tiroir d'applications.
+1. Enable **developer mode**: *Settings → About → tap "Build number" 7 times*.
+2. Enable **USB debugging**: *Settings → Developer options → USB debugging*.
+3. Plug the phone in over USB and accept the authorization prompt.
+4. Check it's visible: `adb devices` (should list a device).
+5. `./gradlew installDebug`, then open the app from the app drawer.
 
-C'est aussi le meilleur moyen de juger le rendu réel (l'émulateur déforme un peu les
-proportions par rapport à un écran haut comme le S21).
-
----
-
-## 5. Astuces (dev peu habitué à Android)
-
-- **`adb logcat`** = les logs du device. Pour ne voir que l'app :
-  `adb logcat -s fin.android:V AndroidRuntime:E` (un crash apparaît en `AndroidRuntime: FATAL`).
-- **Réinstaller proprement** : `adb uninstall fin.android` puis `installDebug` (efface aussi
-  la config + les secrets stockés).
-- **Captures d'écran** : `adb exec-out screencap -p > shot.png`.
-- **`local.properties`, `build/`, `.gradle/`, `*.fin`** ne sont pas versionnés (cf. `.gitignore`).
-- **Pas besoin d'installer Gradle** : `./gradlew` télécharge la version épinglée (8.13). Tu peux
-  aussi `brew install gradle` si tu veux la commande `gradle` globale (pas nécessaire ici).
-- **Versions** : compileSdk/targetSdk **36**, minSdk **26**, JDK **21**, AGP 8.13.2, Kotlin 2.2.20.
-- **Onboarding (1er lancement)** : il te faut un **dépôt privé GitHub** + un **fine-grained PAT**
-  (Settings → Developer settings → Personal access tokens → Fine-grained ; *Repository access* =
-  ce seul dépôt ; *Permissions → Contents: Read and write*). Colle le token + une passphrase ;
-  ensuite c'est le déverrouillage biométrique.
+This is also the best way to judge the real look (the emulator distorts proportions a bit
+compared to a tall screen like the S21).
 
 ---
 
-## 6. Structure & docs
+## 5. Tips (for developers new to Android)
+
+- **`adb logcat`** = the device logs. To see only this app:
+  `adb logcat -s fin.android:V AndroidRuntime:E` (a crash shows up as `AndroidRuntime: FATAL`).
+- **Clean reinstall**: `adb uninstall fin.android` then `installDebug` (also wipes the stored
+  config + secrets).
+- **Screenshots**: `adb exec-out screencap -p > shot.png`.
+- **`local.properties`, `build/`, `.gradle/`, `*.fin`** are not version-controlled (see `.gitignore`).
+- **No need to install Gradle**: `./gradlew` downloads the pinned version (8.13). You can still
+  `brew install gradle` for a global `gradle` command (not required here).
+- **Versions**: compileSdk/targetSdk **36**, minSdk **26**, JDK **21**, AGP 8.13.2, Kotlin 2.2.20.
+- **Onboarding (first launch)**: you need a **private GitHub repo** + a **fine-grained PAT**
+  (Settings → Developer settings → Personal access tokens → Fine-grained; *Repository access* =
+  that one repo; *Permissions → Contents: Read and write*). Paste the token + a passphrase; after
+  that it's biometric unlock.
+
+---
+
+## 6. Layout & docs
 
 ```
 app/src/main/kotlin/fin/android/
-  crypto/  domain/  format/    # cœur pur Kotlin (Argon2id/HKDF/AES-GCM, modèle, lecture/écriture .fin)
-  remote/  market/  valuation/ # sync GitHub, cotes multi-source, valorisation/perf/gains
-  data/    ui/                 # DI + repository, écrans Compose
-scripts/crossimpl.sh           # test de compatibilité bidirectionnelle avec le binaire Go
-docs/superpowers/              # spec, plan, journal de décisions
+  crypto/  domain/  format/    # pure-Kotlin core (Argon2id/HKDF/AES-GCM, model, .fin read/write)
+  remote/  market/  valuation/ # GitHub sync, multi-source quotes, valuation/perf/gains
+  data/    ui/                 # DI + repository, Compose screens
+scripts/crossimpl.sh           # bidirectional compatibility test against the Go binary
+docs/superpowers/              # spec, plan, decision log
 ```
 
-Le format de fichier et le modèle de sync sont spécifiés côté finador :
-`../finador/docs/FORMAT.md` et `../finador/docs/superpowers/specs/2026-06-13-github-remote-data-design.md`.
+The file format and sync model are specified on the finador side:
+`../finador/docs/FORMAT.md` and `../finador/docs/superpowers/specs/2026-06-13-github-remote-data-design.md`.
