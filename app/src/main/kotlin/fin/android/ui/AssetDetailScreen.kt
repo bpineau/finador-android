@@ -15,11 +15,19 @@ import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
+import androidx.compose.material3.SegmentedButton
+import androidx.compose.material3.SegmentedButtonDefaults
+import androidx.compose.material3.SingleChoiceSegmentedButtonRow
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.runtime.setValue
+import java.time.LocalDate
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
@@ -115,11 +123,34 @@ private fun HeaderCard(d: AssetDetail) {
     }
 }
 
+/** Time ranges offered above the price sparkline; cutoff is relative to the latest point. */
+private enum class ChartRange(val label: String) {
+    M1("1m"), M6("6m"), Y1("1y"), MAX("Max");
+
+    fun cutoff(anchor: LocalDate): LocalDate? = when (this) {
+        M1 -> anchor.minusMonths(1)
+        M6 -> anchor.minusMonths(6)
+        Y1 -> anchor.minusYears(1)
+        MAX -> null
+    }
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun Sparkline(d: AssetDetail) {
-    val pts = d.priceHistory
-    if (pts.size < 2) return // defensive: nothing meaningful to draw
+    val all = d.priceHistory
+    if (all.size < 2) return // defensive: nothing meaningful to draw
     val lineColor = MaterialTheme.colorScheme.primary
+
+    var rangeOrdinal by rememberSaveable { mutableStateOf(ChartRange.M6.ordinal) }
+    val range = ChartRange.entries[rangeOrdinal]
+    val anchor = all.last().date
+    val pts = remember(rangeOrdinal, all) {
+        val cutoff = range.cutoff(anchor)
+        val filtered = if (cutoff == null) all else all.filter { !it.date.isBefore(cutoff) }
+        if (filtered.size >= 2) filtered else all // fall back to the full series if a range is too short
+    }
+
     Card(modifier = Modifier.fillMaxWidth()) {
         Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
             Text(
@@ -127,7 +158,16 @@ private fun Sparkline(d: AssetDetail) {
                 style = MaterialTheme.typography.labelMedium,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
-            Canvas(modifier = Modifier.fillMaxWidth().height(96.dp)) {
+            SingleChoiceSegmentedButtonRow(Modifier.fillMaxWidth()) {
+                ChartRange.entries.forEachIndexed { i, r ->
+                    SegmentedButton(
+                        selected = i == rangeOrdinal,
+                        onClick = { rangeOrdinal = i },
+                        shape = SegmentedButtonDefaults.itemShape(i, ChartRange.entries.size),
+                    ) { Text(r.label) }
+                }
+            }
+            Canvas(modifier = Modifier.fillMaxWidth().height(120.dp)) {
                 val closes = pts.map { it.close }
                 val min = closes.min()
                 val max = closes.max()
@@ -144,6 +184,11 @@ private fun Sparkline(d: AssetDetail) {
                     prev = cur
                 }
             }
+            Text(
+                "${pts.first().date} → ${pts.last().date} · ${pts.size} pts",
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
         }
     }
 }
