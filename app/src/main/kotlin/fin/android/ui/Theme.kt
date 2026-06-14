@@ -11,48 +11,45 @@ import androidx.compose.ui.platform.LocalView
 import androidx.core.view.WindowCompat
 
 /**
- * A single, fixed dark palette — no dynamic/wallpaper colour (that's a source of inconsistency).
- * Dark-mode-first: the app forces this scheme regardless of the system setting. The accent (green)
- * lives in [primary]; the two extra semantic colours (gain/loss) live in [FinColors] since they
- * are not Material 3 slots.
+ * A single, fixed dark palette — no dynamic/wallpaper colour (a source of inconsistency).
+ * Dark-mode-first. A restrained **terracotta / rust** accent on warm-neutral darks (premium,
+ * distinctive, used sparingly) lives across the whole accent family; the gain/loss semantic
+ * colours live in [FinColors] (financial green/red, refined) since they are not Material 3 slots.
  *
- * Accent variants tried during design:
- *   A  #27C281  (balanced emerald — shipped)
- *   B  #2EE6A6  (brighter mint)
- *   C  #16A571  (deeper forest)
+ * Accent: terracotta #C2613C. Earlier green builds (#27C281…) read too "template"; rust is warmer.
  */
 private val FinDarkColors = darkColorScheme(
-    background = Color(0xFF0C0D0F),
-    onBackground = Color(0xFFECEDEE),
-    surface = Color(0xFF15181B),
-    onSurface = Color(0xFFECEDEE),
-    surfaceVariant = Color(0xFF1C2024),
-    onSurfaceVariant = Color(0xFF9AA0A6),
-    surfaceContainerHigh = Color(0xFF23282D),
-    surfaceContainerHighest = Color(0xFF23282D),
-    outline = Color(0xFF2B2F35),
-    outlineVariant = Color(0xFF23272C),
+    background = Color(0xFF0E0C0B),
+    onBackground = Color(0xFFECE7E1),
+    surface = Color(0xFF181513),
+    onSurface = Color(0xFFECE7E1),
+    surfaceVariant = Color(0xFF211B16),
+    onSurfaceVariant = Color(0xFFA69C90),
+    surfaceContainerHigh = Color(0xFF2A231D),
+    surfaceContainerHighest = Color(0xFF2A231D),
+    outline = Color(0xFF342B24),
+    outlineVariant = Color(0xFF261F1A),
 
-    // Accent (variant A). Change only this when sampling B/C.
-    primary = Color(0xFF27C281),
-    onPrimary = Color(0xFF04130C),
-    primaryContainer = Color(0xFF123524),
-    onPrimaryContainer = Color(0xFF7FE6B0),
+    // Accent: terracotta / rust, harmonised across the family.
+    primary = Color(0xFFC2613C),
+    onPrimary = Color(0xFF1E0F08),
+    primaryContainer = Color(0xFF3A1C10),
+    onPrimaryContainer = Color(0xFFF2C3A8),
 
-    secondaryContainer = Color(0xFF16291E),
-    onSecondaryContainer = Color(0xFF74E3AC),
+    secondaryContainer = Color(0xFF2C1A11),
+    onSecondaryContainer = Color(0xFFE7B89C),
 
-    error = Color(0xFFF26D6D),
+    error = Color(0xFFE0675E),
     onError = Color(0xFF2A0A0A),
 )
 
 /**
- * Semantic up/down colours used wherever a figure is a gain or a loss. Harmonious with the accent
- * (not flashy). Exposed via [LocalFinColors] so call sites read `FinColors.current`.
+ * Semantic up/down colours used wherever a figure is a gain or a loss — refined financial
+ * green/red (the accent stays reserved for interactive elements). Exposed via [LocalFinColors].
  */
 data class FinSemanticColors(
-    val gain: Color = Color(0xFF35D07F),
-    val loss: Color = Color(0xFFF26D6D),
+    val gain: Color = Color(0xFF4FBF8B),
+    val loss: Color = Color(0xFFE0675E),
 )
 
 val LocalFinColors = staticCompositionLocalOf { FinSemanticColors() }
