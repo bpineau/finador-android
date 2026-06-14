@@ -13,13 +13,17 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material3.Card
+import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.HorizontalDivider
+import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
@@ -33,6 +37,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
@@ -40,20 +45,18 @@ import androidx.compose.ui.unit.dp
 import fin.android.valuation.AssetDetail
 import fin.android.valuation.AssetPeriodGain
 
-/** Gain green; loss reuses the theme error red (read via MaterialTheme at call sites). */
-private val DetailGainGreen = Color(0xFF1B873F)
-
+/** Semantic up/down colour for a figure: gain green / loss red / muted for null. */
 @Composable
 private fun detailGainColor(value: Double?): Color = when {
     value == null -> MaterialTheme.colorScheme.onSurfaceVariant
-    value < 0 -> MaterialTheme.colorScheme.error
-    else -> DetailGainGreen
+    value < 0 -> FinColors.current.loss
+    else -> FinColors.current.gain
 }
 
 /**
  * Per-asset detail page: a simplified, price/FX-move view of one held security. Shows the holding,
  * the current value in the reference currency, a small price sparkline, and a period %/absolute
- * table. No TWR/XIRR/CAGR/Sharpe — by design.
+ * table. Pushed full-screen over the bottom bar with an icon back button.
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -63,8 +66,19 @@ fun AssetDetailScreen(vm: AppViewModel, assetId: String, onBack: () -> Unit) {
     Scaffold(
         topBar = {
             TopAppBar(
-                title = { Text(detail?.name ?: "Asset", maxLines = 1, overflow = TextOverflow.Ellipsis) },
-                navigationIcon = { TextButton(onClick = onBack) { Text("Back") } },
+                title = {
+                    Text(
+                        detail?.name ?: "Asset",
+                        fontWeight = FontWeight.SemiBold,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                },
+                navigationIcon = {
+                    IconButton(onClick = onBack) {
+                        Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
+                    }
+                },
             )
         },
     ) { padding ->
@@ -93,34 +107,43 @@ fun AssetDetailScreen(vm: AppViewModel, assetId: String, onBack: () -> Unit) {
 }
 
 @Composable
+private fun DetailCard(content: @Composable androidx.compose.foundation.layout.ColumnScope.() -> Unit) {
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant),
+    ) {
+        Column(Modifier.padding(20.dp), verticalArrangement = Arrangement.spacedBy(8.dp), content = content)
+    }
+}
+
+@Composable
 private fun HeaderCard(d: AssetDetail) {
-    Card(modifier = Modifier.fillMaxWidth()) {
-        Column(Modifier.padding(20.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-            Text(
-                formatMoney(d.value, d.referenceCcy),
-                style = MaterialTheme.typography.headlineMedium,
-                fontWeight = FontWeight.SemiBold,
-            )
-            HorizontalDivider(Modifier.padding(vertical = 4.dp))
-            d.ticker?.let { DetailRow("Ticker", it) }
-            d.isin?.let { DetailRow("ISIN", it) }
-            DetailRow("Quantity", "${d.qty.stripTrailingZeros().toPlainString()} units")
-            DetailRow(
-                "Market price",
-                if (d.price != null) "${formatAmount(d.price)} ${d.assetCcy}" else "—",
-            )
-            DetailRow(
-                "Avg buy price",
-                if (d.avgBuyPrice != null) formatMoney(d.avgBuyPrice, d.referenceCcy) else "—",
-            )
-            DetailRow("Value", formatMoney(d.value, d.referenceCcy))
-            DetailRow(
-                "Cost basis",
-                if (d.costBasis != null) formatMoney(d.costBasis, d.referenceCcy) else "—",
-            )
-            UnrealizedRow(d)
-            if (d.accounts.isNotEmpty()) DetailRow("Accounts", d.accounts.joinToString(", "))
-        }
+    DetailCard {
+        Text(
+            formatMoney(d.value, d.referenceCcy),
+            style = MaterialTheme.typography.headlineLarge,
+            fontWeight = FontWeight.Bold,
+            color = MaterialTheme.colorScheme.onSurface,
+        )
+        HorizontalDivider(Modifier.padding(vertical = 4.dp), color = MaterialTheme.colorScheme.outlineVariant)
+        d.ticker?.let { DetailRow("Ticker", it) }
+        d.isin?.let { DetailRow("ISIN", it) }
+        DetailRow("Quantity", "${d.qty.stripTrailingZeros().toPlainString()} units")
+        DetailRow(
+            "Market price",
+            if (d.price != null) "${formatAmount(d.price)} ${d.assetCcy}" else "—",
+        )
+        DetailRow(
+            "Avg buy price",
+            if (d.avgBuyPrice != null) formatMoney(d.avgBuyPrice, d.referenceCcy) else "—",
+        )
+        DetailRow("Value", formatMoney(d.value, d.referenceCcy))
+        DetailRow(
+            "Cost basis",
+            if (d.costBasis != null) formatMoney(d.costBasis, d.referenceCcy) else "—",
+        )
+        UnrealizedRow(d)
+        if (d.accounts.isNotEmpty()) DetailRow("Accounts", d.accounts.joinToString(", "))
     }
 }
 
@@ -136,7 +159,7 @@ private enum class ChartRange(val label: String) {
     }
 }
 
-/** Discreet inline range picker: small text pills, the selected one in a subtle filled chip. */
+/** Discreet inline range picker: small accent pills, the selected one in a filled accent chip. */
 @Composable
 private fun RangeChips(selected: Int, onSelect: (Int) -> Unit) {
     Row(horizontalArrangement = Arrangement.spacedBy(2.dp), verticalAlignment = Alignment.CenterVertically) {
@@ -144,14 +167,15 @@ private fun RangeChips(selected: Int, onSelect: (Int) -> Unit) {
             val isSelected = i == selected
             Text(
                 r.label,
-                style = MaterialTheme.typography.labelSmall,
+                style = MaterialTheme.typography.labelMedium,
+                fontWeight = if (isSelected) FontWeight.SemiBold else FontWeight.Normal,
                 color = if (isSelected) MaterialTheme.colorScheme.onSecondaryContainer
                 else MaterialTheme.colorScheme.onSurfaceVariant,
                 modifier = Modifier
                     .clip(RoundedCornerShape(50))
                     .then(if (isSelected) Modifier.background(MaterialTheme.colorScheme.secondaryContainer) else Modifier)
                     .clickable { onSelect(i) }
-                    .padding(horizontal = 9.dp, vertical = 3.dp),
+                    .padding(horizontal = 10.dp, vertical = 4.dp),
             )
         }
     }
@@ -172,58 +196,60 @@ private fun Sparkline(d: AssetDetail) {
         if (filtered.size >= 2) filtered else all // fall back to the full series if a range is too short
     }
 
-    Card(modifier = Modifier.fillMaxWidth()) {
-        Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-            Row(
-                Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                Text(
-                    "Price (${d.referenceCcy})",
-                    style = MaterialTheme.typography.labelMedium,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-                RangeChips(rangeOrdinal) { rangeOrdinal = it }
-            }
-            Canvas(modifier = Modifier.fillMaxWidth().height(120.dp)) {
-                val closes = pts.map { it.close }
-                val min = closes.min()
-                val max = closes.max()
-                val span = (max - min).takeIf { it > 0.0 } ?: 1.0
-                val w = size.width
-                val h = size.height
-                val dx = if (pts.size > 1) w / (pts.size - 1) else 0f
-                var prev: Offset? = null
-                pts.forEachIndexed { i, p ->
-                    val x = dx * i
-                    val y = (h - ((p.close - min) / span * h)).toFloat()
-                    val cur = Offset(x, y)
-                    prev?.let { drawLine(color = lineColor, start = it, end = cur, strokeWidth = 3f) }
-                    prev = cur
-                }
-            }
+    DetailCard {
+        Row(
+            Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
             Text(
-                "${pts.first().date} → ${pts.last().date} · ${pts.size} pts",
-                style = MaterialTheme.typography.labelSmall,
+                "Price (${d.referenceCcy})",
+                style = MaterialTheme.typography.labelMedium,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
+            RangeChips(rangeOrdinal) { rangeOrdinal = it }
         }
+        Canvas(modifier = Modifier.fillMaxWidth().height(120.dp)) {
+            val closes = pts.map { it.close }
+            val min = closes.min()
+            val max = closes.max()
+            val span = (max - min).takeIf { it > 0.0 } ?: 1.0
+            val w = size.width
+            val h = size.height
+            val dx = if (pts.size > 1) w / (pts.size - 1) else 0f
+            var prev: Offset? = null
+            pts.forEachIndexed { i, p ->
+                val x = dx * i
+                val y = (h - ((p.close - min) / span * h)).toFloat()
+                val cur = Offset(x, y)
+                prev?.let { drawLine(color = lineColor, start = it, end = cur, strokeWidth = 4f, cap = StrokeCap.Round) }
+                prev = cur
+            }
+        }
+        Text(
+            "${pts.first().date} → ${pts.last().date} · ${pts.size} pts",
+            style = MaterialTheme.typography.labelSmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
     }
 }
 
 @Composable
 private fun PeriodsCard(d: AssetDetail) {
-    Card(modifier = Modifier.fillMaxWidth()) {
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant),
+    ) {
         Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(2.dp)) {
             Text(
                 "Performance",
-                style = MaterialTheme.typography.titleMedium,
+                style = MaterialTheme.typography.titleSmall,
                 fontWeight = FontWeight.SemiBold,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
                 modifier = Modifier.padding(bottom = 4.dp),
             )
             PeriodHeader()
-            HorizontalDivider(Modifier.padding(vertical = 4.dp))
+            HorizontalDivider(Modifier.padding(vertical = 4.dp), color = MaterialTheme.colorScheme.outlineVariant)
             for (p in d.periods) PeriodRow(p)
         }
     }
@@ -261,8 +287,12 @@ private fun PeriodRow(p: AssetPeriodGain) {
         Modifier.fillMaxWidth().padding(vertical = 6.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        Text(p.label, modifier = Modifier.weight(1f), style = MaterialTheme.typography.bodyMedium)
-        // % column: no currency, one decimal, no "+".
+        Text(
+            p.label,
+            modifier = Modifier.weight(1f),
+            style = MaterialTheme.typography.bodyMedium,
+            color = MaterialTheme.colorScheme.onSurface,
+        )
         Text(
             formatGainPercent(p.relative),
             modifier = Modifier.weight(1f),
@@ -270,7 +300,6 @@ private fun PeriodRow(p: AssetPeriodGain) {
             style = MaterialTheme.typography.bodyMedium,
             color = detailGainColor(p.relative),
         )
-        // Absolute column: one decimal, no "+", no currency (implicit display ccy).
         Text(
             formatGainCell(p.absolute),
             modifier = Modifier.weight(1f),
@@ -291,7 +320,7 @@ private fun UnrealizedRow(d: AssetDetail) {
             color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
         if (d.unrealized == null) {
-            Text("—", style = MaterialTheme.typography.bodyMedium)
+            Text("—", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurface)
         } else {
             val pct = d.unrealizedPct?.let { " (${formatGainPercent(it)})" } ?: ""
             Text(
@@ -310,6 +339,7 @@ private fun DetailRow(label: String, value: String) {
         Text(
             value,
             style = MaterialTheme.typography.bodyMedium,
+            color = MaterialTheme.colorScheme.onSurface,
             maxLines = 1,
             overflow = TextOverflow.Ellipsis,
         )

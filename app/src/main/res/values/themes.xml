@@ -1,4 +1,10 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <style name="Theme.Finador" parent="android:Theme.Material.Light.NoActionBar" />
+    <!-- Dark, action-bar-less shell. Window background matches the Compose `background` token so
+         there is no white flash before Compose draws. The app forces dark inside Compose too. -->
+    <style name="Theme.Finador" parent="android:Theme.Material.NoActionBar">
+        <item name="android:windowBackground">@color/window_background</item>
+        <item name="android:statusBarColor">@android:color/transparent</item>
+        <item name="android:navigationBarColor">@android:color/transparent</item>
+    </style>
 </resources>
