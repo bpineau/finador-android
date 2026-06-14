@@ -56,7 +56,7 @@ data class AssetDetail(
     val value: Double, // value in ref ccy (now)
     val accounts: List<String>, // account names holding it
     val periods: List<AssetPeriodGain>, // 1d,3d,5d,7d,1m,6m,1y,YTD
-    val priceHistory: List<PricePoint>, // last ~120 pts, ref-ccy price, for a sparkline
+    val priceHistory: List<PricePoint>, // full ref-ccy price history, for the sparkline + range selector
     // Cost basis (average-cost), in the reference currency. Populated for gains-taxed envelopes;
     // null for value-taxed / untaxed accounts where the engine tracks no basis.
     val costBasis: Double? = null, // total cost basis, ref ccy
@@ -228,9 +228,6 @@ object Gains {
         "YTD" to LocalDate.of(today.year, 1, 1),
     )
 
-    /** How many trailing price points the sparkline keeps. */
-    private const val PRICE_HISTORY_POINTS = 120
-
     /**
      * Builds the simplified [AssetDetail] for [assetId] as of [today], in [referenceCcy] (defaults
      * to `book.config["currency"]` then "EUR"). Only period % increase + absolute gain are computed
@@ -271,9 +268,10 @@ object Gains {
             AssetPeriodGain(label, relative, absolute)
         }
 
-        // Ref-ccy price history (last ~120 points), skipping any day missing an FX rate.
+        // Full ref-ccy price history (the detail screen's range selector filters it), skipping any
+        // day missing an FX rate.
         val series = market.prices[assetId]?.points ?: emptyList()
-        val priceHistory = series.takeLast(PRICE_HISTORY_POINTS).mapNotNull { pt ->
+        val priceHistory = series.mapNotNull { pt ->
             val rate = converter.rate(asset.ccy, ccy, pt.date) ?: return@mapNotNull null
             PricePoint(pt.date, pt.close * rate)
         }
