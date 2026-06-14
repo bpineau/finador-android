@@ -36,6 +36,20 @@ questions ni confirmations). Chaque décision non triviale est tracée ici.
   (`scripts/crossimpl.sh`) : Go lit un .fin muté par Android (tx visible) ; Android lit un .fin créé
   par Go. Backend Sync rendu **bloquant** (pas de coroutines dans la lib ; l'UI appelle sur IO).
 
-## Décisions à venir (complétées au fil de l'eau)
-- Phase 3 : remote GitHub (Contents API), Sync (copie+state, pull/push/merge), SecretStore Keystore
-  + biométrie.
+- **Phase 3 (remote + secrets)** : OK. 36 tests. GitHub Contents API, Sync (pull/mutate/push,
+  offline-dirty, conflit→merge), SecretStore (EncryptedSharedPreferences). Backend bloquant.
+- **Phase 4 (marché)** : OK (sous-agent). 70 tests. Yahoo/FT/Morningstar (JSON + regex, pas de Jsoup),
+  MultiSource, Converter USD, cache FINCACHE2. Dates en UTC sur mobile (documenté).
+- **Phase 5 (valuation + UI)** : OK (sous-agents). 82 tests + app qui tourne. Valuation = parité
+  finador (value_test.go porté). UI Compose : onboarding (coller PAT + passphrase), unlock biométrie,
+  overview (brut/impôt/net + lignes + positions), saisie tx, settings. **Boote sur l'AVD `test`,
+  atterrit sur l'onboarding sans crash** (capture d'écran validée).
+  Note : material-icons absent du classpath → actions en texte (cosmétique, à enrichir).
+- **Phase 6 (perf, good-to-have)** : OK (sous-agent). 105 tests. TWR/XIRR/CAGR/vol/Sharpe/Sortino/maxDD
+  (parité perf_test/series_test), carte « Performance » dans l'overview.
+
+## Reste optionnel (non bloquant)
+- Test golden Go côté finador (assertion des vecteurs §9 + ouverture sample.ledger) — defense-in-depth ;
+  côté Android les vecteurs sont déjà assertés + le gate cross-impl protège le contrat.
+- Enrichissements visuels : icônes (material-icons-extended), courbes (Canvas), pull-to-refresh.
+- E2E réel GitHub : nécessite un repo privé + PAT de l'utilisateur (à faire au 1er usage).
