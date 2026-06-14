@@ -130,8 +130,12 @@ class AppViewModel(private val container: AppContainer) : ViewModel() {
     fun displayCurrency(): String =
         runCatching { container.loadConfig().displayCurrency }.getOrNull() ?: "EUR"
 
-    /** Builds the simplified per-asset detail for the detail screen; null if not a held security. */
-    fun assetDetail(assetId: String): fin.android.valuation.AssetDetail? = repo.assetDetail(assetId)
+    /**
+     * The per-asset detail for the detail screen. Reads the copy precomputed in [AppState.Ready]
+     * (instant); only falls back to an on-demand computation if it's somehow absent.
+     */
+    fun assetDetail(assetId: String): fin.android.valuation.AssetDetail? =
+        (state.value as? fin.android.data.AppState.Ready)?.assetDetails?.get(assetId) ?: repo.assetDetail(assetId)
 
     /** Reads the persisted remote config for the Settings screen (no secrets). */
     fun repoSummary(): RepoSummary? {

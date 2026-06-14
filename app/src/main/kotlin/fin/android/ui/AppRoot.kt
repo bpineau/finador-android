@@ -1,5 +1,9 @@
 package fin.android.ui
 
+import androidx.compose.animation.AnimatedContentTransitionScope.SlideDirection
+import androidx.compose.animation.core.tween
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.material3.CircularProgressIndicator
@@ -61,7 +65,15 @@ fun AppRoot(vm: AppViewModel, activity: FragmentActivity) {
 @Composable
 private fun ReadyNav(vm: AppViewModel, ready: AppState.Ready) {
     val nav = rememberNavController()
-    NavHost(navController = nav, startDestination = Routes.OVERVIEW) {
+    NavHost(
+        navController = nav,
+        startDestination = Routes.OVERVIEW,
+        // Short, crisp directional slides (push forward / pop back).
+        enterTransition = { slideIntoContainer(SlideDirection.Start, tween(170)) + fadeIn(tween(110)) },
+        exitTransition = { slideOutOfContainer(SlideDirection.Start, tween(170)) + fadeOut(tween(110)) },
+        popEnterTransition = { slideIntoContainer(SlideDirection.End, tween(170)) + fadeIn(tween(110)) },
+        popExitTransition = { slideOutOfContainer(SlideDirection.End, tween(170)) + fadeOut(tween(110)) },
+    ) {
         composable(Routes.OVERVIEW) {
             OverviewScreen(
                 vm = vm,
