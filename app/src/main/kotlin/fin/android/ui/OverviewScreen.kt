@@ -1,5 +1,6 @@
 package fin.android.ui
 
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -59,6 +60,7 @@ fun OverviewScreen(
     ready: AppState.Ready,
     onAddTx: () -> Unit,
     onSettings: () -> Unit,
+    onAssetClick: (String) -> Unit,
 ) {
     var tab by rememberSaveable { mutableIntStateOf(0) }
     Scaffold(
@@ -91,15 +93,15 @@ fun OverviewScreen(
                 LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
             }
             when (tab) {
-                0 -> PortfolioTab(ready)
-                else -> GainsTab(ready)
+                0 -> PortfolioTab(ready, onAssetClick)
+                else -> GainsTab(ready, onAssetClick)
             }
         }
     }
 }
 
 @Composable
-private fun PortfolioTab(ready: AppState.Ready) {
+private fun PortfolioTab(ready: AppState.Ready, onAssetClick: (String) -> Unit) {
     val v = ready.valuation
     LazyColumn(
         modifier = Modifier.fillMaxWidth(),
@@ -131,7 +133,7 @@ private fun PortfolioTab(ready: AppState.Ready) {
 
         if (v.positions.isNotEmpty()) {
             item { SectionHeader("Positions") }
-            items(v.positions) { p -> PositionRow(p, v.referenceCcy) }
+            items(v.positions) { p -> PositionRow(p, v.referenceCcy, onAssetClick) }
         }
 
         item { Spacer(Modifier.height(72.dp)) } // clearance for the FAB
@@ -139,7 +141,7 @@ private fun PortfolioTab(ready: AppState.Ready) {
 }
 
 @Composable
-private fun GainsTab(ready: AppState.Ready) {
+private fun GainsTab(ready: AppState.Ready, onAssetClick: (String) -> Unit) {
     val gains = ready.gains
     LazyColumn(
         modifier = Modifier.fillMaxWidth(),
@@ -174,7 +176,7 @@ private fun GainsTab(ready: AppState.Ready) {
         if (gains.assets.isNotEmpty()) {
             item { SectionHeader("Per-asset gains") }
             item { AssetGainHeader() }
-            items(gains.assets) { a -> AssetGainRow(a, gains.referenceCcy) }
+            items(gains.assets) { a -> AssetGainRow(a, onAssetClick) }
             item {
                 Text(
                     "Per-asset gains approximate a price/FX move on the current quantity; " +
@@ -194,14 +196,15 @@ private fun PeriodCard(pg: PeriodGain, ccy: String, modifier: Modifier = Modifie
     Card(modifier = modifier.fillMaxWidth()) {
         Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
             Text(pg.label, style = MaterialTheme.typography.labelMedium)
+            // No "+" and a single decimal, matching the per-asset table style.
             Text(
-                formatSignedPercent(pg.relative),
+                formatGainPercent(pg.relative),
                 style = MaterialTheme.typography.titleMedium,
                 fontWeight = FontWeight.SemiBold,
                 color = gainColor(pg.relative),
             )
             Text(
-                formatSignedMoney(pg.absolute, ccy),
+                "${formatGainCell(pg.absolute)} $ccy",
                 style = MaterialTheme.typography.bodySmall,
                 color = gainColor(pg.absolute),
             )
@@ -218,7 +221,7 @@ private fun AssetGainHeader() {
             style = MaterialTheme.typography.labelMedium,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
-        for (h in listOf("1d", "7d", "1m", "1y")) {
+        for (h in listOf("1d", "7d", "1m")) {
             Text(
                 h,
                 modifier = Modifier.weight(1f),
@@ -231,24 +234,28 @@ private fun AssetGainHeader() {
 }
 
 @Composable
-private fun AssetGainRow(a: AssetGain, ccy: String) {
+private fun AssetGainRow(a: AssetGain, onAssetClick: (String) -> Unit) {
     Row(
-        Modifier.fillMaxWidth().padding(vertical = 6.dp),
+        Modifier
+            .fillMaxWidth()
+            .clickable { onAssetClick(a.assetId) }
+            .padding(vertical = 6.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Text(
             a.name,
             modifier = Modifier.weight(1.4f),
-            style = MaterialTheme.typography.bodyMedium,
+            style = MaterialTheme.typography.labelMedium,
             maxLines = 1,
             overflow = TextOverflow.Ellipsis,
         )
-        for (cell in listOf(a.d1, a.d7, a.m1, a.y1)) {
+        // No currency code (implicit display ccy), no "+", one decimal; "—" for null.
+        for (cell in listOf(a.d1, a.d7, a.m1)) {
             Text(
-                formatSignedMoney(cell, ccy),
+                formatGainCellOrDash(cell),
                 modifier = Modifier.weight(1f),
                 textAlign = TextAlign.End,
-                style = MaterialTheme.typography.bodySmall,
+                style = MaterialTheme.typography.labelMedium,
                 color = gainColor(cell),
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
@@ -341,8 +348,10 @@ private fun LineRow(line: ValuationLine, ccy: String) {
 }
 
 @Composable
-private fun PositionRow(p: Position, ccy: String) {
-    Card(modifier = Modifier.fillMaxWidth()) {
+private fun PositionRow(p: Position, ccy: String, onAssetClick: (String) -> Unit) {
+    // Cash positions (null assetId) have no detail page and are not clickable.
+    val clickMod = p.assetId?.let { id -> Modifier.clickable { onAssetClick(id) } } ?: Modifier
+    Card(modifier = Modifier.fillMaxWidth().then(clickMod)) {
         Row(
             Modifier.fillMaxWidth().padding(12.dp),
             horizontalArrangement = Arrangement.SpaceBetween,
