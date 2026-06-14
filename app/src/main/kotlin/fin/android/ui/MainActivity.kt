@@ -1,31 +1,27 @@
 package fin.android.ui
 
 import android.os.Bundle
-import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.foundation.layout.padding
-import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
-import androidx.compose.material3.Text
-import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.unit.dp
+import androidx.fragment.app.FragmentActivity
+import androidx.lifecycle.viewmodel.compose.viewModel
 
-class MainActivity : ComponentActivity() {
+/**
+ * Single-activity host. Extends [FragmentActivity] so [androidx.biometric.BiometricPrompt] works
+ * (it needs a FragmentActivity / fragment host).
+ */
+class MainActivity : FragmentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         setContent {
-            MaterialTheme {
+            FinadorTheme {
                 Surface(modifier = Modifier.fillMaxSize()) {
-                    Greeting()
+                    val vm: AppViewModel = viewModel(factory = AppViewModel.Factory)
+                    AppRoot(vm = vm, activity = this)
                 }
             }
         }
     }
-}
-
-@Composable
-private fun Greeting() {
-    Text(text = "finador", modifier = Modifier.padding(16.dp))
 }
