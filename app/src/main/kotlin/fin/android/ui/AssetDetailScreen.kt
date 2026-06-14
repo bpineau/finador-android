@@ -45,14 +45,6 @@ import androidx.compose.ui.unit.dp
 import fin.android.valuation.AssetDetail
 import fin.android.valuation.AssetPeriodGain
 
-/** Semantic up/down colour for a figure: gain green / loss red / muted for null. */
-@Composable
-private fun detailGainColor(value: Double?): Color = when {
-    value == null -> MaterialTheme.colorScheme.onSurfaceVariant
-    value < 0 -> FinColors.current.loss
-    else -> FinColors.current.gain
-}
-
 /**
  * Per-asset detail page: a simplified, price/FX-move view of one held security. Shows the holding,
  * the current value in the reference currency, a small price sparkline, and a period %/absolute
@@ -332,14 +324,14 @@ private fun PeriodRow(p: AssetPeriodGain) {
             modifier = Modifier.weight(1f),
             textAlign = TextAlign.End,
             style = MaterialTheme.typography.bodyMedium,
-            color = detailGainColor(p.relative),
+            color = gainLossColor(p.relative),
         )
         Text(
             formatGainCell(p.absolute),
             modifier = Modifier.weight(1f),
             textAlign = TextAlign.End,
             style = MaterialTheme.typography.bodyMedium,
-            color = detailGainColor(p.absolute),
+            color = gainLossColor(p.absolute),
         )
     }
 }
@@ -360,7 +352,7 @@ private fun UnrealizedRow(d: AssetDetail) {
             Text(
                 "${formatGainCell(d.unrealized)} ${d.referenceCcy}$pct",
                 style = MaterialTheme.typography.bodyMedium,
-                color = detailGainColor(d.unrealized),
+                color = gainLossColor(d.unrealized),
             )
         }
     }

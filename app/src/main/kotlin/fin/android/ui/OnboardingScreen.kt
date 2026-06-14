@@ -44,7 +44,7 @@ fun OnboardingScreen(vm: AppViewModel) {
     var token by remember { mutableStateOf("") }
     var pass by remember { mutableStateOf("") }
     val busy by vm.busy.collectAsStateWithLifecycle()
-    val error by vm.message.collectAsStateWithLifecycle()
+    val error by vm.onboardError.collectAsStateWithLifecycle()
 
     val canConnect = owner.isNotBlank() && repo.isNotBlank() && token.isNotBlank() && pass.isNotBlank() && !busy
 

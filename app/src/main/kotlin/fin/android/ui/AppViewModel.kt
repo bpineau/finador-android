@@ -32,8 +32,12 @@ class AppViewModel(private val container: AppContainer) : ViewModel() {
     val message: StateFlow<String?> = _message.asStateFlow()
 
     private val _busy = MutableStateFlow(false)
-    /** True while a long operation (onboard/unlock) runs, so screens can show a spinner. */
+    /** True while a long operation (onboard/unlock/save) runs, so screens can show a spinner. */
     val busy: StateFlow<Boolean> = _busy.asStateFlow()
+
+    private val _onboardError = MutableStateFlow<String?>(null)
+    /** Persistent inline error for the onboarding/unlock screens — NOT cleared by the snackbar. */
+    val onboardError: StateFlow<String?> = _onboardError.asStateFlow()
 
     init {
         start()
@@ -64,10 +68,11 @@ class AppViewModel(private val container: AppContainer) : ViewModel() {
     fun onboard(owner: String, repo: String, path: String, branch: String, token: String, pass: String) {
         viewModelScope.launch {
             _busy.value = true
+            _onboardError.value = null
             try {
                 this@AppViewModel.repo.onboard(owner, repo, path, branch, token, pass)
                     .onSuccess { refreshQuotes() }
-                    .onFailure { fail(it) }
+                    .onFailure { failOnboard(it) }
             } finally {
                 _busy.value = false
             }
@@ -77,14 +82,21 @@ class AppViewModel(private val container: AppContainer) : ViewModel() {
     fun unlock() {
         viewModelScope.launch {
             _busy.value = true
+            _onboardError.value = null
             try {
                 repo.unlock()
                     .onSuccess { refreshQuotes() }
-                    .onFailure { fail(it) }
+                    .onFailure { failOnboard(it) }
             } finally {
                 _busy.value = false
             }
         }
+    }
+
+    /** Onboarding/unlock failures go to the persistent inline channel (not the transient snackbar). */
+    private fun failOnboard(e: Throwable) {
+        android.util.Log.w("finador", "onboard/unlock failed", e)
+        _onboardError.value = e.message ?: e.javaClass.simpleName
     }
 
     fun refreshQuotes() {
@@ -111,9 +123,14 @@ class AppViewModel(private val container: AppContainer) : ViewModel() {
         onSaved: (String) -> Unit,
     ) {
         viewModelScope.launch {
-            repo.addTransaction(date, accountId, assetId, kind, qty, amount, ccy, note)
-                .onSuccess { onSaved(it.message) }
-                .onFailure { fail(it) }
+            _busy.value = true
+            try {
+                repo.addTransaction(date, accountId, assetId, kind, qty, amount, ccy, note)
+                    .onSuccess { onSaved(it.message) }
+                    .onFailure { fail(it) }
+            } finally {
+                _busy.value = false
+            }
         }
     }
 

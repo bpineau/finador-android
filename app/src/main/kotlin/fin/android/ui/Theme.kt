@@ -60,6 +60,14 @@ object FinColors {
         @Composable get() = LocalFinColors.current
 }
 
+/** Colour for a signed figure: gain green / loss red / muted for null. Shared by all screens. */
+@Composable
+fun gainLossColor(value: Double?): Color = when {
+    value == null -> MaterialTheme.colorScheme.onSurfaceVariant
+    value < 0 -> FinColors.current.loss
+    else -> FinColors.current.gain
+}
+
 /** The fixed, dark Material 3 theme. Forces dark; draws the system bars over the dark background. */
 @Composable
 fun FinadorTheme(content: @Composable () -> Unit) {
