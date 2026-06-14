@@ -100,8 +100,12 @@ fun AssetDetailScreen(vm: AppViewModel, assetId: String, onBack: () -> Unit) {
             }
 
             HeaderCard(detail)
-            Sparkline(detail)
-            PeriodsCard(detail)
+            if (detail.kind == "property") {
+                if (detail.valuations.isNotEmpty()) ValuationsCard(detail)
+            } else {
+                Sparkline(detail)
+                PeriodsCard(detail)
+            }
         }
     }
 }
@@ -126,24 +130,54 @@ private fun HeaderCard(d: AssetDetail) {
             color = MaterialTheme.colorScheme.onSurface,
         )
         HorizontalDivider(Modifier.padding(vertical = 4.dp), color = MaterialTheme.colorScheme.outlineVariant)
-        d.ticker?.let { DetailRow("Ticker", it) }
-        d.isin?.let { DetailRow("ISIN", it) }
-        DetailRow("Quantity", "${d.qty.stripTrailingZeros().toPlainString()} units")
-        DetailRow(
-            "Market price",
-            if (d.price != null) "${formatAmount(d.price)} ${d.assetCcy}" else "—",
+        if (d.kind == "property") {
+            d.isin?.let { DetailRow("ISIN", it) }
+            DetailRow(
+                "Purchase / initial value",
+                if (d.costBasis != null) formatMoney(d.costBasis, d.referenceCcy) else "—",
+            )
+            DetailRow("Current value", formatMoney(d.value, d.referenceCcy))
+            UnrealizedRow(d)
+            d.taxRule?.let { DetailRow("Tax", it) }
+            if (d.accounts.isNotEmpty()) DetailRow("Accounts", d.accounts.joinToString(", "))
+        } else {
+            d.ticker?.let { DetailRow("Ticker", it) }
+            d.isin?.let { DetailRow("ISIN", it) }
+            DetailRow("Quantity", "${d.qty.stripTrailingZeros().toPlainString()} units")
+            DetailRow(
+                "Market price",
+                if (d.price != null) "${formatAmount(d.price)} ${d.assetCcy}" else "—",
+            )
+            DetailRow(
+                "Avg buy price",
+                if (d.avgBuyPrice != null) formatMoney(d.avgBuyPrice, d.referenceCcy) else "—",
+            )
+            DetailRow("Value", formatMoney(d.value, d.referenceCcy))
+            DetailRow(
+                "Cost basis",
+                if (d.costBasis != null) formatMoney(d.costBasis, d.referenceCcy) else "—",
+            )
+            UnrealizedRow(d)
+            d.taxRule?.let { DetailRow("Tax", it) }
+            if (d.accounts.isNotEmpty()) DetailRow("Accounts", d.accounts.joinToString(", "))
+        }
+    }
+}
+
+/** Dated declared values (statement history) — shown for property. */
+@Composable
+private fun ValuationsCard(d: AssetDetail) {
+    DetailCard {
+        Text(
+            "Valuations",
+            style = MaterialTheme.typography.titleMedium,
+            fontWeight = FontWeight.SemiBold,
+            color = MaterialTheme.colorScheme.onSurface,
         )
-        DetailRow(
-            "Avg buy price",
-            if (d.avgBuyPrice != null) formatMoney(d.avgBuyPrice, d.referenceCcy) else "—",
-        )
-        DetailRow("Value", formatMoney(d.value, d.referenceCcy))
-        DetailRow(
-            "Cost basis",
-            if (d.costBasis != null) formatMoney(d.costBasis, d.referenceCcy) else "—",
-        )
-        UnrealizedRow(d)
-        if (d.accounts.isNotEmpty()) DetailRow("Accounts", d.accounts.joinToString(", "))
+        HorizontalDivider(Modifier.padding(vertical = 4.dp), color = MaterialTheme.colorScheme.outlineVariant)
+        d.valuations.sortedByDescending { it.date }.forEach { v ->
+            DetailRow(v.date.toString(), "${formatAmount(v.amount)} ${v.ccy}")
+        }
     }
 }
 
