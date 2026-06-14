@@ -4,10 +4,19 @@ import androidx.compose.animation.AnimatedContentTransitionScope.SlideDirection
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.TrendingUp
 import androidx.compose.material.icons.filled.Add
@@ -17,11 +26,9 @@ import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.FloatingActionButton
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.NavigationBar
-import androidx.compose.material3.NavigationBarItem
-import androidx.compose.material3.NavigationBarItemDefaults
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.SnackbarHost
+import androidx.compose.material3.Surface
 import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -30,7 +37,6 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.unit.dp
 import androidx.fragment.app.FragmentActivity
@@ -59,6 +65,44 @@ private enum class TopLevel(val route: String, val label: String, val icon: Imag
     Portfolio(Routes.PORTFOLIO, "Portfolio", Icons.Filled.PieChart),
     Gains(Routes.GAINS, "Gains", Icons.AutoMirrored.Filled.TrendingUp),
     Settings(Routes.SETTINGS, "Settings", Icons.Filled.Settings),
+}
+
+/**
+ * Compact custom bottom bar (~56dp content + the system gesture inset). Built by hand rather than
+ * Material 3's NavigationBar, whose fixed 80dp height clips the icons when forced shorter.
+ */
+@Composable
+private fun CompactBottomBar(isSelected: (String) -> Boolean, onSelect: (String) -> Unit) {
+    Surface(color = MaterialTheme.colorScheme.surface, tonalElevation = 3.dp) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .navigationBarsPadding()
+                .height(56.dp),
+            horizontalArrangement = Arrangement.SpaceAround,
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            TopLevel.entries.forEach { item ->
+                val tint = if (isSelected(item.route)) {
+                    MaterialTheme.colorScheme.primary
+                } else {
+                    MaterialTheme.colorScheme.onSurfaceVariant
+                }
+                Column(
+                    modifier = Modifier
+                        .weight(1f)
+                        .fillMaxHeight()
+                        .clickable { onSelect(item.route) },
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                    verticalArrangement = Arrangement.Center,
+                ) {
+                    Icon(item.icon, contentDescription = item.label, tint = tint, modifier = Modifier.size(24.dp))
+                    Spacer(Modifier.height(3.dp))
+                    Text(item.label, color = tint, style = MaterialTheme.typography.labelSmall)
+                }
+            }
+        }
+    }
 }
 
 @Composable
@@ -103,31 +147,17 @@ private fun ReadyNav(vm: AppViewModel, ready: AppState.Ready, snackbar: Snackbar
         snackbarHost = { SnackbarHost(snackbar) },
         bottomBar = {
             if (onTopLevel) {
-                NavigationBar(modifier = Modifier.height(64.dp)) {
-                    TopLevel.entries.forEach { item ->
-                        val selected = backStack?.destination?.hierarchy?.any { it.route == item.route } == true
-                        NavigationBarItem(
-                            selected = selected,
-                            onClick = {
-                                nav.navigate(item.route) {
-                                    // Single top-level back stack: switching tabs doesn't grow it.
-                                    popUpTo(nav.graph.findStartDestination().id) { saveState = true }
-                                    launchSingleTop = true
-                                    restoreState = true
-                                }
-                            },
-                            icon = { Icon(item.icon, contentDescription = item.label) },
-                            label = { Text(item.label) },
-                            colors = NavigationBarItemDefaults.colors(
-                                selectedIconColor = MaterialTheme.colorScheme.primary,
-                                selectedTextColor = MaterialTheme.colorScheme.primary,
-                                indicatorColor = Color.Transparent,
-                                unselectedIconColor = MaterialTheme.colorScheme.onSurfaceVariant,
-                                unselectedTextColor = MaterialTheme.colorScheme.onSurfaceVariant,
-                            ),
-                        )
-                    }
-                }
+                CompactBottomBar(
+                    isSelected = { route -> backStack?.destination?.hierarchy?.any { it.route == route } == true },
+                    onSelect = { route ->
+                        nav.navigate(route) {
+                            // Single top-level back stack: switching tabs doesn't grow it.
+                            popUpTo(nav.graph.findStartDestination().id) { saveState = true }
+                            launchSingleTop = true
+                            restoreState = true
+                        }
+                    },
+                )
             }
         },
         floatingActionButton = {
