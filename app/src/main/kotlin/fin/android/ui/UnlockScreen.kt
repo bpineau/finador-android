@@ -12,9 +12,9 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material3.Button
+import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -69,7 +69,11 @@ fun UnlockScreen(vm: AppViewModel, activity: FragmentActivity) {
         verticalArrangement = Arrangement.Center,
         horizontalAlignment = Alignment.CenterHorizontally,
     ) {
-        Text("finador", style = MaterialTheme.typography.headlineMedium)
+        Text(
+            "finador",
+            style = MaterialTheme.typography.headlineMedium,
+            fontWeight = androidx.compose.ui.text.font.FontWeight.Bold,
+        )
         Spacer(Modifier.height(24.dp))
         if (available) {
             Button(onClick = { prompt() }, modifier = Modifier.fillMaxWidth()) {
@@ -79,6 +83,7 @@ fun UnlockScreen(vm: AppViewModel, activity: FragmentActivity) {
             Text(
                 "No biometric or device lock is set up. Unlock directly.",
                 style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
             Spacer(Modifier.height(12.dp))
             Button(onClick = { vm.unlock() }, modifier = Modifier.fillMaxWidth()) {
@@ -92,7 +97,7 @@ fun UnlockScreen(vm: AppViewModel, activity: FragmentActivity) {
         }
 
         Spacer(Modifier.height(8.dp))
-        TextButton(onClick = { vm.forget() }) {
+        FilledTonalButton(onClick = { vm.forget() }) {
             Text("Reconfigure (different repo or token)")
         }
     }

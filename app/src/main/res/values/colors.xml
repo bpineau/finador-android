@@ -1,4 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
     <color name="ic_launcher_background">#F7F3EA</color>
+    <!-- Matches the Compose `background` token so the launch window has no white flash. -->
+    <color name="window_background">#0C0D0F</color>
 </resources>
