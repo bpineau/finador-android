@@ -90,12 +90,29 @@ class AppRepository(private val container: AppContainer) {
     suspend fun refreshQuotes() = withContext(Dispatchers.IO) {
         val l = ledger ?: return@withContext
         runCatching {
-            val updated = Quotes.refresh(l.book, market, from = LocalDate.now().minusYears(2), now = LocalDate.now())
+            val ref = container.loadConfig().displayCurrency
+            val updated = Quotes.refresh(
+                l.book, market, from = LocalDate.now().minusYears(2), now = LocalDate.now(),
+                referenceCcy = ref,
+            )
             market = updated
             CacheSidecar.write(container.marketCacheFile(l.fileId), l.cacheKey, updated)
         }
         emitReady(currentSyncState(), message = null, refreshing = false)
     }
+
+    /**
+     * Persists [ccy] as the display currency every value/gain is shown in, then refreshes quotes so
+     * the new currency's FX series is fetched, and re-emits. A blank value clears the override.
+     */
+    suspend fun setDisplayCurrency(ccy: String) = withContext(Dispatchers.IO) {
+        val cfg = container.loadConfig()
+        container.saveConfig(cfg.copy(displayCurrency = ccy.trim().uppercase().ifBlank { null }))
+        refreshQuotes()
+    }
+
+    fun assetDetail(assetId: String): fin.android.valuation.AssetDetail? =
+        ledger?.let { Gains.assetDetail(it.book, market, container.loadConfig().displayCurrency, LocalDate.now(), assetId) }
 
     suspend fun addTransaction(
         date: LocalDate, accountId: String, assetId: String?, kind: TxKind,
@@ -158,22 +175,24 @@ class AppRepository(private val container: AppContainer) {
     private fun emitReady(syncState: SyncState, message: String?, refreshing: Boolean) {
         val l = ledger ?: return
         val today = LocalDate.now()
-        val valuation = Valuator.value(l.book, market, referenceCcy = null, at = today, byGroup = true)
-        val perf = computePerf(l.book, today)
+        val ref = container.loadConfig().displayCurrency // null → engine falls back to book/EUR
+        val valuation = Valuator.value(l.book, market, referenceCcy = ref, at = today, byGroup = true)
+        val perf = computePerf(l.book, today, ref)
         // Gains are a pure read over the same engine; never let them crash the UI.
-        val gains = runCatching { Gains.report(l.book, market, referenceCcy = null, today = today) }.getOrNull()
+        val gains = runCatching { Gains.report(l.book, market, referenceCcy = ref, today = today) }.getOrNull()
         _state.value = AppState.Ready(valuation, perf, gains, l.book, syncState, message, refreshing)
     }
 
     /**
      * Performance over the full available period (from the earliest tx, or one
-     * year back if none) to today. Computed synchronously alongside the valuation;
-     * any failure or undefined result yields null rather than crashing the UI.
+     * year back if none) to today, in [ref] (null falls back to the book's currency).
+     * Computed synchronously alongside the valuation; any failure or undefined result
+     * yields null rather than crashing the UI.
      */
-    private fun computePerf(book: Book, today: LocalDate): PerfMetrics? = runCatching {
+    private fun computePerf(book: Book, today: LocalDate, ref: String?): PerfMetrics? = runCatching {
         val earliest = book.txs.values.minByOrNull { it.date }?.date
         val from = earliest ?: today.minusYears(1)
         if (!from.isBefore(today)) return@runCatching null
-        Perf.metrics(book, market, referenceCcy = null, from = from, to = today)
+        Perf.metrics(book, market, referenceCcy = ref, from = from, to = today)
     }.getOrNull()
 }

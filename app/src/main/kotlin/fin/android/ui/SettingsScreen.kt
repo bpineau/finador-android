@@ -11,15 +11,21 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
@@ -62,6 +68,13 @@ fun SettingsScreen(vm: AppViewModel, ready: AppState.Ready, onBack: () -> Unit) 
 
             Card(modifier = Modifier.fillMaxWidth()) {
                 Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Text("Display", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
+                    DisplayCurrencyRow(vm)
+                }
+            }
+
+            Card(modifier = Modifier.fillMaxWidth()) {
+                Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                     Text("Sync", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
                     InfoRow("State", if (sync.dirty) "Unpushed changes" else "Clean")
                     InfoRow("Last pull", sync.lastPull ?: "—")
@@ -91,6 +104,42 @@ fun SettingsScreen(vm: AppViewModel, ready: AppState.Ready, onBack: () -> Unit) 
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
+        }
+    }
+}
+
+/** Common display-currency codes offered in the Settings dropdown. */
+private val DISPLAY_CURRENCIES = listOf("EUR", "USD", "GBP", "CHF", "JPY", "CAD", "AUD")
+
+@Composable
+private fun DisplayCurrencyRow(vm: AppViewModel) {
+    var current by remember { mutableStateOf(vm.displayCurrency()) }
+    var expanded by remember { mutableStateOf(false) }
+    Row(
+        Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.SpaceBetween,
+    ) {
+        Text(
+            "Display currency",
+            style = MaterialTheme.typography.bodyMedium,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+        Column {
+            OutlinedButton(onClick = { expanded = true }) { Text(current) }
+            DropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }) {
+                for (code in DISPLAY_CURRENCIES) {
+                    DropdownMenuItem(
+                        text = { Text(code) },
+                        onClick = {
+                            expanded = false
+                            if (code != current) {
+                                current = code
+                                vm.setDisplayCurrency(code)
+                            }
+                        },
+                    )
+                }
+            }
         }
     }
 }

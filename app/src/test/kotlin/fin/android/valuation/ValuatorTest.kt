@@ -147,6 +147,20 @@ class ValuatorTest {
     }
 
     /**
+     * Display-currency override: the same all-EUR book valued in EUR vs USD with 1 EUR = 1.20 USD.
+     * The whole-book gross in USD must equal the EUR gross × 1.20 (a flat-FX book scales exactly).
+     */
+    @Test fun displayCurrencyOverrideScalesValue() {
+        val (book, market) = valuationBook()
+        val withFx = market.copy(fx = mapOf("EUR" to PriceSeries(listOf(PricePoint(d("2026-01-01"), 1.20)))))
+        val eur = Valuator.value(book, withFx, referenceCcy = "EUR", at = d("2026-06-05"))
+        val usd = Valuator.value(book, withFx, referenceCcy = "USD", at = d("2026-06-05"))
+        assertEquals("EUR", eur.referenceCcy)
+        assertEquals("USD", usd.referenceCcy)
+        assertEquals(eur.gross * 1.20, usd.gross, eur.gross * 1.20 * 1e-9)
+    }
+
+    /**
      * TestValueAutoDividends: a Yahoo dividend of 2/share on cw8, ex-date 2026-03-01.
      *   PEA holds 15 shares at Mar 1 (10+5 bought, sell on Mar 15 is later) → +30 EUR cash.
      *   PEA gross = 6720 + 4050 + 30.
