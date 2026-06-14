@@ -6,6 +6,7 @@ import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.TrendingUp
@@ -31,6 +32,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.unit.dp
 import androidx.fragment.app.FragmentActivity
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.navigation.NavDestination.Companion.hierarchy
@@ -101,7 +103,7 @@ private fun ReadyNav(vm: AppViewModel, ready: AppState.Ready, snackbar: Snackbar
         snackbarHost = { SnackbarHost(snackbar) },
         bottomBar = {
             if (onTopLevel) {
-                NavigationBar {
+                NavigationBar(modifier = Modifier.height(64.dp)) {
                     TopLevel.entries.forEach { item ->
                         val selected = backStack?.destination?.hierarchy?.any { it.route == item.route } == true
                         NavigationBarItem(
