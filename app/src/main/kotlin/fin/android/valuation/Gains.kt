@@ -243,13 +243,16 @@ object Gains {
         referenceCcy: String? = null,
         today: LocalDate,
         assetId: String,
+        allPositions: List<Position>? = null,
     ): AssetDetail? {
         val ccy = referenceCcy ?: book.config["currency"] ?: "EUR"
         val asset = book.assets[assetId] ?: return null
 
-        // Held-security positions of this asset (today's valuation), with their account names.
-        val positions = Valuator.value(book, market, referenceCcy = ccy, at = today)
-            .positions.filter { it.kind == "security" && it.assetId == assetId }
+        // Held-security positions of this asset, with their account names. Callers that already have
+        // today's valuation (e.g. precomputing every asset detail) pass its positions to avoid
+        // re-folding the book once per asset.
+        val valuationPositions = allPositions ?: Valuator.value(book, market, referenceCcy = ccy, at = today).positions
+        val positions = valuationPositions.filter { it.kind == "security" && it.assetId == assetId }
         val qtyNow = positions.fold(BigDecimal.ZERO) { acc, p -> acc + p.qty }
         if (qtyNow.signum() <= 0) return null // not a held security
         val accounts = positions.map { it.accountName }.distinct()
