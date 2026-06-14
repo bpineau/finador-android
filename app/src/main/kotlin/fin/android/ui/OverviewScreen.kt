@@ -17,18 +17,40 @@ import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
+import androidx.compose.material3.PrimaryTabRow
+import androidx.compose.material3.Tab
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import fin.android.data.AppState
+import fin.android.valuation.AssetGain
+import fin.android.valuation.GainsReport
+import fin.android.valuation.PeriodGain
 import fin.android.valuation.PerfMetrics
 import fin.android.valuation.Position
 import fin.android.valuation.ValuationLine
+
+/** Gain green; loss reuses the theme error red (read via MaterialTheme at call sites). */
+private val GainGreen = Color(0xFF1B873F)
+
+@Composable
+private fun gainColor(value: Double?): Color = when {
+    value == null -> MaterialTheme.colorScheme.onSurfaceVariant
+    value < 0 -> MaterialTheme.colorScheme.error
+    else -> GainGreen
+}
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -38,7 +60,7 @@ fun OverviewScreen(
     onAddTx: () -> Unit,
     onSettings: () -> Unit,
 ) {
-    val v = ready.valuation
+    var tab by rememberSaveable { mutableIntStateOf(0) }
     Scaffold(
         topBar = {
             TopAppBar(
@@ -60,46 +82,177 @@ fun OverviewScreen(
             )
         },
     ) { padding ->
-        LazyColumn(
-            modifier = Modifier
-                .padding(padding)
-                .fillMaxWidth(),
-            contentPadding = androidx.compose.foundation.layout.PaddingValues(16.dp),
-            verticalArrangement = Arrangement.spacedBy(12.dp),
-        ) {
+        Column(modifier = Modifier.padding(padding).fillMaxWidth()) {
+            PrimaryTabRow(selectedTabIndex = tab) {
+                Tab(selected = tab == 0, onClick = { tab = 0 }, text = { Text("Portfolio") })
+                Tab(selected = tab == 1, onClick = { tab = 1 }, text = { Text("Gains") })
+            }
             if (ready.refreshing) {
-                item { LinearProgressIndicator(modifier = Modifier.fillMaxWidth()) }
+                LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
             }
+            when (tab) {
+                0 -> PortfolioTab(ready)
+                else -> GainsTab(ready)
+            }
+        }
+    }
+}
 
-            item { SyncBanner(ready) }
+@Composable
+private fun PortfolioTab(ready: AppState.Ready) {
+    val v = ready.valuation
+    LazyColumn(
+        modifier = Modifier.fillMaxWidth(),
+        contentPadding = androidx.compose.foundation.layout.PaddingValues(16.dp),
+        verticalArrangement = Arrangement.spacedBy(12.dp),
+    ) {
+        item { SyncBanner(ready) }
 
-            item { TotalCard(v.gross, v.tax, v.net, v.referenceCcy) }
+        item { TotalCard(v.gross, v.tax, v.net, v.referenceCcy) }
 
-            if (v.taxNote != null) {
-                item {
-                    Text(
-                        v.taxNote!!,
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
+        if (v.taxNote != null) {
+            item {
+                Text(
+                    v.taxNote!!,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+        }
+
+        if (ready.perf != null) {
+            item { PerfCard(ready.perf) }
+        }
+
+        if (v.lines.isNotEmpty()) {
+            item { SectionHeader("Breakdown") }
+            items(v.lines) { line -> LineRow(line, v.referenceCcy) }
+        }
+
+        if (v.positions.isNotEmpty()) {
+            item { SectionHeader("Positions") }
+            items(v.positions) { p -> PositionRow(p, v.referenceCcy) }
+        }
+
+        item { Spacer(Modifier.height(72.dp)) } // clearance for the FAB
+    }
+}
+
+@Composable
+private fun GainsTab(ready: AppState.Ready) {
+    val gains = ready.gains
+    LazyColumn(
+        modifier = Modifier.fillMaxWidth(),
+        contentPadding = androidx.compose.foundation.layout.PaddingValues(16.dp),
+        verticalArrangement = Arrangement.spacedBy(12.dp),
+    ) {
+        if (gains == null) {
+            item {
+                Text(
+                    "Gains are unavailable — refresh quotes to compute them.",
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+            return@LazyColumn
+        }
+
+        item { SectionHeader("Portfolio gains") }
+        // Two-column grid of compact period cards.
+        items(gains.periods.chunked(2)) { pair ->
+            Row(
+                Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(12.dp),
+            ) {
+                for (pg in pair) {
+                    PeriodCard(pg, gains.referenceCcy, Modifier.weight(1f))
                 }
+                if (pair.size == 1) Spacer(Modifier.weight(1f))
             }
+        }
 
-            if (ready.perf != null) {
-                item { PerfCard(ready.perf) }
+        if (gains.assets.isNotEmpty()) {
+            item { SectionHeader("Per-asset gains") }
+            item { AssetGainHeader() }
+            items(gains.assets) { a -> AssetGainRow(a, gains.referenceCcy) }
+            item {
+                Text(
+                    "Per-asset gains approximate a price/FX move on the current quantity; " +
+                        "intra-period buys/sells are not attributed.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
             }
+        }
 
-            if (v.lines.isNotEmpty()) {
-                item { SectionHeader("Breakdown") }
-                items(v.lines) { line -> LineRow(line, v.referenceCcy) }
-            }
+        item { Spacer(Modifier.height(72.dp)) } // clearance for the FAB
+    }
+}
 
-            if (v.positions.isNotEmpty()) {
-                item { SectionHeader("Positions") }
-                items(v.positions) { p -> PositionRow(p, v.referenceCcy) }
-            }
+@Composable
+private fun PeriodCard(pg: PeriodGain, ccy: String, modifier: Modifier = Modifier) {
+    Card(modifier = modifier.fillMaxWidth()) {
+        Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+            Text(pg.label, style = MaterialTheme.typography.labelMedium)
+            Text(
+                formatSignedPercent(pg.relative),
+                style = MaterialTheme.typography.titleMedium,
+                fontWeight = FontWeight.SemiBold,
+                color = gainColor(pg.relative),
+            )
+            Text(
+                formatSignedMoney(pg.absolute, ccy),
+                style = MaterialTheme.typography.bodySmall,
+                color = gainColor(pg.absolute),
+            )
+        }
+    }
+}
 
-            item { Spacer(Modifier.height(72.dp)) } // clearance for the FAB
+@Composable
+private fun AssetGainHeader() {
+    Row(Modifier.fillMaxWidth().padding(vertical = 4.dp)) {
+        Text(
+            "Asset",
+            modifier = Modifier.weight(1.4f),
+            style = MaterialTheme.typography.labelMedium,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+        for (h in listOf("1d", "7d", "1m", "1y")) {
+            Text(
+                h,
+                modifier = Modifier.weight(1f),
+                textAlign = TextAlign.End,
+                style = MaterialTheme.typography.labelMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
+    }
+}
+
+@Composable
+private fun AssetGainRow(a: AssetGain, ccy: String) {
+    Row(
+        Modifier.fillMaxWidth().padding(vertical = 6.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Text(
+            a.name,
+            modifier = Modifier.weight(1.4f),
+            style = MaterialTheme.typography.bodyMedium,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+        )
+        for (cell in listOf(a.d1, a.d7, a.m1, a.y1)) {
+            Text(
+                formatSignedMoney(cell, ccy),
+                modifier = Modifier.weight(1f),
+                textAlign = TextAlign.End,
+                style = MaterialTheme.typography.bodySmall,
+                color = gainColor(cell),
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
         }
     }
 }

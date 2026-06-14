@@ -12,6 +12,7 @@ import fin.android.remote.RemoteConfig
 import fin.android.remote.RemoteError
 import fin.android.remote.SyncOutcome
 import fin.android.remote.SyncState
+import fin.android.valuation.Gains
 import fin.android.valuation.Perf
 import fin.android.valuation.PerfMetrics
 import fin.android.valuation.Valuator
@@ -46,12 +47,12 @@ class AppRepository(private val container: AppContainer) {
     suspend fun onboard(
         owner: String, repo: String, path: String, branch: String, token: String, pass: String,
     ): Result<Unit> = withContext(Dispatchers.IO) {
+        val cfg = RemoteConfig(
+            source = "github",
+            github = GithubConfig(owner.trim(), repo.trim(), path.trim().ifBlank { "portfolio.fin" }, branch.trim().ifBlank { "main" }),
+            readPullAfter = "1h",
+        )
         runCatching {
-            val cfg = RemoteConfig(
-                source = "github",
-                github = GithubConfig(owner.trim(), repo.trim(), path.trim().ifBlank { "portfolio.fin" }, branch.trim().ifBlank { "main" }),
-                readPullAfter = "1h",
-            )
             container.saveConfig(cfg)
             container.secretStore.putPat(token.trim())
             container.secretStore.putPassphrase(pass)
@@ -63,9 +64,17 @@ class AppRepository(private val container: AppContainer) {
             if (!wc.exists()) {
                 wc.parentFile?.mkdirs()
                 wc.writeBytes(Ledger.create(pass).toBytes())
-                try { sync.sync(pass) } catch (e: RemoteError) { /* offline/missing — keep local, push later */ }
+                sync.sync(pass) // first push; auth/permission errors surface here, not swallowed
             }
             unlockInternal(cfg, pass)
+        }.onFailure {
+            // A failed first connect must not strand the user on a Locked screen with saved-but-bad
+            // settings: roll back everything so the app returns to the editable onboarding form.
+            container.workingCopy(cfg).delete()
+            container.clearConfig()
+            container.secretStore.purge()
+            passphrase = null
+            ledger = null
         }
     }
 
@@ -151,7 +160,9 @@ class AppRepository(private val container: AppContainer) {
         val today = LocalDate.now()
         val valuation = Valuator.value(l.book, market, referenceCcy = null, at = today, byGroup = true)
         val perf = computePerf(l.book, today)
-        _state.value = AppState.Ready(valuation, perf, l.book, syncState, message, refreshing)
+        // Gains are a pure read over the same engine; never let them crash the UI.
+        val gains = runCatching { Gains.report(l.book, market, referenceCcy = null, today = today) }.getOrNull()
+        _state.value = AppState.Ready(valuation, perf, gains, l.book, syncState, message, refreshing)
     }
 
     /**

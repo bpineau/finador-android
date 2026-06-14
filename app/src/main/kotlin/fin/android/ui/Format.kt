@@ -24,3 +24,20 @@ fun formatPercent(fraction: Double?): String =
 
 /** Formats a unitless ratio (e.g. Sharpe) with two decimals; null → "—". */
 fun formatRatio(value: Double?): String = if (value == null) "—" else ratioFormat.format(value)
+
+/**
+ * Formats a signed money amount: "+1 234.56 CCY" / "−1 234.56 CCY"; null → "—".
+ * Uses a real minus sign and a leading "+" so a gain reads as such at a glance.
+ */
+fun formatSignedMoney(value: Double?, ccy: String): String {
+    if (value == null) return "—"
+    val sign = if (value < 0) "−" else "+"
+    return "$sign${moneyFormat.format(kotlin.math.abs(value))} $ccy"
+}
+
+/** Formats a signed percentage fraction: "+12.3%" / "−4.5%"; null → "—". */
+fun formatSignedPercent(fraction: Double?): String {
+    if (fraction == null) return "—"
+    val sign = if (fraction < 0) "−" else "+"
+    return "$sign${percentFormat.format(kotlin.math.abs(fraction) * 100)}%"
+}

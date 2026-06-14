@@ -14,6 +14,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.material3.Button
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -25,6 +26,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import androidx.core.content.ContextCompat
 import androidx.fragment.app.FragmentActivity
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 
 private const val ALLOWED = BIOMETRIC_WEAK or DEVICE_CREDENTIAL
 
@@ -37,6 +39,7 @@ fun UnlockScreen(vm: AppViewModel, activity: FragmentActivity) {
         BiometricManager.from(activity).canAuthenticate(ALLOWED) == BiometricManager.BIOMETRIC_SUCCESS
     }
     var prompted by remember { mutableStateOf(false) }
+    val error by vm.message.collectAsStateWithLifecycle()
 
     fun prompt() {
         prompted = true
@@ -81,6 +84,16 @@ fun UnlockScreen(vm: AppViewModel, activity: FragmentActivity) {
             Button(onClick = { vm.unlock() }, modifier = Modifier.fillMaxWidth()) {
                 Text("Unlock")
             }
+        }
+
+        error?.let {
+            Spacer(Modifier.height(16.dp))
+            Text(it, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall)
+        }
+
+        Spacer(Modifier.height(8.dp))
+        TextButton(onClick = { vm.forget() }) {
+            Text("Reconfigure (different repo or token)")
         }
     }
 }
