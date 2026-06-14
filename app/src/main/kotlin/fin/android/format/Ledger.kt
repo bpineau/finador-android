@@ -21,6 +21,12 @@ class Ledger internal constructor(
     internal val entries: List<Entry>,
     val book: Book,
 ) {
+    /** The file's stable id (header), used to name the per-ledger market cache sidecar. */
+    val fileId: ByteArray get() = header.id
+
+    /** The cache subkey, for the regenerable market sidecar (never the ledger key). */
+    val cacheKey: ByteArray get() = keys.cache
+
     /** Serializes to the on-disk `.fin` bytes (verbatim record prefix + freshly sealed trailer). */
     fun toBytes(): ByteArray = Writer.serialize(header, keys, entries)
 
