@@ -31,6 +31,10 @@ class AppViewModel(private val container: AppContainer) : ViewModel() {
     /** Transient text for a snackbar (errors and outcome messages). */
     val message: StateFlow<String?> = _message.asStateFlow()
 
+    private val _busy = MutableStateFlow(false)
+    /** True while a long operation (onboard/unlock) runs, so screens can show a spinner. */
+    val busy: StateFlow<Boolean> = _busy.asStateFlow()
+
     init {
         start()
     }
@@ -53,22 +57,33 @@ class AppViewModel(private val container: AppContainer) : ViewModel() {
     }
 
     private fun fail(e: Throwable) {
+        android.util.Log.w("finador", "operation failed", e)
         _message.value = e.message ?: e.javaClass.simpleName
     }
 
     fun onboard(owner: String, repo: String, path: String, branch: String, token: String, pass: String) {
         viewModelScope.launch {
-            this@AppViewModel.repo.onboard(owner, repo, path, branch, token, pass)
-                .onSuccess { refreshQuotes() }
-                .onFailure { fail(it) }
+            _busy.value = true
+            try {
+                this@AppViewModel.repo.onboard(owner, repo, path, branch, token, pass)
+                    .onSuccess { refreshQuotes() }
+                    .onFailure { fail(it) }
+            } finally {
+                _busy.value = false
+            }
         }
     }
 
     fun unlock() {
         viewModelScope.launch {
-            repo.unlock()
-                .onSuccess { refreshQuotes() }
-                .onFailure { fail(it) }
+            _busy.value = true
+            try {
+                repo.unlock()
+                    .onSuccess { refreshQuotes() }
+                    .onFailure { fail(it) }
+            } finally {
+                _busy.value = false
+            }
         }
     }
 
