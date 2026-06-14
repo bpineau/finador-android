@@ -12,7 +12,9 @@ package fin.android.valuation
 
 import fin.android.domain.Book
 import fin.android.domain.MarketData
+import fin.android.domain.PricePoint
 import fin.android.market.Converter
+import java.math.BigDecimal
 import java.time.LocalDate
 
 /** One portfolio period figure. [relative] is a fraction (TWR), null if undefined. */
@@ -25,12 +27,36 @@ data class PeriodGain(val label: String, val absolute: Double, val relative: Dou
  * intra-window-quantity caveat.
  */
 data class AssetGain(
+    val assetId: String,
     val name: String,
     val ccy: String,
     val d1: Double?,
     val d7: Double?,
     val m1: Double?,
     val y1: Double?,
+)
+
+/** One per-asset period figure for the detail page: a % and an absolute, both in the ref ccy. */
+data class AssetPeriodGain(val label: String, val relative: Double?, val absolute: Double) // ref ccy
+
+/**
+ * The single-asset detail the [AssetDetailScreen] renders. A simplified, price/FX-move view of
+ * one held security: current holding, current ref-ccy value, period %/absolute gains, and a short
+ * ref-ccy price history for a sparkline. No TWR/XIRR/CAGR/Sharpe — pure price math.
+ */
+data class AssetDetail(
+    val assetId: String,
+    val name: String,
+    val ticker: String?,
+    val isin: String?,
+    val assetCcy: String,
+    val referenceCcy: String,
+    val qty: BigDecimal,
+    val price: Double?, // native-ccy close at `today`
+    val value: Double, // value in ref ccy (now)
+    val accounts: List<String>, // account names holding it
+    val periods: List<AssetPeriodGain>, // 1d,3d,5d,7d,1m,6m,1y,YTD
+    val priceHistory: List<PricePoint>, // last ~120 pts, ref-ccy price, for a sparkline
 )
 
 /** The full report the UI renders. */
@@ -131,6 +157,7 @@ object Gains {
                 assetGain(market, converter, assetId, asset.ccy, ccy, qtyNow, then, today)
             val name = asset.ticker ?: asset.name
             AssetGain(
+                assetId = assetId,
                 name = name,
                 ccy = asset.ccy,
                 d1 = gain(today.minusDays(1)),
@@ -179,5 +206,85 @@ object Gains {
         val close = market.prices[assetId]?.at(d)?.first ?: return null
         val rate = converter.rate(assetCcy, ref, d) ?: return null
         return close * rate
+    }
+
+    // ---- per-asset detail page ----
+
+    /** Detail-page period windows, in display order: label → the day `then` is computed from `today`. */
+    private fun assetWindows(today: LocalDate): List<Pair<String, LocalDate>> = listOf(
+        "1d" to today.minusDays(1),
+        "3d" to today.minusDays(3),
+        "5d" to today.minusDays(5),
+        "7d" to today.minusDays(7),
+        "1m" to today.minusMonths(1),
+        "6m" to today.minusMonths(6),
+        "1y" to today.minusYears(1),
+        "YTD" to LocalDate.of(today.year, 1, 1),
+    )
+
+    /** How many trailing price points the sparkline keeps. */
+    private const val PRICE_HISTORY_POINTS = 120
+
+    /**
+     * Builds the simplified [AssetDetail] for [assetId] as of [today], in [referenceCcy] (defaults
+     * to `book.config["currency"]` then "EUR"). Only period % increase + absolute gain are computed
+     * — no TWR/XIRR/CAGR/Sharpe. Returns null when the asset is not a currently-held security.
+     *
+     * Per period: relative = priceRef(today)/priceRef(then) − 1 (null if either endpoint price/FX
+     * is missing); absolute = qtyNow × (priceRef(today) − priceRef(then)). priceRef(d) is the asset's
+     * native close at d × FX(assetCcy→ref, d).
+     */
+    fun assetDetail(
+        book: Book,
+        market: MarketData,
+        referenceCcy: String? = null,
+        today: LocalDate,
+        assetId: String,
+    ): AssetDetail? {
+        val ccy = referenceCcy ?: book.config["currency"] ?: "EUR"
+        val asset = book.assets[assetId] ?: return null
+
+        // Held-security positions of this asset (today's valuation), with their account names.
+        val positions = Valuator.value(book, market, referenceCcy = ccy, at = today)
+            .positions.filter { it.kind == "security" && it.assetId == assetId }
+        val qtyNow = positions.fold(BigDecimal.ZERO) { acc, p -> acc + p.qty }
+        if (qtyNow.signum() <= 0) return null // not a held security
+        val accounts = positions.map { it.accountName }.distinct()
+
+        val converter = Converter(market.fx)
+        val qty = qtyNow.toDouble()
+        val priceNow = market.prices[assetId]?.at(today)?.first
+        val valueRefToday = priceRef(market, converter, assetId, asset.ccy, ccy, today)
+        val value = if (valueRefToday != null) qty * valueRefToday else 0.0
+
+        val periods = assetWindows(today).map { (label, then) ->
+            val pThen = priceRef(market, converter, assetId, asset.ccy, ccy, then)
+            val pToday = valueRefToday
+            val relative = if (pThen != null && pToday != null && pThen != 0.0) pToday / pThen - 1 else null
+            val absolute = if (pThen != null && pToday != null) qty * (pToday - pThen) else 0.0
+            AssetPeriodGain(label, relative, absolute)
+        }
+
+        // Ref-ccy price history (last ~120 points), skipping any day missing an FX rate.
+        val series = market.prices[assetId]?.points ?: emptyList()
+        val priceHistory = series.takeLast(PRICE_HISTORY_POINTS).mapNotNull { pt ->
+            val rate = converter.rate(asset.ccy, ccy, pt.date) ?: return@mapNotNull null
+            PricePoint(pt.date, pt.close * rate)
+        }
+
+        return AssetDetail(
+            assetId = assetId,
+            name = asset.name,
+            ticker = asset.ticker,
+            isin = asset.isin,
+            assetCcy = asset.ccy,
+            referenceCcy = ccy,
+            qty = qtyNow,
+            price = priceNow,
+            value = value,
+            accounts = accounts,
+            periods = periods,
+            priceHistory = priceHistory,
+        )
     }
 }

@@ -11,6 +11,7 @@ private val moneySymbols = DecimalFormatSymbols(Locale.US).apply {
 private val moneyFormat = DecimalFormat("#,##0.00", moneySymbols)
 private val percentFormat = DecimalFormat("#,##0.0#", moneySymbols)
 private val ratioFormat = DecimalFormat("#,##0.00", moneySymbols)
+private val gainCellFormat = DecimalFormat("#,##0.0", moneySymbols)
 
 /** Formats a Double as "1 234.56 CCY" (thousands-grouped, two decimals). */
 fun formatMoney(value: Double, ccy: String): String = "${moneyFormat.format(value)} $ccy"
@@ -41,3 +42,17 @@ fun formatSignedPercent(fraction: Double?): String {
     val sign = if (fraction < 0) "−" else "+"
     return "$sign${percentFormat.format(kotlin.math.abs(fraction) * 100)}%"
 }
+
+/**
+ * Compact gains-table cell: grouped thousands, exactly one decimal, a leading minus for negatives,
+ * NO leading "+" and NO currency code (the column's currency is implicit). E.g. 1234.56 → "1 234.6",
+ * −12.34 → "-12.3", 0.04 → "0.0".
+ */
+fun formatGainCell(value: Double): String = gainCellFormat.format(value)
+
+/** Like [formatGainCell] but null → "—". */
+fun formatGainCellOrDash(value: Double?): String = if (value == null) "—" else gainCellFormat.format(value)
+
+/** A percentage with exactly one decimal, no "+", no currency; null → "—". E.g. 0.123 → "12.3%". */
+fun formatGainPercent(fraction: Double?): String =
+    if (fraction == null) "—" else "${gainCellFormat.format(fraction * 100)}%"

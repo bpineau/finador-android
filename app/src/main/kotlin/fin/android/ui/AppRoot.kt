@@ -14,15 +14,19 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.fragment.app.FragmentActivity
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import androidx.navigation.NavType
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.compose.rememberNavController
+import androidx.navigation.navArgument
 import fin.android.data.AppState
 
 object Routes {
     const val OVERVIEW = "overview"
     const val TX_ENTRY = "txentry"
     const val SETTINGS = "settings"
+    const val ASSET = "asset/{assetId}"
+    fun asset(assetId: String) = "asset/$assetId"
 }
 
 @Composable
@@ -64,6 +68,18 @@ private fun ReadyNav(vm: AppViewModel, ready: AppState.Ready) {
                 ready = ready,
                 onAddTx = { nav.navigate(Routes.TX_ENTRY) },
                 onSettings = { nav.navigate(Routes.SETTINGS) },
+                onAssetClick = { id -> nav.navigate(Routes.asset(id)) },
+            )
+        }
+        composable(
+            Routes.ASSET,
+            arguments = listOf(navArgument("assetId") { type = NavType.StringType }),
+        ) { entry ->
+            val assetId = entry.arguments?.getString("assetId").orEmpty()
+            AssetDetailScreen(
+                vm = vm,
+                assetId = assetId,
+                onBack = { nav.popBackStack() },
             )
         }
         composable(Routes.TX_ENTRY) {
