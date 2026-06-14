@@ -3,14 +3,20 @@ package fin.android.format
 import java.time.Instant
 import java.time.ZoneOffset
 import java.time.format.DateTimeFormatter
+import java.util.Locale
 
 /**
  * RFC 3339 with nanoseconds in UTC, formatted exactly like Go's time.RFC3339Nano (trailing zeros
  * of the fraction trimmed; no fraction when zero). Keeping the same shape as the reference writer
  * makes the `ts` field — the merge last-writer-wins key — compare consistently across clients.
+ *
+ * Locale.ROOT everywhere: this string is sealed into the file and used as the LWW sort key, so the
+ * digits must be ASCII 0-9 regardless of the device locale (an Arabic/Persian locale would otherwise
+ * emit non-Latin digits and corrupt the timestamp).
  */
 internal object Rfc3339 {
-    private val secs = DateTimeFormatter.ofPattern("yyyy-MM-dd'T'HH:mm:ss").withZone(ZoneOffset.UTC)
+    private val secs =
+        DateTimeFormatter.ofPattern("yyyy-MM-dd'T'HH:mm:ss", Locale.ROOT).withZone(ZoneOffset.UTC)
 
     fun now(): String = format(Instant.now())
 
@@ -18,7 +24,7 @@ internal object Rfc3339 {
         val head = secs.format(instant)
         val nanos = instant.atOffset(ZoneOffset.UTC).nano
         if (nanos == 0) return "${head}Z"
-        val frac = "%09d".format(nanos).trimEnd('0')
+        val frac = String.format(Locale.ROOT, "%09d", nanos).trimEnd('0')
         return "$head.${frac}Z"
     }
 }

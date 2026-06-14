@@ -2,6 +2,7 @@ package fin.android.market
 
 import fin.android.domain.AssetKind
 import fin.android.domain.Book
+import fin.android.domain.DividendEvent
 import fin.android.domain.MarketData
 import fin.android.domain.PriceSeries
 import java.time.LocalDate
@@ -35,7 +36,14 @@ object Quotes {
             if (asset.ticker == null && asset.isin == null) continue
             val daily = multi.daily(Ref(asset.ticker, asset.isin), from) ?: continue
             prices[asset.id] = (prices[asset.id] ?: PriceSeries()).merge(daily.closes).copy(fetchedAt = now)
-            if (daily.dividends.isNotEmpty()) dividends[asset.id] = daily.dividends
+            if (daily.dividends.isNotEmpty()) {
+                // Upsert by ex-date (mirror Go's mergeDividends): an incremental fetch returns only a
+                // recent window, so overwriting would drop previously-cached historical dividends.
+                val byDate = LinkedHashMap<LocalDate, DividendEvent>()
+                for (d in dividends[asset.id].orEmpty()) byDate[d.exDate] = d
+                for (d in daily.dividends) byDate[d.exDate] = d
+                dividends[asset.id] = byDate.values.sortedBy { it.exDate }
+            }
             daily.currency?.let { currencies.add(it) }
         }
         for (account in book.accounts.values) currencies.add(account.ccy)
