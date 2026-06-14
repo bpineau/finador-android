@@ -1,0 +1,19 @@
+# Android / Gradle
+.gradle/
+build/
+/captures/
+local.properties
+*.apk
+*.aab
+*.keystore
+*.jks
+
+# IDE
+.idea/
+*.iml
+
+# OS
+.DS_Store
+
+# Never commit a real ledger or any secrets
+*.fin
