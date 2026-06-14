@@ -12,6 +12,8 @@ import fin.android.remote.RemoteConfig
 import fin.android.remote.RemoteError
 import fin.android.remote.SyncOutcome
 import fin.android.remote.SyncState
+import fin.android.valuation.Perf
+import fin.android.valuation.PerfMetrics
 import fin.android.valuation.Valuator
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -146,7 +148,21 @@ class AppRepository(private val container: AppContainer) {
 
     private fun emitReady(syncState: SyncState, message: String?, refreshing: Boolean) {
         val l = ledger ?: return
-        val valuation = Valuator.value(l.book, market, referenceCcy = null, at = LocalDate.now(), byGroup = true)
-        _state.value = AppState.Ready(valuation, l.book, syncState, message, refreshing)
+        val today = LocalDate.now()
+        val valuation = Valuator.value(l.book, market, referenceCcy = null, at = today, byGroup = true)
+        val perf = computePerf(l.book, today)
+        _state.value = AppState.Ready(valuation, perf, l.book, syncState, message, refreshing)
     }
+
+    /**
+     * Performance over the full available period (from the earliest tx, or one
+     * year back if none) to today. Computed synchronously alongside the valuation;
+     * any failure or undefined result yields null rather than crashing the UI.
+     */
+    private fun computePerf(book: Book, today: LocalDate): PerfMetrics? = runCatching {
+        val earliest = book.txs.values.minByOrNull { it.date }?.date
+        val from = earliest ?: today.minusYears(1)
+        if (!from.isBefore(today)) return@runCatching null
+        Perf.metrics(book, market, referenceCcy = null, from = from, to = today)
+    }.getOrNull()
 }
