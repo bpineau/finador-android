@@ -10,9 +10,11 @@
 // Nothing here changes existing semantics; it only reads the engine.
 package fin.android.valuation
 
+import fin.android.domain.AssetKind
 import fin.android.domain.Book
 import fin.android.domain.MarketData
 import fin.android.domain.PricePoint
+import fin.android.domain.TxKind
 import fin.android.market.Converter
 import java.math.BigDecimal
 import java.time.LocalDate
@@ -59,11 +61,17 @@ data class AssetDetail(
     val priceHistory: List<PricePoint>, // full ref-ccy price history, for the sparkline + range selector
     // Cost basis (average-cost), in the reference currency. Populated for gains-taxed envelopes;
     // null for value-taxed / untaxed accounts where the engine tracks no basis.
-    val costBasis: Double? = null, // total cost basis, ref ccy
-    val avgBuyPrice: Double? = null, // costBasis / qty, ref ccy per unit
+    val costBasis: Double? = null, // total cost basis / purchase value, ref ccy
+    val avgBuyPrice: Double? = null, // costBasis / qty, ref ccy per unit (securities only)
     val unrealized: Double? = null, // value − costBasis, ref ccy
     val unrealizedPct: Double? = null, // unrealized / costBasis, fraction
+    val kind: String = "security", // "security" | "property"
+    val taxRule: String? = null, // applicable tax envelope(s), e.g. "gains:30%"
+    val valuations: List<AssetValuation> = emptyList(), // dated declared values (property statements)
 )
+
+/** One dated declared value of an asset (a statement), shown as native amount. */
+data class AssetValuation(val date: java.time.LocalDate, val amount: Double, val ccy: String)
 
 /** The full report the UI renders. */
 data class GainsReport(
@@ -248,16 +256,50 @@ object Gains {
         val ccy = referenceCcy ?: book.config["currency"] ?: "EUR"
         val asset = book.assets[assetId] ?: return null
 
-        // Held-security positions of this asset, with their account names. Callers that already have
-        // today's valuation (e.g. precomputing every asset detail) pass its positions to avoid
-        // re-folding the book once per asset.
+        // Callers that already have today's valuation (e.g. precomputing every asset detail) pass its
+        // positions to avoid re-folding the book once per asset.
         val valuationPositions = allPositions ?: Valuator.value(book, market, referenceCcy = ccy, at = today).positions
+        val converter = Converter(market.fx)
+
+        // Applicable tax envelope(s) and the dated declared values (statements) — for any kind.
+        val taxRule = valuationPositions
+            .filter { it.assetId == assetId }
+            .mapNotNull { book.accounts[it.accountId]?.tax?.toWire() }
+            .distinct().takeIf { it.isNotEmpty() }?.joinToString(", ")
+        val stmts = book.txs.values
+            .filter { it.kind == TxKind.statement && it.asset == assetId }
+            .sortedBy { it.date }
+        val valuations = stmts.map { AssetValuation(it.date, it.amount.amount.toDouble(), it.amount.ccy) }
+
+        if (asset.kind == AssetKind.PROPERTY) {
+            val positions = valuationPositions.filter { it.kind == "property" && it.assetId == assetId }
+            if (positions.isEmpty()) return null // declared but unvalued
+            val value = positions.sumOf { it.gross }
+            val bases = positions.mapNotNull { it.costBasis }
+            // Purchase / initial value: the engine's basis if tracked, else the first declared value.
+            val purchaseRef = when {
+                bases.isNotEmpty() -> bases.sum()
+                stmts.isNotEmpty() -> stmts.first().let { converter.convert(it.amount.amount.toDouble(), it.amount.ccy, ccy, it.date) }
+                else -> null
+            }
+            val unrealized = if (purchaseRef != null) value - purchaseRef else null
+            val unrealizedPct = if (purchaseRef != null && purchaseRef != 0.0) (value - purchaseRef) / purchaseRef else null
+            return AssetDetail(
+                assetId = assetId, name = asset.name, ticker = asset.ticker, isin = asset.isin,
+                assetCcy = asset.ccy, referenceCcy = ccy,
+                qty = positions.fold(BigDecimal.ZERO) { a, p -> a + p.qty },
+                price = null, value = value, accounts = positions.map { it.accountName }.distinct(),
+                periods = emptyList(), priceHistory = emptyList(),
+                costBasis = purchaseRef, avgBuyPrice = null, unrealized = unrealized, unrealizedPct = unrealizedPct,
+                kind = "property", taxRule = taxRule, valuations = valuations,
+            )
+        }
+
+        // ---- security ----
         val positions = valuationPositions.filter { it.kind == "security" && it.assetId == assetId }
         val qtyNow = positions.fold(BigDecimal.ZERO) { acc, p -> acc + p.qty }
         if (qtyNow.signum() <= 0) return null // not a held security
         val accounts = positions.map { it.accountName }.distinct()
-
-        val converter = Converter(market.fx)
         val qty = qtyNow.toDouble()
         val priceNow = market.prices[assetId]?.at(today)?.first
         val valueRefToday = priceRef(market, converter, assetId, asset.ccy, ccy, today)
@@ -270,17 +312,11 @@ object Gains {
             val absolute = if (pThen != null && pToday != null) qty * (pToday - pThen) else 0.0
             AssetPeriodGain(label, relative, absolute)
         }
-
-        // Full ref-ccy price history (the detail screen's range selector filters it), skipping any
-        // day missing an FX rate.
         val series = market.prices[assetId]?.points ?: emptyList()
         val priceHistory = series.mapNotNull { pt ->
             val rate = converter.rate(asset.ccy, ccy, pt.date) ?: return@mapNotNull null
             PricePoint(pt.date, pt.close * rate)
         }
-
-        // Cost basis: sum the per-position bases the engine tracked (gains-taxed envelopes). If none
-        // of this asset's positions carry a basis, leave it null (shown as "—").
         val bases = positions.mapNotNull { it.costBasis }
         val costBasis = if (bases.isEmpty()) null else bases.sum()
         val avgBuyPrice = if (costBasis != null && qty > 0.0) costBasis / qty else null
@@ -288,22 +324,11 @@ object Gains {
         val unrealizedPct = if (costBasis != null && costBasis != 0.0) (value - costBasis) / costBasis else null
 
         return AssetDetail(
-            assetId = assetId,
-            name = asset.name,
-            ticker = asset.ticker,
-            isin = asset.isin,
-            assetCcy = asset.ccy,
-            referenceCcy = ccy,
-            qty = qtyNow,
-            price = priceNow,
-            value = value,
-            accounts = accounts,
-            periods = periods,
-            priceHistory = priceHistory,
-            costBasis = costBasis,
-            avgBuyPrice = avgBuyPrice,
-            unrealized = unrealized,
-            unrealizedPct = unrealizedPct,
+            assetId = assetId, name = asset.name, ticker = asset.ticker, isin = asset.isin,
+            assetCcy = asset.ccy, referenceCcy = ccy, qty = qtyNow, price = priceNow, value = value,
+            accounts = accounts, periods = periods, priceHistory = priceHistory,
+            costBasis = costBasis, avgBuyPrice = avgBuyPrice, unrealized = unrealized, unrealizedPct = unrealizedPct,
+            kind = "security", taxRule = taxRule, valuations = valuations,
         )
     }
 }
