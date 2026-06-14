@@ -2,6 +2,7 @@ package fin.android.data
 
 import fin.android.domain.Book
 import fin.android.remote.SyncState
+import fin.android.valuation.AssetDetail
 import fin.android.valuation.GainsReport
 import fin.android.valuation.PerfMetrics
 import fin.android.valuation.Valuation
@@ -26,5 +27,7 @@ sealed interface AppState {
         val sync: SyncState,
         val message: String?,
         val refreshing: Boolean,
+        /** Per-asset detail pages, precomputed so opening one is instant. Keyed by asset id. */
+        val assetDetails: Map<String, AssetDetail> = emptyMap(),
     ) : AppState
 }

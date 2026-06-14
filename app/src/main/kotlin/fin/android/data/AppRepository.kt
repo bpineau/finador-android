@@ -180,7 +180,15 @@ class AppRepository(private val container: AppContainer) {
         val perf = computePerf(l.book, today, ref)
         // Gains are a pure read over the same engine; never let them crash the UI.
         val gains = runCatching { Gains.report(l.book, market, referenceCcy = ref, today = today) }.getOrNull()
-        _state.value = AppState.Ready(valuation, perf, gains, l.book, syncState, message, refreshing)
+        // Precompute every held-security detail now (reusing the valuation's positions, so no extra
+        // book folds) — opening an asset's page is then an instant map lookup, not a computation.
+        val assetDetails = runCatching {
+            l.book.assets.values
+                .filter { it.kind == fin.android.domain.AssetKind.SECURITY }
+                .mapNotNull { a -> Gains.assetDetail(l.book, market, ref, today, a.id, valuation.positions)?.let { a.id to it } }
+                .toMap()
+        }.getOrDefault(emptyMap())
+        _state.value = AppState.Ready(valuation, perf, gains, l.book, syncState, message, refreshing, assetDetails)
     }
 
     /**
