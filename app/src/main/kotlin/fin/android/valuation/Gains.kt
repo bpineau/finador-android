@@ -52,11 +52,17 @@ data class AssetDetail(
     val assetCcy: String,
     val referenceCcy: String,
     val qty: BigDecimal,
-    val price: Double?, // native-ccy close at `today`
+    val price: Double?, // native-ccy close at `today` (current MARKET price)
     val value: Double, // value in ref ccy (now)
     val accounts: List<String>, // account names holding it
     val periods: List<AssetPeriodGain>, // 1d,3d,5d,7d,1m,6m,1y,YTD
     val priceHistory: List<PricePoint>, // last ~120 pts, ref-ccy price, for a sparkline
+    // Cost basis (average-cost), in the reference currency. Populated for gains-taxed envelopes;
+    // null for value-taxed / untaxed accounts where the engine tracks no basis.
+    val costBasis: Double? = null, // total cost basis, ref ccy
+    val avgBuyPrice: Double? = null, // costBasis / qty, ref ccy per unit
+    val unrealized: Double? = null, // value − costBasis, ref ccy
+    val unrealizedPct: Double? = null, // unrealized / costBasis, fraction
 )
 
 /** The full report the UI renders. */
@@ -272,6 +278,14 @@ object Gains {
             PricePoint(pt.date, pt.close * rate)
         }
 
+        // Cost basis: sum the per-position bases the engine tracked (gains-taxed envelopes). If none
+        // of this asset's positions carry a basis, leave it null (shown as "—").
+        val bases = positions.mapNotNull { it.costBasis }
+        val costBasis = if (bases.isEmpty()) null else bases.sum()
+        val avgBuyPrice = if (costBasis != null && qty > 0.0) costBasis / qty else null
+        val unrealized = if (costBasis != null) value - costBasis else null
+        val unrealizedPct = if (costBasis != null && costBasis != 0.0) (value - costBasis) / costBasis else null
+
         return AssetDetail(
             assetId = assetId,
             name = asset.name,
@@ -285,6 +299,10 @@ object Gains {
             accounts = accounts,
             periods = periods,
             priceHistory = priceHistory,
+            costBasis = costBasis,
+            avgBuyPrice = avgBuyPrice,
+            unrealized = unrealized,
+            unrealizedPct = unrealizedPct,
         )
     }
 }

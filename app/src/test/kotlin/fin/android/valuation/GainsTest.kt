@@ -323,4 +323,26 @@ class GainsTest {
         assertEquals(1100.0 * 1.25, detail.value, tol) // 10 × 110 EUR × 1.25
         assertEquals(20.0 * 1.25, detail.periods.first { it.label == "1d" }.absolute, tol)
     }
+
+    /**
+     * Gains-taxed envelope: the engine tracks an average-cost basis, so the detail exposes avg buy
+     * price and unrealized +/−. Buy 10 @1000 (basis 1000), today 110 → value 1100, +100 (+10%).
+     */
+    @Test fun assetDetailCostBasisAndUnrealized() {
+        seq = 0
+        val today = d("2026-06-15")
+        val accounts = mapOf("pea" to Account("pea", "PEA", "EUR", TaxRule.Gains(BigDecimal("0.30"))))
+        val assets = mapOf("aa" to Asset("aa", AssetKind.SECURITY, "Alpha", ticker = "AA", ccy = "EUR", group = "g"))
+        val txs = mutableMapOf<String, Tx>()
+        listOf(tx("2026-01-01", "pea", "aa", TxKind.buy, "10", eur("1000"))).forEach { txs[it.id] = it }
+        val book = Book(accounts = accounts, assets = assets, txs = txs, config = mapOf("currency" to "EUR"))
+        val market = MarketData(prices = mapOf("aa" to PriceSeries(listOf(PricePoint(today, 110.0)))))
+
+        val detail = Gains.assetDetail(book, market, today = today, assetId = "aa")!!
+        assertEquals(1100.0, detail.value, tol)
+        assertEquals(1000.0, detail.costBasis!!, tol)
+        assertEquals(100.0, detail.avgBuyPrice!!, tol)
+        assertEquals(100.0, detail.unrealized!!, tol)
+        assertEquals(0.10, detail.unrealizedPct!!, tol)
+    }
 }
