@@ -214,7 +214,7 @@ internal class Valuer(
     /** Folds buy/sell per (account, asset) up to `at`; non-positive dropped; first-seen order. */
     private fun holdings(): List<Holding> {
         val qty = LinkedHashMap<Pair<String, String?>, BigDecimal>()
-        for (t in sorted()) {
+        for (t in sortedTxs) {
             if (t.date.isAfter(at) || t.asset == null) continue
             val k = t.account to t.asset
             when (t.kind) {
@@ -236,7 +236,7 @@ internal class Valuer(
     /** Quantity of one asset inside one account at [d] (clamped to 0 if negative). */
     private fun quantity(acc: String, asset: String, d: LocalDate): BigDecimal {
         var q = BigDecimal.ZERO
-        for (t in sorted()) {
+        for (t in sortedTxs) {
             if (t.date.isAfter(d) || t.account != acc || t.asset != asset) continue
             when (t.kind) {
                 TxKind.buy -> q += t.qty
@@ -254,7 +254,8 @@ internal class Valuer(
     }
 
     /** Ledger in replay order: (date, id). */
-    private fun sorted(): List<Tx> = book.txs.values.sortedWith(compareBy({ it.date }, { it.id }))
+    // Sorted once (was re-sorted on every helper call, incl. per dividend ex-date).
+    private val sortedTxs: List<Tx> = book.txs.values.sortedWith(compareBy({ it.date }, { it.id }))
 
     // ---- statement pairs (value.go) ----
 
@@ -264,7 +265,7 @@ internal class Valuer(
     private fun statementPairs(): List<Pair2> {
         val seen = HashSet<Pair<String, String?>>()
         val out = mutableListOf<Pair2>()
-        for (t in sorted()) {
+        for (t in sortedTxs) {
             if (t.date.isAfter(at) || t.kind != TxKind.statement || t.asset == null) continue
             val k = t.account to t.asset
             if (!seen.add(k)) continue
@@ -295,7 +296,7 @@ internal class Valuer(
 
     private fun lastStatement(acc: String, asset: String): Tx? {
         var last: Tx? = null
-        for (t in sorted()) {
+        for (t in sortedTxs) {
             if (t.date.isAfter(at) || t.kind != TxKind.statement || t.account != acc || t.asset != asset) continue
             last = t
         }
@@ -303,7 +304,7 @@ internal class Valuer(
     }
 
     private fun firstStatement(acc: String, asset: String): Tx? {
-        for (t in sorted()) {
+        for (t in sortedTxs) {
             if (t.date.isAfter(at)) break
             if (t.kind == TxKind.statement && t.account == acc && t.asset == asset) return t
         }
@@ -322,7 +323,7 @@ internal class Valuer(
     private fun positionBasis(acc: String, asset: String): Double {
         var qty = 0.0
         var basis = 0.0
-        for (t in sorted()) {
+        for (t in sortedTxs) {
             if (t.date.isAfter(at) || t.account != acc || t.asset != asset) continue
             when (t.kind) {
                 TxKind.buy -> {
@@ -366,7 +367,7 @@ internal class Valuer(
     private fun accountBasis(acc: Account): Double {
         val tracked = cashTracked(acc.id)
         var basis = 0.0
-        for (t in sorted()) {
+        for (t in sortedTxs) {
             if (t.date.isAfter(at) || t.account != acc.id) continue
             val sign = when {
                 tracked && t.kind == TxKind.deposit -> 1.0
@@ -391,12 +392,12 @@ internal class Valuer(
     private fun cashValue(acc: Account): Double {
         var balance = 0.0
         var anchor: LocalDate? = null
-        for (t in sorted()) {
+        for (t in sortedTxs) {
             if (t.date.isAfter(at) || t.account != acc.id || t.asset != null || t.kind != TxKind.statement) continue
             balance = convert(t.amount.amount.toDouble(), t.amount.ccy, acc.ccy, t.date)
             anchor = t.date
         }
-        for (t in sorted()) {
+        for (t in sortedTxs) {
             if (t.date.isAfter(at) || t.account != acc.id) continue
             if (anchor != null && !anchor.isBefore(t.date)) continue // already in the anchor statement
             val sign = when (t.kind) {

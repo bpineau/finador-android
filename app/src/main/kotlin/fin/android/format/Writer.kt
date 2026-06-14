@@ -5,8 +5,6 @@ import fin.android.crypto.B64
 import fin.android.crypto.Bytes
 import java.security.SecureRandom
 
-private val HEAD_LABEL_W = "finador-head".toByteArray(Charsets.US_ASCII)
-
 /**
  * Append-only writer. New records continue the hash chain from the last existing tag; existing
  * record lines are re-emitted verbatim by [serialize], so a small logical change is a small diff
@@ -36,7 +34,7 @@ internal object Writer {
         val lastTag = entries.lastOrNull()?.tag ?: ByteArray(AesGcm.TAG_LEN)
         val headPt = wireJson.encodeToString(HeadDto.serializer(), HeadDto(entries.size, B64.encode(lastTag)))
             .toByteArray(Charsets.UTF_8)
-        val headAad = Bytes.concat(header.hdrHash, HEAD_LABEL_W, Bytes.uint64be(entries.size.toLong()))
+        val headAad = Bytes.concat(header.hdrHash, HEAD_LABEL, Bytes.uint64be(entries.size.toLong()))
         val (headLine, _) = seal(keys.log, headPt, headAad)
 
         val sb = StringBuilder(header.rawLine.length + entries.sumOf { it.line.length + 1 } + headLine.length + 8)

@@ -20,6 +20,8 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 import java.math.BigDecimal
 import java.time.LocalDate
@@ -37,8 +39,15 @@ class AppRepository(private val container: AppContainer) {
     private var ledger: Ledger? = null
     private var market: MarketData = MarketData()
 
+    // Serializes every mutation of the shared ledger/market/config (the UI can launch e.g. sync and
+    // a quote refresh concurrently). Not reentrant — a locked method must call the *Locked helpers,
+    // never another public (locked) method.
+    private val mutex = Mutex()
+    private suspend fun <T> exclusive(block: suspend () -> T): T =
+        withContext(Dispatchers.IO) { mutex.withLock { block() } }
+
     /** Decides whether onboarding is needed or we can offer biometric unlock. */
-    suspend fun refresh() = withContext(Dispatchers.IO) {
+    suspend fun refresh() = exclusive {
         val cfg = container.loadConfig()
         val ready = cfg.isGithub && container.secretStore.getPat() != null && container.secretStore.hasPassphrase()
         _state.value = if (ready) AppState.Locked else AppState.Onboarding
@@ -46,7 +55,7 @@ class AppRepository(private val container: AppContainer) {
 
     suspend fun onboard(
         owner: String, repo: String, path: String, branch: String, token: String, pass: String,
-    ): Result<Unit> = withContext(Dispatchers.IO) {
+    ): Result<Unit> = exclusive {
         val cfg = RemoteConfig(
             source = "github",
             github = GithubConfig(owner.trim(), repo.trim(), path.trim().ifBlank { "portfolio.fin" }, branch.trim().ifBlank { "main" }),
@@ -79,7 +88,7 @@ class AppRepository(private val container: AppContainer) {
     }
 
     /** Call after a successful BiometricPrompt. Uses the stored passphrase. */
-    suspend fun unlock(): Result<Unit> = withContext(Dispatchers.IO) {
+    suspend fun unlock(): Result<Unit> = exclusive {
         runCatching {
             val cfg = container.loadConfig()
             val pass = container.secretStore.getPassphrase() ?: error("no stored passphrase")
@@ -87,8 +96,11 @@ class AppRepository(private val container: AppContainer) {
         }
     }
 
-    suspend fun refreshQuotes() = withContext(Dispatchers.IO) {
-        val l = ledger ?: return@withContext
+    suspend fun refreshQuotes() = exclusive { refreshQuotesLocked() }
+
+    /** Quote refresh without taking the lock — call only from an already-locked method. */
+    private suspend fun refreshQuotesLocked() {
+        val l = ledger ?: return
         runCatching {
             val ref = container.loadConfig().displayCurrency
             val updated = Quotes.refresh(
@@ -105,10 +117,10 @@ class AppRepository(private val container: AppContainer) {
      * Persists [ccy] as the display currency every value/gain is shown in, then refreshes quotes so
      * the new currency's FX series is fetched, and re-emits. A blank value clears the override.
      */
-    suspend fun setDisplayCurrency(ccy: String) = withContext(Dispatchers.IO) {
+    suspend fun setDisplayCurrency(ccy: String) = exclusive {
         val cfg = container.loadConfig()
         container.saveConfig(cfg.copy(displayCurrency = ccy.trim().uppercase().ifBlank { null }))
-        refreshQuotes()
+        refreshQuotesLocked() // already holding the lock
     }
 
     fun assetDetail(assetId: String): fin.android.valuation.AssetDetail? =
@@ -117,10 +129,10 @@ class AppRepository(private val container: AppContainer) {
     suspend fun addTransaction(
         date: LocalDate, accountId: String, assetId: String?, kind: TxKind,
         qty: BigDecimal, amount: BigDecimal, ccy: String, note: String?,
-    ): Result<SyncOutcome> = withContext(Dispatchers.IO) {
+    ): Result<SyncOutcome> = exclusive {
         val cfg = container.loadConfig()
-        val token = container.secretStore.getPat() ?: return@withContext Result.failure(IllegalStateException("no token"))
-        val pass = passphrase ?: return@withContext Result.failure(IllegalStateException("locked"))
+        val token = container.secretStore.getPat() ?: return@exclusive Result.failure(IllegalStateException("no token"))
+        val pass = passphrase ?: return@exclusive Result.failure(IllegalStateException("locked"))
         runCatching {
             val sync = container.buildSync(cfg, token)
             val outcome = sync.mutate(pass, "finador-android: add ${kind.name}") { ledgerSnapshot ->
@@ -132,10 +144,10 @@ class AppRepository(private val container: AppContainer) {
         }
     }
 
-    suspend fun syncNow(): Result<SyncOutcome> = withContext(Dispatchers.IO) {
+    suspend fun syncNow(): Result<SyncOutcome> = exclusive {
         val cfg = container.loadConfig()
-        val token = container.secretStore.getPat() ?: return@withContext Result.failure(IllegalStateException("no token"))
-        val pass = passphrase ?: return@withContext Result.failure(IllegalStateException("locked"))
+        val token = container.secretStore.getPat() ?: return@exclusive Result.failure(IllegalStateException("no token"))
+        val pass = passphrase ?: return@exclusive Result.failure(IllegalStateException("locked"))
         runCatching {
             val sync = container.buildSync(cfg, token)
             val outcome = sync.sync(pass)
@@ -145,7 +157,7 @@ class AppRepository(private val container: AppContainer) {
         }
     }
 
-    suspend fun forget() = withContext(Dispatchers.IO) {
+    suspend fun forget() = exclusive {
         container.secretStore.purge()
         container.clearConfig()
         passphrase = null

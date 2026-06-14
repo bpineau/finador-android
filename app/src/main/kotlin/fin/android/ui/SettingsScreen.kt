@@ -81,7 +81,7 @@ fun SettingsScreen(vm: AppViewModel, ready: AppState.Ready) {
 
             Spacer(Modifier.height(4.dp))
 
-            // Destructive action as a discreet tonal button (not a blue link), tinted with the loss red.
+            // Destructive action as a discreet tonal button (not a blue link).
             FilledTonalButton(
                 onClick = { vm.forget() },
                 modifier = Modifier.fillMaxWidth(),
