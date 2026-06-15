@@ -440,7 +440,7 @@ private fun PositionRow(p: Position, ccy: String, onAssetClick: (String) -> Unit
             )
             if (p.kind == "security" && p.qty.signum() != 0) {
                 Text(
-                    "${p.qty.stripTrailingZeros().toPlainString()} units",
+                    formatQuantity(p.qty),
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )

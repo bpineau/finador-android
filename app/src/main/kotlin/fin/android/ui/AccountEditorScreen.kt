@@ -34,14 +34,12 @@ import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import fin.android.data.AppState
 import fin.android.domain.TaxRule
+import fin.android.domain.ratePercent
 import java.math.BigDecimal
 
 private enum class TaxMode(val label: String) { None("No tax"), Gains("On gains"), Value("On full value") }
 
 private val HUNDRED = BigDecimal(100)
-
-/** Rate fraction (0.172) → percentage string ("17.2") for display/editing. */
-internal fun ratePct(rate: BigDecimal): String = rate.multiply(HUNDRED).stripTrailingZeros().toPlainString()
 
 /**
  * Create (accountId == null) or edit an account. Mirrors the desktop fields: name, currency,
@@ -66,8 +64,8 @@ fun AccountEditorScreen(vm: AppViewModel, ready: AppState.Ready, accountId: Stri
     var rate by rememberSaveable {
         mutableStateOf(
             when (val t = existing?.tax) {
-                is TaxRule.Gains -> ratePct(t.rate)
-                is TaxRule.Value -> ratePct(t.rate)
+                is TaxRule.Gains -> ratePercent(t.rate)
+                is TaxRule.Value -> ratePercent(t.rate)
                 else -> ""
             },
         )
