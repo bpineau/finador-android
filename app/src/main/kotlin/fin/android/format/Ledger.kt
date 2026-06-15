@@ -4,6 +4,8 @@ import fin.android.crypto.B64
 import fin.android.crypto.Ids
 import fin.android.domain.Account
 import fin.android.domain.AccountRules
+import fin.android.domain.Asset
+import fin.android.domain.AssetRules
 import fin.android.domain.Book
 import fin.android.domain.Money
 import fin.android.domain.TxKind
@@ -74,6 +76,34 @@ class Ledger internal constructor(
         AccountRules.assertNoTxRefs(book, id)
         val d = wireJson.encodeToJsonElement(IdRefDto.serializer(), IdRefDto(id)).jsonObject
         return append(listOf(Envelope("acct-del", Rfc3339.now(), d)))
+    }
+
+    /**
+     * Upserts an asset (an `asset` record, last-writer-wins by id) — used for both create and edit,
+     * since the format reconciles by id. Rejects a reference collision against the *current* book
+     * (post-pull when called inside [fin.android.remote.Sync.mutate]).
+     */
+    fun putAsset(asset: Asset): Ledger {
+        AssetRules.checkRefs(book.assets.values, asset)
+        val dto = AssetDto(
+            id = asset.id,
+            kind = asset.kind.wire,
+            name = asset.name,
+            ticker = asset.ticker,
+            isin = asset.isin,
+            aliases = asset.aliases,
+            ccy = asset.ccy,
+            group = asset.group,
+            withholding = asset.withholding,
+        )
+        return append(listOf(Envelope("asset", Rfc3339.now(), wireJson.encodeToJsonElement(AssetDto.serializer(), dto).jsonObject)))
+    }
+
+    /** Deletes an asset (an `asset-del` tombstone). Refuses to orphan a referencing transaction. */
+    fun deleteAsset(id: String): Ledger {
+        AssetRules.assertNoTxRefs(book, id)
+        val d = wireJson.encodeToJsonElement(IdRefDto.serializer(), IdRefDto(id)).jsonObject
+        return append(listOf(Envelope("asset-del", Rfc3339.now(), d)))
     }
 
     /** Reconciles a diverged copy of the same ledger (union + last-writer-wins by ts). */
