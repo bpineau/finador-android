@@ -11,7 +11,7 @@ import androidx.compose.ui.platform.LocalView
 import androidx.core.view.WindowCompat
 
 /**
- * A single, fixed dark palette — no dynamic/wallpaper colour (a source of inconsistency).
+ * A single, fixed dark palette - no dynamic/wallpaper colour (a source of inconsistency).
  * Dark-mode-first. A restrained **terracotta / rust** accent on warm-neutral darks (premium,
  * distinctive, used sparingly) lives across the whole accent family; the gain/loss semantic
  * colours live in [FinColors] (financial green/red, refined) since they are not Material 3 slots.
@@ -44,7 +44,7 @@ private val FinDarkColors = darkColorScheme(
 )
 
 /**
- * Semantic up/down colours used wherever a figure is a gain or a loss — refined financial
+ * Semantic up/down colours used wherever a figure is a gain or a loss - refined financial
  * green/red (the accent stays reserved for interactive elements). Exposed via [LocalFinColors].
  */
 data class FinSemanticColors(

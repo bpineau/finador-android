@@ -22,7 +22,7 @@ data class SyncOutcome(val pushed: Boolean, val dirty: Boolean, val message: Str
 /**
  * Reconciles a local working copy of the ledger with a [Backend]. Reads pull when stale; writes
  * pull-before / push-after with conflict→merge; offline writes succeed locally (dirty) and push on
- * the next online access. Blocking — call on a background dispatcher.
+ * the next online access. Blocking - call on a background dispatcher.
  */
 class Sync(
     private val backend: Backend,
@@ -53,7 +53,7 @@ class Sync(
             writeCopy(f.data)
             saveState(st.copy(sha = f.version, lastPull = now().toString()))
         } catch (e: RemoteError.Missing) {
-            // No remote file yet — keep whatever local copy exists (possibly none).
+            // No remote file yet - keep whatever local copy exists (possibly none).
         } catch (e: RemoteError.Offline) {
             if (!workingCopy.exists()) throw e // can't read without any copy
         }
@@ -105,7 +105,7 @@ class Sync(
                     backend.fetch()
                 } catch (off: RemoteError.Offline) {
                     saveState(st.copy(dirty = true))
-                    return SyncOutcome(pushed = false, dirty = true, message = "saved locally (offline) — will push later")
+                    return SyncOutcome(pushed = false, dirty = true, message = "saved locally (offline) - will push later")
                 }
                 local = local.merge(Ledger.open(remote.data, passphrase), resolve)
                 bytes = local.toBytes()
@@ -114,11 +114,11 @@ class Sync(
                 saveState(st)
             } catch (e: RemoteError.Offline) {
                 saveState(st.copy(dirty = true))
-                return SyncOutcome(pushed = false, dirty = true, message = "saved locally (offline) — will push later")
+                return SyncOutcome(pushed = false, dirty = true, message = "saved locally (offline) - will push later")
             }
         }
         saveState(st.copy(dirty = true))
-        return SyncOutcome(pushed = false, dirty = true, message = "could not resolve remote conflict — kept locally")
+        return SyncOutcome(pushed = false, dirty = true, message = "could not resolve remote conflict - kept locally")
     }
 
     /** Force pull (and push if there are unpushed local changes). */
@@ -162,7 +162,7 @@ class Sync(
             SyncOutcome(pushed = true, dirty = false, message = "synced")
         } catch (e: RemoteError.Offline) {
             saveState(st.copy(dirty = true))
-            SyncOutcome(pushed = false, dirty = true, message = "offline — will push later")
+            SyncOutcome(pushed = false, dirty = true, message = "offline - will push later")
         }
     }
 

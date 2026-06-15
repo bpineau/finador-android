@@ -65,7 +65,7 @@ class ValuatorTest {
         ).associateBy { it.id }
         val assets = listOf(
             Asset("cw8", AssetKind.SECURITY, "CW8", ticker = "CW8.PA", ccy = "EUR", group = "actions/monde"),
-            Asset("maison", AssetKind.PROPERTY, "Maison à Achères", ccy = "EUR", group = "immo"),
+            Asset("maison", AssetKind.PROPERTY, "Maison à Rénover", ccy = "EUR", group = "immo"),
         ).associateBy { it.id }
         val txs = listOf(
             tx("2026-01-10", "pea", null, TxKind.deposit, amount = eur("10000")),
@@ -191,7 +191,7 @@ class ValuatorTest {
 
     /**
      * TestPropertyWithBuyNotDoubleCounted: a buy recorded on the property (e.g. notary)
-     * must not value it twice — it stays valued by its statements (450000).
+     * must not value it twice - it stays valued by its statements (450000).
      */
     @Test fun propertyWithBuyNotDoubleCounted() {
         val (book, market) = valuationBook()

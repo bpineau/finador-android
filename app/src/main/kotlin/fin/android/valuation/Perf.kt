@@ -400,8 +400,8 @@ internal class SeriesBuilder(
                         }
                     }
 
-                    // Flow valued at the MARKET value of the shares transacted at t.date —
-                    // the value crossing the scope boundary — not the cash amount; falls
+                    // Flow valued at the MARKET value of the shares transacted at t.date -
+                    // the value crossing the scope boundary - not the cash amount; falls
                     // back to the cash amount when no price is known that day.
                     var flowVal = disp
                     if (asset.kind != AssetKind.PROPERTY) {

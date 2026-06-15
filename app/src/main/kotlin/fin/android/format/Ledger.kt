@@ -61,7 +61,7 @@ class Ledger internal constructor(
     }
 
     /**
-     * Upserts an account (an `acct` record, last-writer-wins by id) — used for both create and edit,
+     * Upserts an account (an `acct` record, last-writer-wins by id) - used for both create and edit,
      * since the format reconciles by id. Rejects a reference collision against the *current* book
      * (post-pull when called inside [fin.android.remote.Sync.mutate]).
      */
@@ -79,7 +79,7 @@ class Ledger internal constructor(
     }
 
     /**
-     * Upserts an asset (an `asset` record, last-writer-wins by id) — used for both create and edit,
+     * Upserts an asset (an `asset` record, last-writer-wins by id) - used for both create and edit,
      * since the format reconciles by id. Rejects a reference collision against the *current* book
      * (post-pull when called inside [fin.android.remote.Sync.mutate]).
      */
@@ -143,7 +143,7 @@ class Ledger internal constructor(
             val book = try {
                 Replay.fold(raw.entries)
             } catch (e: UnsupportedFormatException) {
-                throw e // unknown record kind — must stay distinct
+                throw e // unknown record kind - must stay distinct
             } catch (e: Exception) {
                 // Authenticated but malformed payload (bad decimal/date/enum, missing field): the file
                 // is effectively corrupt. Honors the documented @throws instead of leaking a raw JVM exception.
@@ -152,7 +152,7 @@ class Ledger internal constructor(
             return Ledger(raw.header, raw.keys, raw.entries, book)
         }
 
-        /** Creates a brand-new empty ledger (fresh salt + file id) — first-run / onboarding. */
+        /** Creates a brand-new empty ledger (fresh salt + file id) - first-run / onboarding. */
         fun create(passphrase: String, t: Int = 3, m: Int = 65536): Ledger {
             val rng = SecureRandom()
             val salt = ByteArray(16).also { rng.nextBytes(it) }

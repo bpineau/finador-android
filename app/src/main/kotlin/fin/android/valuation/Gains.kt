@@ -44,7 +44,7 @@ data class AssetPeriodGain(val label: String, val relative: Double?, val absolut
 /**
  * The single-asset detail the [AssetDetailScreen] renders. A simplified, price/FX-move view of
  * one held security: current holding, current ref-ccy value, period %/absolute gains, and a short
- * ref-ccy price history for a sparkline. No TWR/XIRR/CAGR/Sharpe — pure price math.
+ * ref-ccy price history for a sparkline. No TWR/XIRR/CAGR/Sharpe - pure price math.
  */
 data class AssetDetail(
     val assetId: String,
@@ -99,7 +99,7 @@ object Gains {
      *
      * Per-asset gains use the asset's CURRENT quantity: they approximate the gain
      * as a pure price/FX move on today's holding. Intra-window quantity changes
-     * (buys/sells inside the period) are NOT attributed — for an exact, flow-aware
+     * (buys/sells inside the period) are NOT attributed - for an exact, flow-aware
      * figure use the portfolio-level absolute (which neutralizes external flows).
      */
     fun report(
@@ -239,7 +239,7 @@ object Gains {
     /**
      * Builds the simplified [AssetDetail] for [assetId] as of [today], in [referenceCcy] (defaults
      * to `book.config["currency"]` then "EUR"). Only period % increase + absolute gain are computed
-     * — no TWR/XIRR/CAGR/Sharpe. Returns null when the asset is not a currently-held security.
+     * - no TWR/XIRR/CAGR/Sharpe. Returns null when the asset is not a currently-held security.
      *
      * Per period: relative = priceRef(today)/priceRef(then) − 1 (null if either endpoint price/FX
      * is missing); absolute = qtyNow × (priceRef(today) − priceRef(then)). priceRef(d) is the asset's
@@ -261,7 +261,7 @@ object Gains {
         val valuationPositions = allPositions ?: Valuator.value(book, market, referenceCcy = ccy, at = today).positions
         val converter = Converter(market.fx)
 
-        // Applicable tax envelope(s) and the dated declared values (statements) — for any kind.
+        // Applicable tax envelope(s) and the dated declared values (statements) - for any kind.
         val taxRule = valuationPositions
             .filter { it.assetId == assetId }
             .mapNotNull { book.accounts[it.accountId]?.tax?.toWire() }

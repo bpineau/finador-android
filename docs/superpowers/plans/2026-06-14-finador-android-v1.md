@@ -1,7 +1,7 @@
-# finador-android v1 — Implementation Plan
+# finador-android v1 - Implementation Plan
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:executing-plans (inline, batch
-> with checkpoints) — this is a solo autonomous run. Steps use checkbox (`- [ ]`) tracking.
+> with checkpoints) - this is a solo autonomous run. Steps use checkbox (`- [ ]`) tracking.
 > Each phase ends with a **hard gate** (compile + tests green) before the next begins.
 
 **Goal:** A native Android client (Kotlin/Compose) that reads/writes the finador `.fin` format
@@ -76,7 +76,7 @@ interface Source { suspend fun quote(asset: Asset): PriceSeries?; suspend fun fx
 
 ---
 
-## Phase 0 — Scaffold a buildable empty app (gate: APK builds)
+## Phase 0 - Scaffold a buildable empty app (gate: APK builds)
 
 **Files (create):** `settings.gradle.kts`, `build.gradle.kts`, `gradle.properties`,
 `gradle/libs.versions.toml`, `gradle/wrapper/gradle-wrapper.properties`, `gradlew`, `gradlew.bat`,
@@ -98,16 +98,16 @@ interface Source { suspend fun quote(asset: Asset): PriceSeries?; suspend fun fx
   `adb wait-for-device`), `…/gradlew installDebug`, `adb shell am start -n <pkg>/.ui.MainActivity`,
   confirm no crash in `adb logcat` (then kill emulator). Commit.
 
-## Phase 1 — Crypto + format reader (gate: KDF vector + sample.ledger decrypt)
+## Phase 1 - Crypto + format reader (gate: KDF vector + sample.ledger decrypt)
 
 Pure Kotlin. **TDD against FORMAT.md §9.** Add deps: `argon2kt`, kotlinx-serialization-json.
 
-- [ ] **Test first — KDF vector** (`crypto/KdfTest.kt`): pw `correct horse battery staple`,
+- [ ] **Test first - KDF vector** (`crypto/KdfTest.kt`): pw `correct horse battery staple`,
   salt hex `000102…0f`, t3 m65536 p4 ⇒ master `853b27…b49e`, keyLog `156457…167b`,
   keyCache `7c39dd…0b3a`. Implement `Argon2` (argon2kt), `Hkdf.sha256`, `deriveKeys` until green.
-- [ ] **Test first — Crockford ID** (`crypto/IdsTest.kt`): fixed millis+rnd ⇒ 23-char id over
+- [ ] **Test first - Crockford ID** (`crypto/IdsTest.kt`): fixed millis+rnd ⇒ 23-char id over
   alphabet `0123456789abcdefghjkmnpqrstvwxyz`, time-prefix monotonic. Implement `Ids.newId`.
-- [ ] **Test first — AES-GCM round-trip** (`crypto/AesGcmTest.kt`): seal then open under AAD;
+- [ ] **Test first - AES-GCM round-trip** (`crypto/AesGcmTest.kt`): seal then open under AAD;
   tamper → AEADBadTagException. Implement `AesGcm` (Cipher AES/GCM/NoPadding, tag appended).
 - [ ] **Header parse** (`format/Header.kt` + test): parse line-1 JSON, enforce bounds
   (`fmt=="finador-ledger"`, `v==3`, `kdf=="argon2id"`, 1≤t≤16, 8≤m≤1048576, 1≤p≤16,
@@ -120,12 +120,12 @@ Pure Kotlin. **TDD against FORMAT.md §9.** Add deps: `argon2kt`, kotlinx-serial
   **Unknown `k` = hard error.** Unknown fields tolerated.
 - [ ] **Replay/fold** (`format/Replay.kt` + test): fold in file order (upsert/tombstone by id,
   config by key) → `Book`.
-- [ ] **Gate — sample.ledger** (`format/SampleLedgerTest.kt`): copy
+- [ ] **Gate - sample.ledger** (`format/SampleLedgerTest.kt`): copy
   `../finador/docs/format-testdata/sample.ledger` + passphrase from its README into test
   resources; `Ledger.open(...)` reproduces the documented accounts/assets/txs. `testDebugUnitTest`
   green. Commit.
 
-## Phase 2 — Writer (diff-on-save) + merge (gate: round-trip + cross-impl with Go CLI)
+## Phase 2 - Writer (diff-on-save) + merge (gate: round-trip + cross-impl with Go CLI)
 
 - [ ] **Verbatim prefix + seal** (`format/Writer.kt` + test): keep each read record's verbatim
   base64 line; `toBytes()` re-emits them byte-for-byte, appends newly-sealed records continuing
@@ -138,12 +138,12 @@ Pure Kotlin. **TDD against FORMAT.md §9.** Add deps: `argon2kt`, kotlinx-serial
 - [ ] **Merge** (`format/Merge.kt` + test mirroring `internal/store/merge_test.go`): refuse on
   header-id mismatch; group by (class,id)/config-key; LWW by `ts`; identical (k,d) not a conflict;
   true tie → resolver; tombstone winner omitted; reseal sorted by ts.
-- [ ] **Gate — cross-impl** (`scripts/crossimpl.sh`, documented): build the Go `finador`; create a
+- [ ] **Gate - cross-impl** (`scripts/crossimpl.sh`, documented): build the Go `finador`; create a
   ledger via CLI; open+AddTx via a tiny JVM harness (`./gradlew :app:run`-style main or a unit
   test writing to a temp file); re-open with `finador value` → no error, new tx visible; and
   vice-versa (Android opens a CLI-produced file). Record result in DECISIONS.md. Commit.
 
-## Phase 3 — Remote GitHub + SecretStore + biometric (gate: sync against MockWebServer)
+## Phase 3 - Remote GitHub + SecretStore + biometric (gate: sync against MockWebServer)
 
 Add deps: OkHttp + MockWebServer (test), androidx.security:security-crypto, androidx.biometric.
 
@@ -162,7 +162,7 @@ Add deps: OkHttp + MockWebServer (test), androidx.security:security-crypto, andr
 - [ ] **Gate:** `testDebugUnitTest` (Sync/GitHub) + `connectedAndroidTest` (SecretStore) green.
   Commit.
 
-## Phase 4 — Market data + sidecar cache (gate: source tests with fixtures)
+## Phase 4 - Market data + sidecar cache (gate: source tests with fixtures)
 
 Add dep: Jsoup. Fixtures captured into test resources.
 
@@ -176,7 +176,7 @@ Add dep: Jsoup. Fixtures captured into test resources.
   merge into MarketData; persist cache.
 - [ ] **Gate:** `testDebugUnitTest` market green. Commit.
 
-## Phase 5 — Valuation + Compose UI (gate: app runs full flow on emulator)
+## Phase 5 - Valuation + Compose UI (gate: app runs full flow on emulator)
 
 Add deps: navigation-compose, lifecycle-viewmodel-compose, coil (icons optional).
 
@@ -201,7 +201,7 @@ Add deps: navigation-compose, lifecycle-viewmodel-compose, coil (icons optional)
 - [ ] **Gate:** `assembleDebug` green; boot AVD `test`, `installDebug`, drive onboarding→overview
   →tx entry against a test repo (or fake), confirm no crash in logcat. Commit.
 
-## Phase 6 — Performance metrics (good-to-have)
+## Phase 6 - Performance metrics (good-to-have)
 
 - [ ] **Perf** (`valuation/Perf.kt` + tests mirroring `internal/perf`): TWR, XIRR, CAGR, vol,
   Sharpe, Sortino, maxDD per period/scope; surface on overview/detail. Commit.
@@ -211,10 +211,10 @@ Add deps: navigation-compose, lifecycle-viewmodel-compose, coil (icons optional)
 ## Self-review
 
 - **Spec coverage:** format read (P1) / write+merge (P2) / GitHub sync+secrets+biometric (P3) /
-  market multi-source+cache (P4) / valuation+UI+auth UX (P5) / perf (P6) — every spec §4–§9
+  market multi-source+cache (P4) / valuation+UI+auth UX (P5) / perf (P6) - every spec §4–§9
   requirement maps to a phase. Storage-GitHub-only, PAT-paste-store, passphrase-once-biometric:
   P3+P5. Cross-impl compatibility criterion: P2 gate.
-- **Placeholders:** none — each phase names exact files, the hard parts carry the algorithm, and
+- **Placeholders:** none - each phase names exact files, the hard parts carry the algorithm, and
   every phase ends with a runnable gate. (UI tasks are component-level by design for a solo
   autonomous run; each still has a compile+run gate.)
 - **Type consistency:** interfaces fixed in "Shared interfaces" and reused verbatim downstream

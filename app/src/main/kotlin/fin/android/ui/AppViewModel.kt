@@ -38,7 +38,7 @@ class AppViewModel(private val container: AppContainer) : ViewModel() {
     val busy: StateFlow<Boolean> = _busy.asStateFlow()
 
     private val _onboardError = MutableStateFlow<String?>(null)
-    /** Persistent inline error for the onboarding/unlock screens — NOT cleared by the snackbar. */
+    /** Persistent inline error for the onboarding/unlock screens - NOT cleared by the snackbar. */
     val onboardError: StateFlow<String?> = _onboardError.asStateFlow()
 
     init {

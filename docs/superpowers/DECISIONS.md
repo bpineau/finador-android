@@ -1,12 +1,12 @@
-# Decisions — finador-android autonomous run
+# Decisions - finador-android autonomous run
 
 Log of decisions taken autonomously (the user asked for an A→Z build without
 questions or confirmations). Each non-trivial decision is tracked here.
 
-## 2026-06-14 — framing
+## 2026-06-14 - framing
 
 - **Stack**: Kotlin + Jetpack Compose (Material 3), no KMP (pure Android, iOS not requested).
-- **Target**: compileSdk/targetSdk **36**, build-tools **36.1.0**, minSdk **26** — to match
+- **Target**: compileSdk/targetSdk **36**, build-tools **36.1.0**, minSdk **26** - to match
   the env installed by the user (android-commandlinetools, `platforms;android-36`).
 - **SDK**: `ANDROID_HOME=$(brew --prefix)/share/android-commandlinetools`; the project writes
   `local.properties` and the build commands export `ANDROID_HOME`/`JAVA_HOME` explicitly.
@@ -17,7 +17,7 @@ questions or confirmations). Each non-trivial decision is tracked here.
 - **Network**: OkHttp + kotlinx.serialization; **Jsoup** for FT/Morningstar (Yahoo = JSON).
 - **Charts**: hand-rolled Compose Canvas (no heavy lib).
 - **Secrets/auth** (explicit requirement): GitHub PAT **pasted then stored** in the Keystore;
-  passphrase entered **once** then **unlock by biometrics alone** (BiometricPrompt) —
+  passphrase entered **once** then **unlock by biometrics alone** (BiometricPrompt) -
   integrated from **phase 3** (foundation), not deferred.
 - **Perf** (TWR/XIRR/Sharpe…): **good-to-have**, phase 6; shippable v1 = phases 1–5.
 - **Storage**: **GitHub only** in v1 (no local file / SAF).
@@ -49,7 +49,7 @@ questions or confirmations). Each non-trivial decision is tracked here.
   (perf_test/series_test parity), "Performance" card in the overview.
 
 ## Remaining optional (non-blocking)
-- Go golden test on the finador side (assertion of the §9 vectors + opening of sample.ledger) — defense-in-depth;
+- Go golden test on the finador side (assertion of the §9 vectors + opening of sample.ledger) - defense-in-depth;
   on the Android side the vectors are already asserted + the cross-impl gate protects the contract.
 - Visual enrichments: icons (material-icons-extended), curves (Canvas), pull-to-refresh.
 - Real GitHub E2E: requires a private repo + the user's PAT (to do on first use).
