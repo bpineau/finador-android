@@ -63,7 +63,7 @@ echo "sdk.dir=$(brew --prefix)/share/android-commandlinetools" > local.propertie
 Always with `JAVA_HOME`/`ANDROID_HOME` exported (see above):
 
 ```sh
-cd /Users/ben/projects/finador-android
+cd finador-android               # the cloned repo
 
 ./gradlew testDebugUnitTest      # unit tests (JVM, no device) — the engine layer
 ./gradlew assembleDebug          # build the debug APK

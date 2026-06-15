@@ -6,8 +6,9 @@ set -euo pipefail
 export JAVA_HOME="${JAVA_HOME:-/Library/Java/JavaVirtualMachines/temurin-21.jdk/Contents/Home}"
 export ANDROID_HOME="${ANDROID_HOME:-/opt/homebrew/share/android-commandlinetools}"
 
-AROOT="${AROOT:-/Users/ben/projects/finador-android}"
-FROOT="${FROOT:-/Users/ben/projects/finador}"
+# Default to this script's repo and a sibling `finador` checkout; override via env if elsewhere.
+AROOT="${AROOT:-$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)}"
+FROOT="${FROOT:-$(cd "$AROOT/.." && pwd)/finador}"
 FIN="${FIN:-/tmp/finador}"
 OUT="$AROOT/build/crossimpl"
 SAMPLE="$FROOT/docs/format-testdata/sample.ledger"

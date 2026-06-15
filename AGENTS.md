@@ -34,7 +34,7 @@ The Gradle wrapper needs both env vars (the build shell usually doesn't inherit 
 ```sh
 export JAVA_HOME=/Library/Java/JavaVirtualMachines/temurin-21.jdk/Contents/Home
 export ANDROID_HOME=/opt/homebrew/share/android-commandlinetools
-P=/Users/ben/projects/finador-android
+P="$(git rev-parse --show-toplevel)"   # the repo root
 
 "$P/gradlew" --project-dir "$P" testDebugUnitTest            # unit tests (host JVM, no device) — your main loop
 "$P/gradlew" --project-dir "$P" assembleDebug               # compile the APK (catches Compose/Android errors)
@@ -51,8 +51,7 @@ P=/Users/ben/projects/finador-android
   `adb shell am start -n fin.android/.ui.MainActivity`, check `adb logcat -d -s AndroidRuntime:E`.
   A fresh install lands on **Onboarding** (no config); a configured emulator lands on **Unlock**
   (tap "Unlock"; it has no biometric so it falls back to a direct button).
-- Full repo workflow doc for humans: `README.md`. Sharing/signing notes (outside the repo):
-  `/Users/ben/projects/finador-install-and-share.md`.
+- Full repo workflow doc for humans: `README.md`.
 
 ## Architecture map
 
