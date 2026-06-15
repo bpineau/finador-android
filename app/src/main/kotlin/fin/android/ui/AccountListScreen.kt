@@ -38,6 +38,7 @@ import androidx.compose.ui.unit.dp
 import fin.android.data.AppState
 import fin.android.domain.Account
 import fin.android.domain.TaxRule
+import fin.android.domain.ratePercent
 
 /**
  * Lists the configured accounts and is the entry point for create/edit/delete. Reached from
@@ -158,6 +159,6 @@ private fun accountSubtitle(account: Account): String = buildList {
 
 private fun taxSummary(tax: TaxRule): String = when (tax) {
     is TaxRule.None -> "No tax"
-    is TaxRule.Gains -> "Tax on gains · ${ratePct(tax.rate)}%"
-    is TaxRule.Value -> "Tax on value · ${ratePct(tax.rate)}%"
+    is TaxRule.Gains -> "Tax on gains · ${ratePercent(tax.rate)}%"
+    is TaxRule.Value -> "Tax on value · ${ratePercent(tax.rate)}%"
 }

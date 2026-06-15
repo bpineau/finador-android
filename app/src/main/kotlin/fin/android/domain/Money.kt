@@ -37,8 +37,8 @@ sealed class TaxRule {
 
     fun toWire(): String = when (this) {
         is None -> "none"
-        is Gains -> "gains:${pct(rate)}%"
-        is Value -> "value:${pct(rate)}%"
+        is Gains -> "gains:${ratePercent(rate)}%"
+        is Value -> "value:${ratePercent(rate)}%"
     }
 
     companion object {
@@ -57,8 +57,9 @@ sealed class TaxRule {
                 else -> error("bad tax rule kind: $kind")
             }
         }
-
-        private fun pct(rate: BigDecimal): String =
-            rate.multiply(HUNDRED).stripTrailingZeros().toPlainString()
     }
 }
+
+/** A tax-rate fraction (0.172) rendered as a percentage number string ("17.2"), trailing zeros trimmed. */
+internal fun ratePercent(fraction: BigDecimal): String =
+    fraction.multiply(BigDecimal(100)).stripTrailingZeros().toPlainString()

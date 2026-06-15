@@ -66,32 +66,30 @@ class AppViewModel(private val container: AppContainer) : ViewModel() {
         _message.value = e.message ?: e.javaClass.simpleName
     }
 
-    fun onboard(owner: String, repo: String, path: String, branch: String, token: String, pass: String) {
+    /** Launches [block] with the busy flag set for its duration (cleared on success or failure). */
+    private fun launchBusy(block: suspend () -> Unit) {
         viewModelScope.launch {
             _busy.value = true
-            _onboardError.value = null
             try {
-                this@AppViewModel.repo.onboard(owner, repo, path, branch, token, pass)
-                    .onSuccess { refreshQuotes() }
-                    .onFailure { failOnboard(it) }
+                block()
             } finally {
                 _busy.value = false
             }
         }
     }
 
-    fun unlock() {
-        viewModelScope.launch {
-            _busy.value = true
-            _onboardError.value = null
-            try {
-                repo.unlock()
-                    .onSuccess { refreshQuotes() }
-                    .onFailure { failOnboard(it) }
-            } finally {
-                _busy.value = false
-            }
-        }
+    fun onboard(owner: String, repo: String, path: String, branch: String, token: String, pass: String) = launchBusy {
+        _onboardError.value = null
+        this@AppViewModel.repo.onboard(owner, repo, path, branch, token, pass)
+            .onSuccess { refreshQuotes() }
+            .onFailure { failOnboard(it) }
+    }
+
+    fun unlock() = launchBusy {
+        _onboardError.value = null
+        repo.unlock()
+            .onSuccess { refreshQuotes() }
+            .onFailure { failOnboard(it) }
     }
 
     /** Onboarding/unlock failures go to the persistent inline channel (not the transient snackbar). */
@@ -122,17 +120,10 @@ class AppViewModel(private val container: AppContainer) : ViewModel() {
         ccy: String,
         note: String?,
         onSaved: (String) -> Unit,
-    ) {
-        viewModelScope.launch {
-            _busy.value = true
-            try {
-                repo.addTransaction(date, accountId, assetId, kind, qty, amount, ccy, note)
-                    .onSuccess { onSaved(it.message) }
-                    .onFailure { fail(it) }
-            } finally {
-                _busy.value = false
-            }
-        }
+    ) = launchBusy {
+        repo.addTransaction(date, accountId, assetId, kind, qty, amount, ccy, note)
+            .onSuccess { onSaved(it.message) }
+            .onFailure { fail(it) }
     }
 
     /** Creates (id == null) or edits an account, then runs [onSaved] with the outcome message. */
@@ -143,34 +134,20 @@ class AppViewModel(private val container: AppContainer) : ViewModel() {
         tax: TaxRule,
         aliases: List<String>,
         onSaved: (String) -> Unit,
-    ) {
-        viewModelScope.launch {
-            _busy.value = true
-            try {
-                val result = if (id == null) {
-                    repo.addAccount(name, ccy, tax, aliases)
-                } else {
-                    repo.editAccount(id, name, ccy, tax, aliases)
-                }
-                result.onSuccess { onSaved(it.message) }.onFailure { fail(it) }
-            } finally {
-                _busy.value = false
-            }
+    ) = launchBusy {
+        val result = if (id == null) {
+            repo.addAccount(name, ccy, tax, aliases)
+        } else {
+            repo.editAccount(id, name, ccy, tax, aliases)
         }
+        result.onSuccess { onSaved(it.message) }.onFailure { fail(it) }
     }
 
     /** Deletes an account; refused with a snackbar message if a transaction still references it. */
-    fun deleteAccount(id: String) {
-        viewModelScope.launch {
-            _busy.value = true
-            try {
-                repo.deleteAccount(id)
-                    .onSuccess { notify(it.message) }
-                    .onFailure { fail(it) }
-            } finally {
-                _busy.value = false
-            }
-        }
+    fun deleteAccount(id: String) = launchBusy {
+        repo.deleteAccount(id)
+            .onSuccess { notify(it.message) }
+            .onFailure { fail(it) }
     }
 
     fun forget() {
