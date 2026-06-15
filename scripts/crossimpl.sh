@@ -18,7 +18,7 @@ GPW="gopw"
 rm -rf "$OUT"; mkdir -p "$OUT"
 run_fin() { FINADOR_PASSWORD="$1" "$FIN" --offline --no-keychain --db "$2" "${@:3}" </dev/null; }
 
-echo "### 1. baseline — Go reads the committed sample"
+echo "### 1. baseline - Go reads the committed sample"
 run_fin "$SPW" "$SAMPLE" account list
 run_fin "$SPW" "$SAMPLE" tx list | tail -n +1
 
