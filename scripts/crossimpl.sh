@@ -28,8 +28,10 @@ echo "### 2. Android produces android-mutated.fin (sample + a deposit)"
   -Dcrossimpl.out="$OUT" --console=plain </dev/null
 ls -l "$OUT/android-mutated.fin"
 
-echo "### 3. Go reads the Android-mutated file"
-run_fin "$SPW" "$OUT/android-mutated.fin" account list
+echo "### 3. Go reads the Android-mutated file (incl. an Android-written account)"
+ACCTS=$(run_fin "$SPW" "$OUT/android-mutated.fin" account list)
+echo "$ACCTS"
+echo "$ACCTS" | grep -q "Android Test Account" || { echo "FAIL: Go did not read the Android-written account"; exit 1; }
 run_fin "$SPW" "$OUT/android-mutated.fin" tx list
 
 echo "### 4. Go creates go-created.fin (init + account + cash deposit)"

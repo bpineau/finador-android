@@ -1,6 +1,9 @@
 package fin.android.format
 
+import fin.android.crypto.Ids
+import fin.android.domain.Account
 import fin.android.domain.Money
+import fin.android.domain.TaxRule
 import fin.android.domain.TxKind
 import org.junit.Test
 import java.io.File
@@ -26,6 +29,9 @@ class CrossImplProducerTest {
             qty = BigDecimal.ZERO,
             amount = Money(BigDecimal("5000"), "EUR"),
             note = "from-android",
+        ).putAccount(
+            // A net-new account written by Android — the Go CLI must read it back (crossimpl.sh §3).
+            Account(Ids.newId(), "Android Test Account", "USD", TaxRule.Gains(BigDecimal("0.25")), listOf("android-acct")),
         )
         outDir.mkdirs()
         File(outDir, "android-mutated.fin").writeBytes(mutated.toBytes())

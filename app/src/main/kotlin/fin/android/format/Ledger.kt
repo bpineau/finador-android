@@ -2,6 +2,8 @@ package fin.android.format
 
 import fin.android.crypto.B64
 import fin.android.crypto.Ids
+import fin.android.domain.Account
+import fin.android.domain.AccountRules
 import fin.android.domain.Book
 import fin.android.domain.Money
 import fin.android.domain.TxKind
@@ -54,6 +56,24 @@ class Ledger internal constructor(
     fun deleteTransaction(id: String): Ledger {
         val d = wireJson.encodeToJsonElement(IdRefDto.serializer(), IdRefDto(id)).jsonObject
         return append(listOf(Envelope("tx-del", Rfc3339.now(), d)))
+    }
+
+    /**
+     * Upserts an account (an `acct` record, last-writer-wins by id) — used for both create and edit,
+     * since the format reconciles by id. Rejects a reference collision against the *current* book
+     * (post-pull when called inside [fin.android.remote.Sync.mutate]).
+     */
+    fun putAccount(account: Account): Ledger {
+        AccountRules.checkRefs(book.accounts.values, account)
+        val dto = AcctDto(account.id, account.name, account.ccy, account.tax.toWire(), account.aliases)
+        return append(listOf(Envelope("acct", Rfc3339.now(), wireJson.encodeToJsonElement(AcctDto.serializer(), dto).jsonObject)))
+    }
+
+    /** Deletes an account (an `acct-del` tombstone). Refuses to orphan a referencing transaction. */
+    fun deleteAccount(id: String): Ledger {
+        AccountRules.assertNoTxRefs(book, id)
+        val d = wireJson.encodeToJsonElement(IdRefDto.serializer(), IdRefDto(id)).jsonObject
+        return append(listOf(Envelope("acct-del", Rfc3339.now(), d)))
     }
 
     /** Reconciles a diverged copy of the same ledger (union + last-writer-wins by ts). */

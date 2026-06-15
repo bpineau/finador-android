@@ -57,7 +57,11 @@ object Routes {
     const val SETTINGS = "settings"
     const val TX_ENTRY = "txentry"
     const val ASSET = "asset/{assetId}"
+    const val ACCOUNTS = "accounts"
+    const val ACCOUNT_NEW = "account/new"
+    const val ACCOUNT_EDIT = "account/{accountId}/edit"
     fun asset(assetId: String) = "asset/$assetId"
+    fun accountEdit(accountId: String) = "account/$accountId/edit"
 }
 
 /** Top-level sections reachable from the bottom NavigationBar. */
@@ -197,7 +201,34 @@ private fun ReadyNav(vm: AppViewModel, ready: AppState.Ready, snackbar: Snackbar
                 )
             }
             composable(Routes.SETTINGS) {
-                SettingsScreen(vm = vm, ready = ready)
+                SettingsScreen(
+                    vm = vm,
+                    ready = ready,
+                    onManageAccounts = { nav.navigate(Routes.ACCOUNTS) },
+                )
+            }
+            composable(Routes.ACCOUNTS) {
+                AccountListScreen(
+                    vm = vm,
+                    ready = ready,
+                    onAdd = { nav.navigate(Routes.ACCOUNT_NEW) },
+                    onEdit = { id -> nav.navigate(Routes.accountEdit(id)) },
+                    onBack = { nav.popBackStack() },
+                )
+            }
+            composable(Routes.ACCOUNT_NEW) {
+                AccountEditorScreen(vm = vm, ready = ready, accountId = null, onDone = { nav.popBackStack() })
+            }
+            composable(
+                Routes.ACCOUNT_EDIT,
+                arguments = listOf(navArgument("accountId") { type = NavType.StringType }),
+            ) { entry ->
+                AccountEditorScreen(
+                    vm = vm,
+                    ready = ready,
+                    accountId = entry.arguments?.getString("accountId"),
+                    onDone = { nav.popBackStack() },
+                )
             }
             composable(
                 Routes.ASSET,
