@@ -9,8 +9,8 @@ when you change architecture or invariants.
 `finador-android` is a native Android app (Kotlin + Jetpack Compose) — the mobile companion to
 **finador** (a Go CLI+web personal wealth tracker, at `../finador`). It reads/writes the same
 **encrypted `.fin` ledger** and syncs it through a **private GitHub repo**. v1 = read everything
-(value, gains, per-asset detail) + quick transaction entry. Accounts/assets are created on the
-desktop; mobile only adds transactions.
+(value, gains, per-asset detail) + quick transaction entry. Accounts AND assets are now manageable
+on both web and mobile (Settings → Manage accounts / Manage assets), alongside the CLI.
 
 ## Golden rules (do not break)
 

@@ -41,7 +41,12 @@ import fin.android.data.AppState
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun SettingsScreen(vm: AppViewModel, ready: AppState.Ready, onManageAccounts: () -> Unit) {
+fun SettingsScreen(
+    vm: AppViewModel,
+    ready: AppState.Ready,
+    onManageAccounts: () -> Unit,
+    onManageAssets: () -> Unit,
+) {
     val summary = remember { vm.repoSummary() }
     val sync = ready.sync
 
@@ -71,23 +76,9 @@ fun SettingsScreen(vm: AppViewModel, ready: AppState.Ready, onManageAccounts: ()
                 }
             }
 
-            SettingsCard("Accounts") {
-                Row(
-                    Modifier.fillMaxWidth().clickable(onClick = onManageAccounts),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically,
-                ) {
-                    Text(
-                        "Manage accounts",
-                        style = MaterialTheme.typography.bodyMedium,
-                        color = MaterialTheme.colorScheme.onSurface,
-                    )
-                    Icon(
-                        Icons.AutoMirrored.Filled.KeyboardArrowRight,
-                        contentDescription = null,
-                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-                }
+            SettingsCard("Manage") {
+                NavRow("Manage accounts", onClick = onManageAccounts)
+                NavRow("Manage assets", onClick = onManageAssets)
             }
 
             SettingsCard("Display") {
@@ -119,6 +110,27 @@ fun SettingsScreen(vm: AppViewModel, ready: AppState.Ready, onManageAccounts: ()
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
         }
+    }
+}
+
+/** A tappable "go to X" row with a trailing chevron, used by the Manage card. */
+@Composable
+private fun NavRow(label: String, onClick: () -> Unit) {
+    Row(
+        Modifier.fillMaxWidth().clickable(onClick = onClick),
+        horizontalArrangement = Arrangement.SpaceBetween,
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Text(
+            label,
+            style = MaterialTheme.typography.bodyMedium,
+            color = MaterialTheme.colorScheme.onSurface,
+        )
+        Icon(
+            Icons.AutoMirrored.Filled.KeyboardArrowRight,
+            contentDescription = null,
+            tint = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
     }
 }
 

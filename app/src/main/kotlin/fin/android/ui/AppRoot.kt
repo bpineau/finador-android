@@ -60,8 +60,12 @@ object Routes {
     const val ACCOUNTS = "accounts"
     const val ACCOUNT_NEW = "account/new"
     const val ACCOUNT_EDIT = "account/{accountId}/edit"
+    const val ASSETS = "assets"
+    const val ASSET_NEW = "asset/new"
+    const val ASSET_EDIT = "asset/{assetId}/edit"
     fun asset(assetId: String) = "asset/$assetId"
     fun accountEdit(accountId: String) = "account/$accountId/edit"
+    fun assetEdit(assetId: String) = "asset/$assetId/edit"
 }
 
 /** Top-level sections reachable from the bottom NavigationBar. */
@@ -205,6 +209,7 @@ private fun ReadyNav(vm: AppViewModel, ready: AppState.Ready, snackbar: Snackbar
                     vm = vm,
                     ready = ready,
                     onManageAccounts = { nav.navigate(Routes.ACCOUNTS) },
+                    onManageAssets = { nav.navigate(Routes.ASSETS) },
                 )
             }
             composable(Routes.ACCOUNTS) {
@@ -227,6 +232,29 @@ private fun ReadyNav(vm: AppViewModel, ready: AppState.Ready, snackbar: Snackbar
                     vm = vm,
                     ready = ready,
                     accountId = entry.arguments?.getString("accountId"),
+                    onDone = { nav.popBackStack() },
+                )
+            }
+            composable(Routes.ASSETS) {
+                AssetListScreen(
+                    vm = vm,
+                    ready = ready,
+                    onAdd = { nav.navigate(Routes.ASSET_NEW) },
+                    onEdit = { id -> nav.navigate(Routes.assetEdit(id)) },
+                    onBack = { nav.popBackStack() },
+                )
+            }
+            composable(Routes.ASSET_NEW) {
+                AssetEditorScreen(vm = vm, ready = ready, assetId = null, onDone = { nav.popBackStack() })
+            }
+            composable(
+                Routes.ASSET_EDIT,
+                arguments = listOf(navArgument("assetId") { type = NavType.StringType }),
+            ) { entry ->
+                AssetEditorScreen(
+                    vm = vm,
+                    ready = ready,
+                    assetId = entry.arguments?.getString("assetId"),
                     onDone = { nav.popBackStack() },
                 )
             }
