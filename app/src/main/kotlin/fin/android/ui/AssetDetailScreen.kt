@@ -135,7 +135,7 @@ private fun HeaderCard(d: AssetDetail) {
         } else {
             d.ticker?.let { DetailRow("Ticker", it) }
             d.isin?.let { DetailRow("ISIN", it) }
-            DetailRow("Quantity", "${d.qty.stripTrailingZeros().toPlainString()} units")
+            DetailRow("Quantity", formatQuantity(d.qty))
             DetailRow(
                 "Market price",
                 if (d.price != null) "${formatAmount(d.price)} ${d.assetCcy}" else "—",
