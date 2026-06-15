@@ -28,6 +28,6 @@
 -dontwarn com.google.errorprone.annotations.**
 -dontwarn javax.annotation.**
 -keep class com.google.crypto.tink.** { *; }
-# Tink's optional remote-keyset downloader pulls google-api-client / joda — unused here.
+# Tink's optional remote-keyset downloader pulls google-api-client / joda - unused here.
 -dontwarn com.google.api.client.**
 -dontwarn org.joda.time.**
