@@ -28,13 +28,13 @@ class FormatTest {
     }
 
     @Test fun orDashHandlesNull() {
-        assertEquals("—", formatGainCellOrDash(null))
+        assertEquals("-", formatGainCellOrDash(null))
         assertEquals("12.3", formatGainCellOrDash(12.34))
     }
 
     @Test fun gainPercentOneDecimalNoPlus() {
         assertEquals("12.3%", formatGainPercent(0.1234))
         assertEquals("-4.6%", formatGainPercent(-0.0456))
-        assertEquals("—", formatGainPercent(null))
+        assertEquals("-", formatGainPercent(null))
     }
 }

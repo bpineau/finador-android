@@ -41,7 +41,7 @@ data class ValuationLine(val label: String, val gross: Double, val tax: Double, 
  * The value of the whole book at [asOf], in [referenceCcy]. Line taxes are the
  * per-position approximation; [gross]/[tax]/[net] use the exact per-account
  * envelope rule, and [taxNote] is set when the two visibly diverge (or when a
- * held security could not be priced — its value was counted as 0).
+ * held security could not be priced - its value was counted as 0).
  */
 data class Valuation(
     val asOf: LocalDate,
@@ -191,7 +191,7 @@ internal class Valuer(
         val d = exactTax - lineTaxTotal
         if (d > 0.01 || d < -0.01) note = NOTE_TAX_APPROX
         if (fxMissing) {
-            val missingNote = "some positions could not be priced or converted — counted as 0"
+            val missingNote = "some positions could not be priced or converted - counted as 0"
             note = if (note == null) missingNote else "$note; $missingNote"
         }
 

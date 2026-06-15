@@ -10,7 +10,7 @@ data class GithubConfig(
     val owner: String,
     val repo: String,
     val path: String = "portfolio.fin",
-    val branch: String = "main",
+    val branch: String = "master",
 )
 
 /**

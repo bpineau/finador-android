@@ -8,7 +8,7 @@ import java.util.Locale
 /**
  * RFC 3339 with nanoseconds in UTC, formatted exactly like Go's time.RFC3339Nano (trailing zeros
  * of the fraction trimmed; no fraction when zero). Keeping the same shape as the reference writer
- * makes the `ts` field — the merge last-writer-wins key — compare consistently across clients.
+ * makes the `ts` field - the merge last-writer-wins key - compare consistently across clients.
  *
  * Locale.ROOT everywhere: this string is sealed into the file and used as the LWW sort key, so the
  * digits must be ASCII 0-9 regardless of the device locale (an Arabic/Persian locale would otherwise

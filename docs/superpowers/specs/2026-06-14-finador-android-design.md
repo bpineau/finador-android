@@ -1,6 +1,6 @@
-# finador-android — design (v1)
+# finador-android - design (v1)
 
-*2026-06-14 — spec resulting from a brainstorming. Native Android client, **bit-for-bit
+*2026-06-14 - spec resulting from a brainstorming. Native Android client, **bit-for-bit
 compatible** with the finador file format and the GitHub sync. The same encrypted `.fin`, in a
 private GitHub repository, is usable interchangeably from the desktop (CLI/web) and from
 Android.*
@@ -20,7 +20,7 @@ An Android app that reads and writes **exactly** the same `.fin` file as finador
 via the **same private GitHub repository**, so that the user manages their wealth from the desktop
 **and** from the mobile on the same ledger, without conversion or format divergence.
 
-### 0.2 v1 scope — *viewer + quick entry*
+### 0.2 v1 scope - *viewer + quick entry*
 
 **Read (everything)**:
 - Unlock the `.fin`, decrypt, replay (fold) the journal → `Book`.
@@ -30,7 +30,7 @@ via the **same private GitHub repository**, so that the user manages their wealt
   (phase 6, "nice-to-have" of v1).
 - Display of labels (read-only).
 
-**Write (quick entry on the go)** — only **transactions** on **already existing** accounts /
+**Write (quick entry on the go)** - only **transactions** on **already existing** accounts /
 assets:
 - `buy`, `sell`, `dividend`, `fee`, `deposit`, `withdraw`, `statement` (the 7 `tx` kinds).
 - Correction / deletion of a recent transaction (`tx-edit`, `tx-del`).
@@ -71,15 +71,15 @@ and then propagate via sync.
 | Charts | **Compose Canvas** (hand-rolled drawing) | simple curves, zero heavy dependency (finador ethos) |
 | Secrets | **Android Keystore + EncryptedSharedPreferences** (`androidx.security:security-crypto`) | equivalent to macOS Keychain |
 
-### 1.1 Crypto — dependencies
+### 1.1 Crypto - dependencies
 
 Everything is in the JDK **except Argon2id**:
 
 | Primitive | Implementation |
 |---|---|
-| Argon2id | **`com.lambdapioneer.argon2kt:argon2kt`** (JNI wrapper of the reference lib, native libs for all ABIs, explicit `t`/`m`/`p` parameters, raw output) — **the only external crypto dependency** |
+| Argon2id | **`com.lambdapioneer.argon2kt:argon2kt`** (JNI wrapper of the reference lib, native libs for all ABIs, explicit `t`/`m`/`p` parameters, raw output) - **the only external crypto dependency** |
 | HKDF-SHA256 | hand-rolled (RFC 5869) via `javax.crypto.Mac` (HmacSHA256), ~30 lines |
-| AES-256-GCM | `javax.crypto.Cipher("AES/GCM/NoPadding")` + `GCMParameterSpec(128, nonce)` — the tag is appended to the ciphertext, **like Go** (compatible convention) |
+| AES-256-GCM | `javax.crypto.Cipher("AES/GCM/NoPadding")` + `GCMParameterSpec(128, nonce)` - the tag is appended to the ciphertext, **like Go** (compatible convention) |
 | SHA-256 | `java.security.MessageDigest` |
 | base64 std padded | `java.util.Base64.getEncoder()/getDecoder()` |
 | base64 RawURL (cache name) | `java.util.Base64.getUrlEncoder().withoutPadding()` |
@@ -91,7 +91,7 @@ higher-level development.
 
 ---
 
-## 2. Dev environment (macOS, Homebrew, free) — **installed**
+## 2. Dev environment (macOS, Homebrew, free) - **installed**
 
 Environment actually in place (done by the user):
 ```sh
@@ -178,7 +178,7 @@ We reimplement the reader/writer described by `FORMAT.md v3`. Key points:
    record` (truncation/tampering detection).
 5. **Replay (fold)** in file order: upsert/tombstone by `id` (config by `key`).
    `tx-edit == tx` (upsert), tombstones delete. **An unknown `k` = hard error** (never
-   ignored — could hide money). **Unknown fields of a known `k` = tolerated** (and
+   ignored - could hide money). **Unknown fields of a known `k` = tolerated** (and
    round-tripped via the verbatim line).
 
 ### 4.2 Write (diff-on-save, append-only)
@@ -210,7 +210,7 @@ We reimplement the reader/writer described by `FORMAT.md v3`. Key points:
 The `.fin` **lives in a private GitHub repository**; the remote is just a **transport**. Reimplements
 the model of finador's remote spec.
 
-### 5.1 Backend — GitHub Contents API (pure HTTPS, no git binary)
+### 5.1 Backend - GitHub Contents API (pure HTTPS, no git binary)
 - `GET /repos/{owner}/{repo}/contents/{path}?ref={branch}` (`Authorization: Bearer <PAT>`,
   `Accept: application/vnd.github+json`) → `{content: base64, sha}`. **Gotcha**: GitHub `content`
   contains line breaks every 60 chars → **strip whitespace before base64-decode**. 404 →
@@ -233,7 +233,7 @@ interface Backend {
 }
 ```
 
-### 5.2 Sync layer — working copy + state
+### 5.2 Sync layer - working copy + state
 - **Working copy**: `filesDir/checkout/<hash(owner/repo/path)>.fin`.
 - **Sidecar state**: `…<hash>.state.json` = `{ "sha": "<last known remote sha>",
   "lastPull": "<RFC3339>", "dirty": false }`. `dirty=true` = unpushed changes (offline).
@@ -267,7 +267,7 @@ No `~/.config/finador/` on mobile → **`filesDir/config.json`**:
   "github": { "owner": "bpineau", "repo": "finador-data", "path": "portfolio.fin", "branch": "main" },
   "readPullAfter": "1h" }
 ```
-(Edited by the Settings screen.) The **PAT** never lives here — only in the Keystore.
+(Edited by the Settings screen.) The **PAT** never lives here - only in the Keystore.
 
 ---
 
@@ -299,18 +299,18 @@ Recomputed from the folded transactions (nothing is stored), like finador:
 - **Estimated tax** according to the account rule: `gains:N%` taxes `max(0, value − contribution
   base)`; `value:N%` taxes the entire value; `none` nothing. Display **gross / tax / net**.
 - **Value series** over time → curves (Compose Canvas).
-- **Metrics** (phase 6): TWR, XIRR, CAGR, volatility, Sharpe, Sortino, maxDD — by period /
+- **Metrics** (phase 6): TWR, XIRR, CAGR, volatility, Sharpe, Sortino, maxDD - by period /
   scope. Reimplements `internal/perf`.
 
 ---
 
-## 8. UI (Compose) — v1 screens
+## 8. UI (Compose) - v1 screens
 
 1. **Onboarding (once only)**: enter `owner/repo` (+ path, branch); **paste the GitHub
    PAT** into a text field ("paste" button, hidden after entry) → **stored in the Keystore**,
    never to be retyped again; enter the **passphrase** of the `.fin` once → **stored in the Keystore
    behind BiometricPrompt**. First pull → unlock. **On subsequent opens: only
-   biometric authentication** (fingerprint/face) unlocks — neither PAT nor passphrase to
+   biometric authentication** (fingerprint/face) unlocks - neither PAT nor passphrase to
    retype. Device code/PIN fallback if biometrics fails.
 2. **Overview (wealth)**: total gross/tax/net; equities/property/cash lines; tree by
    `group`; global sparkline; sync status banner (up to date / unpushed / offline).
@@ -334,7 +334,7 @@ Charts: hand-rolled **Canvas** drawing (line + sparkline), no WebView or heavy l
   onboarding, it is **stored in the Keystore** (EncryptedSharedPreferences; never in clear, never
   logged, never to be retyped again). Re-login from Settings if it is revoked/regenerated.
 - **Passphrase**: entered **once only**, **stored in the Keystore behind BiometricPrompt**.
-  Thereafter, **unlock by biometrics alone** (device code/PIN fallback) — never re-entered,
+  Thereafter, **unlock by biometrics alone** (device code/PIN fallback) - never re-entered,
   never on disk in clear. The KDF key is derived only after biometric unlock.
   Wrong passphrase and tampered file = **same error** "bad password / corrupt file"
   (indistinguishable by design). "Forget" in Settings purges PAT + passphrase from the Keystore.
@@ -359,7 +359,7 @@ The pure layer is frozen by **reference vectors** before any UI.
 
 ### 10.2 Round-trip & cross-implementation
 - Write a ledger on the Android side, re-read it on the Android side (identical replay).
-- **Cross-impl**: open with the **finador CLI** a `.fin` mutated by Android (and vice versa) —
+- **Cross-impl**: open with the **finador CLI** a `.fin` mutated by Android (and vice versa) -
   documented manual/CI test (the real criterion of "compatibility").
 - **Merge**: synthetic divergences (concurrent adds/deletes/edits, LWW, true conflict) =
   parity with `merge_test.go`.

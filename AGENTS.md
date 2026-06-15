@@ -1,4 +1,4 @@
-# AGENTS.md — guide for AI coding agents
+# AGENTS.md - guide for AI coding agents
 
 Read this first. It tells you what the project is, the rules you must not break, where things
 live, and how to change/verify code **cheaply** (few tokens, fast feedback). Keep it up to date
@@ -6,7 +6,7 @@ when you change architecture or invariants.
 
 ## What this is
 
-`finador-android` is a native Android app (Kotlin + Jetpack Compose) — the mobile companion to
+`finador-android` is a native Android app (Kotlin + Jetpack Compose) - the mobile companion to
 **finador** (a Go CLI+web personal wealth tracker, at `../finador`). It reads/writes the same
 **encrypted `.fin` ledger** and syncs it through a **private GitHub repo**. v1 = read everything
 (value, gains, per-asset detail) + quick transaction entry. Accounts AND assets are now manageable
@@ -36,7 +36,7 @@ export JAVA_HOME=/Library/Java/JavaVirtualMachines/temurin-21.jdk/Contents/Home
 export ANDROID_HOME=/opt/homebrew/share/android-commandlinetools
 P="$(git rev-parse --show-toplevel)"   # the repo root
 
-"$P/gradlew" --project-dir "$P" testDebugUnitTest            # unit tests (host JVM, no device) — your main loop
+"$P/gradlew" --project-dir "$P" testDebugUnitTest            # unit tests (host JVM, no device) - your main loop
 "$P/gradlew" --project-dir "$P" assembleDebug               # compile the APK (catches Compose/Android errors)
 "$P/gradlew" --project-dir "$P" testDebugUnitTest --tests "*GainsTest*" --rerun-tasks   # one test class (cheap)
 ```
@@ -90,7 +90,7 @@ that state; per-asset detail pages are **precomputed** into `Ready.assetDetails`
 ## Gotchas & non-obvious things
 
 - **`AppRepository` mutations are serialized by a `Mutex`** (`exclusive { }`). The Mutex is **not
-  reentrant** — a locked public method must call the `*Locked` private helpers, never another public
+  reentrant** - a locked public method must call the `*Locked` private helpers, never another public
   (locked) method (else deadlock). See `refreshQuotesLocked`.
 - **The market cache is NOT synced** (per-device, regenerable). A freshly synced device has the
   ledger but no prices until `refreshQuotes` runs → period gains read ~0 until quotes load, and
@@ -99,12 +99,12 @@ that state; per-asset detail pages are **precomputed** into `Ready.assetDetails`
   deposits are flows, not gains. Don't "fix" the ~0 on a property-heavy portfolio.
 - **`Ledger.toBytes()` is diff-on-save**: existing record lines are re-emitted verbatim; only new
   records are sealed and the trailer re-sealed. `merge` re-seals the whole chain (matches Go).
-- **Timestamps must be `Locale.ROOT`** (`format/Timestamps.kt`) — the `ts` is the sealed LWW key.
+- **Timestamps must be `Locale.ROOT`** (`format/Timestamps.kt`) - the `ts` is the sealed LWW key.
 - **Argon2id is Bouncy Castle** (pure-JVM, so host unit tests run); not `argon2kt`.
 - **Build types**: `debug` = dev (slow, debuggable). `release` = R8-minified, non-debuggable, ~6 MB,
   validated end-to-end. It's signed with the **real release key** when `FINADOR_STORE_FILE` & co. are
   set in `~/.gradle/gradle.properties` (never committed), and **falls back to debug signing** when
-  they're absent (contributors / CI) — see `app/build.gradle.kts` `signingConfigs` and the out-of-repo
+  they're absent (contributors / CI) - see `app/build.gradle.kts` `signingConfigs` and the out-of-repo
   notes file. The key/passwords live only in `~/.gradle/gradle.properties` + `~/finador-release.jks`.
 - The single native lib is Compose's `libandroidx.graphics.path.so`; "Unable to strip" is a benign warning.
 
@@ -118,11 +118,11 @@ that state; per-asset detail pages are **precomputed** into `Ready.assetDetails`
 
 ## Known deferred work (intentional, with rationale)
 
-- **Holdings replay is implemented twice** — `valuation/Valuator.kt` (full fold) and
+- **Holdings replay is implemented twice** - `valuation/Valuator.kt` (full fold) and
   `valuation/Perf.kt`'s `SeriesBuilder` (day-walk). Extracting the shared per-tx transition logic
-  would remove drift risk, but it touches parity-tested numbers — do it under the full suite.
+  would remove drift risk, but it touches parity-tested numbers - do it under the full suite.
 - **`Gains.periodGain` rebuilds a full series per window** (8 windows). Building one series over the
-  widest window and slicing (as Go's `report.go` does) is a pure speedup — verify TWR-per-window parity.
+  widest window and slicing (as Go's `report.go` does) is a pure speedup - verify TWR-per-window parity.
 - The *data* lives in the user's separate private GitHub repo; this code repo is public at
   `github.com/bpineau/finador-android`.
 

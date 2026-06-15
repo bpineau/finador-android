@@ -33,7 +33,7 @@ object AssetRules {
     fun assertNoTxRefs(book: Book, assetId: String) {
         val tx = book.txs.values.firstOrNull { it.asset == assetId } ?: return
         throw IllegalArgumentException(
-            "asset $assetId is referenced by transaction ${tx.id} — delete its transactions first",
+            "asset $assetId is referenced by transaction ${tx.id} - delete its transactions first",
         )
     }
 }

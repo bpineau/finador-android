@@ -10,7 +10,7 @@ import java.time.LocalDate
 /**
  * Orchestrates a market refresh for a [Book]: fetches a daily series for each security (by ticker
  * then ISIN, via the [MultiSource] chain), the per-currency USD FX series (via Yahoo), and merges
- * them into the existing [MarketData]. Pure of Android — callers handle the encrypted sidecar cache.
+ * them into the existing [MarketData]. Pure of Android - callers handle the encrypted sidecar cache.
  */
 object Quotes {
     fun refresh(

@@ -16,7 +16,7 @@ import java.time.LocalDate
 
 /**
  * Folds the record log in file (append) order into a materialized [Book]: upsert/tombstone by id
- * (config by key). An unknown kind is a hard error — never silently skipped.
+ * (config by key). An unknown kind is a hard error - never silently skipped.
  */
 internal object Replay {
     fun fold(entries: List<Entry>): Book {

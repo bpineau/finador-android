@@ -45,7 +45,7 @@ class AppRepository(private val container: AppContainer) {
     private var market: MarketData = MarketData()
 
     // Serializes every mutation of the shared ledger/market/config (the UI can launch e.g. sync and
-    // a quote refresh concurrently). Not reentrant — a locked method must call the *Locked helpers,
+    // a quote refresh concurrently). Not reentrant - a locked method must call the *Locked helpers,
     // never another public (locked) method.
     private val mutex = Mutex()
     private suspend fun <T> exclusive(block: suspend () -> T): T =
@@ -63,7 +63,7 @@ class AppRepository(private val container: AppContainer) {
     ): Result<Unit> = exclusive {
         val cfg = RemoteConfig(
             source = "github",
-            github = GithubConfig(owner.trim(), repo.trim(), path.trim().ifBlank { "portfolio.fin" }, branch.trim().ifBlank { "main" }),
+            github = GithubConfig(owner.trim(), repo.trim(), path.trim().ifBlank { "portfolio.fin" }, branch.trim().ifBlank { "master" }),
             readPullAfter = "1h",
         )
         runCatching {
@@ -72,7 +72,7 @@ class AppRepository(private val container: AppContainer) {
             container.secretStore.putPassphrase(pass)
 
             val sync = container.buildSync(cfg, token.trim())
-            try { sync.pullIfStale() } catch (e: RemoteError.Offline) { /* offline first run — create locally */ }
+            try { sync.pullIfStale() } catch (e: RemoteError.Offline) { /* offline first run - create locally */ }
 
             val wc = container.workingCopy(cfg)
             if (!wc.exists()) {
@@ -103,7 +103,7 @@ class AppRepository(private val container: AppContainer) {
 
     suspend fun refreshQuotes() = exclusive { refreshQuotesLocked() }
 
-    /** Quote refresh without taking the lock — call only from an already-locked method. */
+    /** Quote refresh without taking the lock - call only from an already-locked method. */
     private suspend fun refreshQuotesLocked() {
         val l = ledger ?: return
         runCatching {
@@ -247,7 +247,7 @@ class AppRepository(private val container: AppContainer) {
         // Gains are a pure read over the same engine; never let them crash the UI.
         val gains = runCatching { Gains.report(l.book, market, referenceCcy = ref, today = today) }.getOrNull()
         // Precompute every held-security detail now (reusing the valuation's positions, so no extra
-        // book folds) — opening an asset's page is then an instant map lookup, not a computation.
+        // book folds) - opening an asset's page is then an instant map lookup, not a computation.
         val assetDetails = runCatching {
             l.book.assets.values
                 .mapNotNull { a -> Gains.assetDetail(l.book, market, ref, today, a.id, valuation.positions)?.let { a.id to it } }
