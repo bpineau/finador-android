@@ -7,6 +7,7 @@ import androidx.lifecycle.viewmodel.CreationExtras
 import fin.android.App
 import fin.android.data.AppContainer
 import fin.android.data.AppRepository
+import fin.android.domain.AssetKind
 import fin.android.domain.TaxRule
 import fin.android.domain.TxKind
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -146,6 +147,34 @@ class AppViewModel(private val container: AppContainer) : ViewModel() {
     /** Deletes an account; refused with a snackbar message if a transaction still references it. */
     fun deleteAccount(id: String) = launchBusy {
         repo.deleteAccount(id)
+            .onSuccess { notify(it.message) }
+            .onFailure { fail(it) }
+    }
+
+    /** Creates (id == null) or edits an asset, then runs [onSaved] with the outcome message. */
+    fun saveAsset(
+        id: String?,
+        kind: AssetKind,
+        name: String,
+        ticker: String?,
+        isin: String?,
+        aliases: List<String>,
+        ccy: String,
+        group: String?,
+        withholding: Double?,
+        onSaved: (String) -> Unit,
+    ) = launchBusy {
+        val result = if (id == null) {
+            repo.addAsset(kind, name, ticker, isin, aliases, ccy, group, withholding)
+        } else {
+            repo.editAsset(id, kind, name, ticker, isin, aliases, ccy, group, withholding)
+        }
+        result.onSuccess { onSaved(it.message) }.onFailure { fail(it) }
+    }
+
+    /** Deletes an asset; refused with a snackbar message if a transaction still references it. */
+    fun deleteAsset(id: String) = launchBusy {
+        repo.deleteAsset(id)
             .onSuccess { notify(it.message) }
             .onFailure { fail(it) }
     }
