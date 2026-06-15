@@ -1,5 +1,6 @@
 package fin.android.ui
 
+import java.math.BigDecimal
 import java.text.DecimalFormat
 import java.text.DecimalFormatSymbols
 import java.util.Locale
@@ -56,3 +57,6 @@ fun formatGainCellOrDash(value: Double?): String = if (value == null) "—" else
 /** A percentage with exactly one decimal, no "+", no currency; null → "—". E.g. 0.123 → "12.3%". */
 fun formatGainPercent(fraction: Double?): String =
     if (fraction == null) "—" else "${gainCellFormat.format(fraction * 100)}%"
+
+/** Formats a holding quantity: trailing zeros trimmed, with a "units" suffix. E.g. 10.50 → "10.5 units". */
+fun formatQuantity(qty: BigDecimal): String = "${qty.stripTrailingZeros().toPlainString()} units"
