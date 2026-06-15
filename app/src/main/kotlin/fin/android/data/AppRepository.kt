@@ -2,6 +2,8 @@ package fin.android.data
 
 import fin.android.crypto.Ids
 import fin.android.domain.Account
+import fin.android.domain.Asset
+import fin.android.domain.AssetKind
 import fin.android.domain.Book
 import fin.android.domain.MarketData
 import fin.android.domain.Money
@@ -151,6 +153,31 @@ class AppRepository(private val container: AppContainer) {
     /** Deletes an account; refused (Result.failure) if a transaction still references it. */
     suspend fun deleteAccount(id: String): Result<SyncOutcome> = exclusive {
         mutateLocked("delete account") { it.deleteAccount(id) }
+    }
+
+    /** Creates an asset (fresh id). Rejects a reference collision; surfaced as Result.failure. */
+    suspend fun addAsset(
+        kind: AssetKind, name: String, ticker: String?, isin: String?,
+        aliases: List<String>, ccy: String, group: String?, withholding: Double?,
+    ): Result<SyncOutcome> = exclusive {
+        mutateLocked("add asset") {
+            it.putAsset(Asset(Ids.newId(), kind, name, ticker, isin, aliases, ccy, group, withholding))
+        }
+    }
+
+    /** Edits an existing asset in place (same id, last-writer-wins). */
+    suspend fun editAsset(
+        id: String, kind: AssetKind, name: String, ticker: String?, isin: String?,
+        aliases: List<String>, ccy: String, group: String?, withholding: Double?,
+    ): Result<SyncOutcome> = exclusive {
+        mutateLocked("edit asset") {
+            it.putAsset(Asset(id, kind, name, ticker, isin, aliases, ccy, group, withholding))
+        }
+    }
+
+    /** Deletes an asset; refused (Result.failure) if a transaction still references it. */
+    suspend fun deleteAsset(id: String): Result<SyncOutcome> = exclusive {
+        mutateLocked("delete asset") { it.deleteAsset(id) }
     }
 
     /**
