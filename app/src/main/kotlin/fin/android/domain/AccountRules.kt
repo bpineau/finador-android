@@ -30,7 +30,7 @@ object AccountRules {
     fun assertNoTxRefs(book: Book, accountId: String) {
         val tx = book.txs.values.firstOrNull { it.account == accountId } ?: return
         throw IllegalArgumentException(
-            "account $accountId is referenced by transaction ${tx.id} — delete its transactions first",
+            "account $accountId is referenced by transaction ${tx.id} - delete its transactions first",
         )
     }
 }

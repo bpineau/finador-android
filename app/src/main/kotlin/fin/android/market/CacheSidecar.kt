@@ -22,7 +22,7 @@ import java.util.zip.GZIPOutputStream
  * "FINCACHE2"(9 ascii) ‖ nonce[12] ‖ AES-256-GCM( gzip( JSON(MarketData) ), AAD="FINCACHE2" )
  * ```
  *
- * The cache is fully regenerable: a missing, unreadable or wrong-magic file is never an error —
+ * The cache is fully regenerable: a missing, unreadable or wrong-magic file is never an error -
  * [read] returns null and a refresh rebuilds it. The JSON shape matches the Go implementation byte
  * for byte (`{"d","c"}` points, `{"exDate","amount"}` dividends, dates as civil-day `YYYY-MM-DD`
  * strings) so a ledger's cache is portable across implementations. The Android cacheDir wiring is

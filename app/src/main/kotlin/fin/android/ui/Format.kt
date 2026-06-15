@@ -20,26 +20,26 @@ fun formatMoney(value: Double, ccy: String): String = "${moneyFormat.format(valu
 /** Formats a Double amount without a currency suffix. */
 fun formatAmount(value: Double): String = moneyFormat.format(value)
 
-/** Formats a fraction (0.123 → "12.3%"); null → "—". 1–2 decimals. */
+/** Formats a fraction (0.123 → "12.3%"); null → "-". 1–2 decimals. */
 fun formatPercent(fraction: Double?): String =
-    if (fraction == null) "—" else "${percentFormat.format(fraction * 100)}%"
+    if (fraction == null) "-" else "${percentFormat.format(fraction * 100)}%"
 
-/** Formats a unitless ratio (e.g. Sharpe) with two decimals; null → "—". */
-fun formatRatio(value: Double?): String = if (value == null) "—" else ratioFormat.format(value)
+/** Formats a unitless ratio (e.g. Sharpe) with two decimals; null → "-". */
+fun formatRatio(value: Double?): String = if (value == null) "-" else ratioFormat.format(value)
 
 /**
  * Formats a money amount with a leading minus for losses and NO "+" for gains (color carries the
- * direction): "1 234.56 CCY" / "−1 234.56 CCY"; null → "—".
+ * direction): "1 234.56 CCY" / "−1 234.56 CCY"; null → "-".
  */
 fun formatSignedMoney(value: Double?, ccy: String): String {
-    if (value == null) return "—"
+    if (value == null) return "-"
     val sign = if (value < 0) "−" else ""
     return "$sign${moneyFormat.format(kotlin.math.abs(value))} $ccy"
 }
 
-/** Formats a percentage fraction with a leading minus for losses and NO "+" for gains; null → "—". */
+/** Formats a percentage fraction with a leading minus for losses and NO "+" for gains; null → "-". */
 fun formatSignedPercent(fraction: Double?): String {
-    if (fraction == null) return "—"
+    if (fraction == null) return "-"
     val sign = if (fraction < 0) "−" else ""
     return "$sign${percentFormat.format(kotlin.math.abs(fraction) * 100)}%"
 }
@@ -51,12 +51,12 @@ fun formatSignedPercent(fraction: Double?): String {
  */
 fun formatGainCell(value: Double): String = gainCellFormat.format(value)
 
-/** Like [formatGainCell] but null → "—". */
-fun formatGainCellOrDash(value: Double?): String = if (value == null) "—" else gainCellFormat.format(value)
+/** Like [formatGainCell] but null → "-". */
+fun formatGainCellOrDash(value: Double?): String = if (value == null) "-" else gainCellFormat.format(value)
 
-/** A percentage with exactly one decimal, no "+", no currency; null → "—". E.g. 0.123 → "12.3%". */
+/** A percentage with exactly one decimal, no "+", no currency; null → "-". E.g. 0.123 → "12.3%". */
 fun formatGainPercent(fraction: Double?): String =
-    if (fraction == null) "—" else "${gainCellFormat.format(fraction * 100)}%"
+    if (fraction == null) "-" else "${gainCellFormat.format(fraction * 100)}%"
 
 /** Formats a holding quantity: trailing zeros trimmed, with a "units" suffix. E.g. 10.50 → "10.5 units". */
 fun formatQuantity(qty: BigDecimal): String = "${qty.stripTrailingZeros().toPlainString()} units"

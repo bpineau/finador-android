@@ -86,7 +86,7 @@ class GitHubBackend(
     }
 
     private fun authMessage(code: Int): String =
-        "GitHub token invalid or lacks Contents permission (HTTP $code) — re-login"
+        "GitHub token invalid or lacks Contents permission (HTTP $code) - re-login"
 
     companion object {
         private val JSON_MEDIA = "application/json".toMediaType()

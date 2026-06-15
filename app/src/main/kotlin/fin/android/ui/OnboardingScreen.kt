@@ -61,7 +61,7 @@ fun OnboardingScreen(vm: AppViewModel) {
             fontWeight = androidx.compose.ui.text.font.FontWeight.Bold,
         )
         Text(
-            "Connect a private GitHub repository. It holds only the encrypted ledger file — " +
+            "Connect a private GitHub repository. It holds only the encrypted ledger file - " +
                 "your data never leaves it in clear text.",
             style = MaterialTheme.typography.bodyMedium,
             color = MaterialTheme.colorScheme.onSurfaceVariant,

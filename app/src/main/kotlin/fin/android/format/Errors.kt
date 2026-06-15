@@ -1,7 +1,7 @@
 package fin.android.format
 
 /**
- * A wrong passphrase and a tampered/corrupt file are indistinguishable by design — both surface
+ * A wrong passphrase and a tampered/corrupt file are indistinguishable by design - both surface
  * as this single error.
  */
 class BadPasswordOrCorruptException(cause: Throwable? = null) :

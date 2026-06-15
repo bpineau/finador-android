@@ -1,6 +1,6 @@
 # finador-android
 
-A **native Android** client (Kotlin / Jetpack Compose) — the mobile companion to
+A **native Android** client (Kotlin / Jetpack Compose) - the mobile companion to
 [finador](../finador) (desktop CLI + web). It reads and writes **the same encrypted
 `.fin` file**, synced through a **private GitHub repository**, so you manage your wealth
 interchangeably from desktop and mobile.
@@ -16,7 +16,7 @@ interchangeably from desktop and mobile.
 
 ## 1. Set up the dev environment (macOS, free)
 
-> For a developer **new to Android**: you do **not** have to install Gradle or Android Studio —
+> For a developer **new to Android**: you do **not** have to install Gradle or Android Studio -
 > the project ships a wrapper (`./gradlew`) that downloads the right Gradle version, and the
 > command line is enough to build/install. Android Studio is still handy (editor, emulator
 > manager, logs).
@@ -65,7 +65,7 @@ Always with `JAVA_HOME`/`ANDROID_HOME` exported (see above):
 ```sh
 cd finador-android               # the cloned repo
 
-./gradlew testDebugUnitTest      # unit tests (JVM, no device) — the engine layer
+./gradlew testDebugUnitTest      # unit tests (JVM, no device) - the engine layer
 ./gradlew assembleDebug          # build the debug APK
 ./gradlew installDebug           # install on the connected device/emulator
 ```
@@ -98,7 +98,7 @@ adb shell am start -n fin.android/.ui.MainActivity   # (re)launch without reinst
 ```
 
 Stop the emulator: close its window, or `adb emu kill`.
-(GUI alternative: Android Studio → *Device Manager* → ▶ — more convenient.)
+(GUI alternative: Android Studio → *Device Manager* → ▶ - more convenient.)
 
 ---
 

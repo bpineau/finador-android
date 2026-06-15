@@ -3,7 +3,7 @@ package fin.android.crypto
 import org.junit.Assert.assertEquals
 import org.junit.Test
 
-/** Golden KDF vector from FORMAT.md §9.1 — freezes Argon2id + HKDF against the reference impl. */
+/** Golden KDF vector from FORMAT.md §9.1 - freezes Argon2id + HKDF against the reference impl. */
 class KdfTest {
     @Test
     fun kdfVector() {

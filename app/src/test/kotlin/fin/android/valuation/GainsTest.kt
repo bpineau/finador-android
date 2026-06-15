@@ -21,8 +21,8 @@ import java.time.LocalDate
 
 /**
  * Correctness tests for the gains layer. Each fixture is built so the expected
- * gain is hand-computable, and the key invariant — external flows (a deposit)
- * must NOT count as a gain — is asserted directly.
+ * gain is hand-computable, and the key invariant - external flows (a deposit)
+ * must NOT count as a gain - is asserted directly.
  */
 class GainsTest {
     private val tol = 1e-6
@@ -104,7 +104,7 @@ class GainsTest {
             // Open the tracked envelope and buy well before the window.
             tx("2026-01-01", "pea", null, TxKind.statement, amount = eur("2000")), // makes cash tracked
             tx("2026-01-02", "pea", "aa", TxKind.buy, "10", eur("1000")),
-            // A deposit INSIDE the 7d window — must not show as a gain.
+            // A deposit INSIDE the 7d window - must not show as a gain.
             tx("2026-06-10", "pea", null, TxKind.deposit, amount = eur("5000")),
         ).forEach { txs[it.id] = it }
         val book = Book(accounts = accounts, assets = assets, txs = txs, config = mapOf("currency" to "EUR"))
@@ -351,7 +351,7 @@ class GainsTest {
      * Period gains must reflect a security's price move over the window. 100 shares bought for
      * 10000 (cash now 0); price 100 → 110 over the 7d window ⇒ +1000 (+10%). Guards against a flat
      * series when the price history has the dates the window needs (the on-device "+0.0%" was a
-     * shallow-cache symptom, not a calculation bug — this proves the math).
+     * shallow-cache symptom, not a calculation bug - this proves the math).
      */
     /**
      * Property detail: valued by statements (no price/periods). Initial 400000, revalued 450000 →

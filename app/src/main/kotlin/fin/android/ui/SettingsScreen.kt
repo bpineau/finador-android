@@ -87,8 +87,8 @@ fun SettingsScreen(
 
             SettingsCard("Sync") {
                 InfoRow("State", if (sync.dirty) "Unpushed changes" else "Clean")
-                InfoRow("Last pull", sync.lastPull ?: "—")
-                InfoRow("Version", sync.sha?.take(12) ?: "—")
+                InfoRow("Last pull", sync.lastPull ?: "-")
+                InfoRow("Version", sync.sha?.take(12) ?: "-")
             }
 
             Spacer(Modifier.height(4.dp))
@@ -100,7 +100,7 @@ fun SettingsScreen(
             ) {
                 Icon(Icons.Filled.DeleteOutline, contentDescription = null, modifier = Modifier.size(18.dp))
                 Spacer(Modifier.size(8.dp))
-                Text("Forget — purge token, passphrase & config")
+                Text("Forget - purge token, passphrase & config")
             }
 
             Spacer(Modifier.height(4.dp))

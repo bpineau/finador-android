@@ -4,7 +4,7 @@ import java.time.LocalDate
 
 /**
  * Quotes a daily series by trying an ordered chain of providers: the first that returns a non-null
- * result with a non-empty close series wins. The default chain mirrors the Go implementation —
+ * result with a non-empty close series wins. The default chain mirrors the Go implementation -
  * Yahoo for ticker symbols, with Financial Times then Morningstar (via Boursorama) as ISIN fallbacks
  * for funds Yahoo lacks. Chain: Yahoo → FT → Morningstar.
  */

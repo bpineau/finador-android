@@ -57,7 +57,7 @@ internal object Log {
         } catch (e: BadPasswordOrCorruptException) {
             throw e
         } catch (e: Exception) {
-            // AEADBadTagException, base64, JSON, bounds — all indistinguishable by design.
+            // AEADBadTagException, base64, JSON, bounds - all indistinguishable by design.
             throw BadPasswordOrCorruptException(e)
         }
     }

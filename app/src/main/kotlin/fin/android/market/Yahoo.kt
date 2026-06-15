@@ -14,12 +14,12 @@ import java.time.LocalDate
 import java.time.ZoneOffset
 
 /**
- * The default provider: the unofficial but stable Yahoo Finance chart API. No key, no auth — just a
+ * The default provider: the unofficial but stable Yahoo Finance chart API. No key, no auth - just a
  * browser-looking User-Agent and one polite retry on 429/5xx.
  *
  * Timezone note: the Go implementation converts each timestamp in the exchange's local zone (via
  * embedded tzdata). The Android side intentionally does NOT bundle tzdata and uses UTC for the
- * civil-day conversion — a quote near midnight may land one day off relative to Go, which is harmless
+ * civil-day conversion - a quote near midnight may land one day off relative to Go, which is harmless
  * for daily analytics (forward-fill smooths it).
  */
 class Yahoo(
@@ -50,7 +50,7 @@ class Yahoo(
         return DailyData(currency = r.meta?.currency, closes = closes, dividends = dividends)
     }
 
-    /** Quotes `"{ccy}USD=X"` and returns its close series — the value of one unit of [ccy] in USD. */
+    /** Quotes `"{ccy}USD=X"` and returns its close series - the value of one unit of [ccy] in USD. */
     fun fxToUsd(ccy: String, from: LocalDate): PriceSeries? {
         val resp = chart("${ccy}USD=X", from) ?: return null
         val r = resp.chart.result?.firstOrNull() ?: return null

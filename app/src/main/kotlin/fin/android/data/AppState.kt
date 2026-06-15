@@ -12,7 +12,7 @@ sealed interface AppState {
     /** Determining configuration/secrets. */
     data object Loading : AppState
 
-    /** No GitHub repo / token / passphrase configured yet — show onboarding. */
+    /** No GitHub repo / token / passphrase configured yet - show onboarding. */
     data object Onboarding : AppState
 
     /** Configured; awaiting biometric unlock before secrets are used. */

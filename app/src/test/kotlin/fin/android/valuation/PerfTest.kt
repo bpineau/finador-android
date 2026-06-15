@@ -343,7 +343,7 @@ class PerfTest {
         ).associateBy { it.id }
         val assets = listOf(
             Asset("cw8", AssetKind.SECURITY, "CW8", ticker = "CW8.PA", ccy = "EUR", group = "actions/monde"),
-            Asset("maison", AssetKind.PROPERTY, "Maison à Achères", ccy = "EUR", group = "immo"),
+            Asset("maison", AssetKind.PROPERTY, "Maison à Rénover", ccy = "EUR", group = "immo"),
         ).associateBy { it.id }
         val txs = listOf(
             tx("2026-01-10", "pea", null, TxKind.deposit, amount = eur("10000")),
