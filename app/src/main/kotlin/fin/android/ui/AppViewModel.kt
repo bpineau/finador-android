@@ -7,6 +7,7 @@ import androidx.lifecycle.viewmodel.CreationExtras
 import fin.android.App
 import fin.android.data.AppContainer
 import fin.android.data.AppRepository
+import fin.android.domain.TaxRule
 import fin.android.domain.TxKind
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -127,6 +128,44 @@ class AppViewModel(private val container: AppContainer) : ViewModel() {
             try {
                 repo.addTransaction(date, accountId, assetId, kind, qty, amount, ccy, note)
                     .onSuccess { onSaved(it.message) }
+                    .onFailure { fail(it) }
+            } finally {
+                _busy.value = false
+            }
+        }
+    }
+
+    /** Creates (id == null) or edits an account, then runs [onSaved] with the outcome message. */
+    fun saveAccount(
+        id: String?,
+        name: String,
+        ccy: String,
+        tax: TaxRule,
+        aliases: List<String>,
+        onSaved: (String) -> Unit,
+    ) {
+        viewModelScope.launch {
+            _busy.value = true
+            try {
+                val result = if (id == null) {
+                    repo.addAccount(name, ccy, tax, aliases)
+                } else {
+                    repo.editAccount(id, name, ccy, tax, aliases)
+                }
+                result.onSuccess { onSaved(it.message) }.onFailure { fail(it) }
+            } finally {
+                _busy.value = false
+            }
+        }
+    }
+
+    /** Deletes an account; refused with a snackbar message if a transaction still references it. */
+    fun deleteAccount(id: String) {
+        viewModelScope.launch {
+            _busy.value = true
+            try {
+                repo.deleteAccount(id)
+                    .onSuccess { notify(it.message) }
                     .onFailure { fail(it) }
             } finally {
                 _busy.value = false

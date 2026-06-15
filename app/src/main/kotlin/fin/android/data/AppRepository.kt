@@ -1,8 +1,11 @@
 package fin.android.data
 
+import fin.android.crypto.Ids
+import fin.android.domain.Account
 import fin.android.domain.Book
 import fin.android.domain.MarketData
 import fin.android.domain.Money
+import fin.android.domain.TaxRule
 import fin.android.domain.TxKind
 import fin.android.format.Ledger
 import fin.android.market.CacheSidecar
@@ -130,14 +133,38 @@ class AppRepository(private val container: AppContainer) {
         date: LocalDate, accountId: String, assetId: String?, kind: TxKind,
         qty: BigDecimal, amount: BigDecimal, ccy: String, note: String?,
     ): Result<SyncOutcome> = exclusive {
+        mutateLocked("add ${kind.name}") {
+            it.addTransaction(date, accountId, assetId, kind, qty, Money(amount, ccy), note?.ifBlank { null })
+        }
+    }
+
+    /** Creates an account (fresh id). Rejects a reference collision; surfaced as Result.failure. */
+    suspend fun addAccount(name: String, ccy: String, tax: TaxRule, aliases: List<String>): Result<SyncOutcome> = exclusive {
+        mutateLocked("add account") { it.putAccount(Account(Ids.newId(), name, ccy, tax, aliases)) }
+    }
+
+    /** Edits an existing account in place (same id, last-writer-wins). */
+    suspend fun editAccount(id: String, name: String, ccy: String, tax: TaxRule, aliases: List<String>): Result<SyncOutcome> = exclusive {
+        mutateLocked("edit account") { it.putAccount(Account(id, name, ccy, tax, aliases)) }
+    }
+
+    /** Deletes an account; refused (Result.failure) if a transaction still references it. */
+    suspend fun deleteAccount(id: String): Result<SyncOutcome> = exclusive {
+        mutateLocked("delete account") { it.deleteAccount(id) }
+    }
+
+    /**
+     * Shared mutate→reopen→emit path for every ledger write. The lock is already held (callers wrap
+     * this in [exclusive]); a validation failure inside [fn] propagates as Result.failure without
+     * touching the persisted copy (see [fin.android.remote.Sync.mutate]).
+     */
+    private fun mutateLocked(message: String, fn: (Ledger) -> Ledger): Result<SyncOutcome> {
         val cfg = container.loadConfig()
-        val token = container.secretStore.getPat() ?: return@exclusive Result.failure(IllegalStateException("no token"))
-        val pass = passphrase ?: return@exclusive Result.failure(IllegalStateException("locked"))
-        runCatching {
+        val token = container.secretStore.getPat() ?: return Result.failure(IllegalStateException("no token"))
+        val pass = passphrase ?: return Result.failure(IllegalStateException("locked"))
+        return runCatching {
             val sync = container.buildSync(cfg, token)
-            val outcome = sync.mutate(pass, "finador-android: add ${kind.name}") { ledgerSnapshot ->
-                ledgerSnapshot.addTransaction(date, accountId, assetId, kind, qty, Money(amount, ccy), note?.ifBlank { null })
-            }
+            val outcome = sync.mutate(pass, "finador-android: $message", fn = fn)
             ledger = Ledger.open(container.workingCopy(cfg).readBytes(), pass)
             emitReady(sync.state(), outcome.message, refreshing = false)
             outcome

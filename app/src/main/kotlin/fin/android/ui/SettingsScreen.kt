@@ -8,10 +8,12 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
 import androidx.compose.material.icons.filled.DeleteOutline
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
@@ -39,7 +41,7 @@ import fin.android.data.AppState
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun SettingsScreen(vm: AppViewModel, ready: AppState.Ready) {
+fun SettingsScreen(vm: AppViewModel, ready: AppState.Ready, onManageAccounts: () -> Unit) {
     val summary = remember { vm.repoSummary() }
     val sync = ready.sync
 
@@ -65,6 +67,25 @@ fun SettingsScreen(vm: AppViewModel, ready: AppState.Ready) {
                         "No repository configured.",
                         style = MaterialTheme.typography.bodyMedium,
                         color = MaterialTheme.colorScheme.onSurface,
+                    )
+                }
+            }
+
+            SettingsCard("Accounts") {
+                Row(
+                    Modifier.fillMaxWidth().clickable(onClick = onManageAccounts),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Text(
+                        "Manage accounts",
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onSurface,
+                    )
+                    Icon(
+                        Icons.AutoMirrored.Filled.KeyboardArrowRight,
+                        contentDescription = null,
+                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
                 }
             }
