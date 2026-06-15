@@ -72,8 +72,10 @@ cd finador-android               # the cloned repo
 
 - **First run** is slow (downloads Gradle + dependencies). Subsequent runs are fast.
 - The **debug build** is for everyday work. An optimized **release build** (R8: faster, ~3× smaller)
-  also exists: `./gradlew installRelease` (debug-signed so it can be installed locally; replace with
-  a real release key before any distribution).
+  also exists: `./gradlew installRelease`. It is signed with a real release key when the maintainer's
+  `FINADOR_STORE_FILE`/`FINADOR_STORE_PASSWORD`/`FINADOR_KEY_ALIAS`/`FINADOR_KEY_PASSWORD` are set in
+  `~/.gradle/gradle.properties` (never committed); without them it falls back to debug signing so the
+  repo still builds for everyone.
 
 ---
 

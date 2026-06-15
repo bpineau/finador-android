@@ -102,8 +102,10 @@ that state; per-asset detail pages are **precomputed** into `Ready.assetDetails`
 - **Timestamps must be `Locale.ROOT`** (`format/Timestamps.kt`) — the `ts` is the sealed LWW key.
 - **Argon2id is Bouncy Castle** (pure-JVM, so host unit tests run); not `argon2kt`.
 - **Build types**: `debug` = dev (slow, debuggable). `release` = R8-minified, non-debuggable, ~6 MB,
-  validated end-to-end; it's **debug-signed** for local installs (needs a real release keystore before
-  distribution — see the out-of-repo notes file).
+  validated end-to-end. It's signed with the **real release key** when `FINADOR_STORE_FILE` & co. are
+  set in `~/.gradle/gradle.properties` (never committed), and **falls back to debug signing** when
+  they're absent (contributors / CI) — see `app/build.gradle.kts` `signingConfigs` and the out-of-repo
+  notes file. The key/passwords live only in `~/.gradle/gradle.properties` + `~/finador-release.jks`.
 - The single native lib is Compose's `libandroidx.graphics.path.so`; "Unable to strip" is a benign warning.
 
 ## Verifying a change cheaply
@@ -121,9 +123,8 @@ that state; per-asset detail pages are **precomputed** into `Ready.assetDetails`
   would remove drift risk, but it touches parity-tested numbers — do it under the full suite.
 - **`Gains.periodGain` rebuilds a full series per window** (8 windows). Building one series over the
   widest window and slicing (as Go's `report.go` does) is a pure speedup — verify TWR-per-window parity.
-- **Release signing**: configure a real keystore (`app/build.gradle.kts` `signingConfigs`).
-- **No GitHub remote** for this code repo yet (local `master`); the *data* lives in the user's
-  separate private repo.
+- The *data* lives in the user's separate private GitHub repo; this code repo is public at
+  `github.com/bpineau/finador-android`.
 
 ## Pointers
 

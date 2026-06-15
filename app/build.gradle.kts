@@ -15,9 +15,26 @@ android {
         applicationId = "fin.android"
         minSdk = 26
         targetSdk = 36
-        versionCode = 1
-        versionName = "0.1"
+        versionCode = 2
+        versionName = "0.1.1"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
+    }
+
+    // Real release signing, configured entirely outside the repo: the keystore path and passwords
+    // come from ~/.gradle/gradle.properties (FINADOR_STORE_FILE / FINADOR_STORE_PASSWORD /
+    // FINADOR_KEY_ALIAS / FINADOR_KEY_PASSWORD), which is never committed. When absent (other
+    // contributors / CI) the values are null and the release build falls back to debug signing,
+    // so the repo still builds for everyone without exposing any secret.
+    val releaseStoreFile = (findProperty("FINADOR_STORE_FILE") as String?)?.takeIf { it.isNotBlank() }
+    signingConfigs {
+        if (releaseStoreFile != null) {
+            create("release") {
+                storeFile = file(releaseStoreFile)
+                storePassword = findProperty("FINADOR_STORE_PASSWORD") as String?
+                keyAlias = findProperty("FINADOR_KEY_ALIAS") as String?
+                keyPassword = findProperty("FINADOR_KEY_PASSWORD") as String?
+            }
+        }
     }
 
     buildTypes {
@@ -25,9 +42,9 @@ android {
             isMinifyEnabled = true
             isShrinkResources = true
             proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
-            // Debug-signed so it can be installed locally (`./gradlew installRelease`) without a keystore.
-            // Replace with a real release key before any distribution.
-            signingConfig = signingConfigs.getByName("debug")
+            // Use the real release key when configured (see signingConfigs above); otherwise fall
+            // back to debug signing so the repo still builds for contributors/CI without the keystore.
+            signingConfig = signingConfigs.findByName("release") ?: signingConfigs.getByName("debug")
         }
     }
 
