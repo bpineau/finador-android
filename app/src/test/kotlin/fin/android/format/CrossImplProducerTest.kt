@@ -14,7 +14,7 @@ import java.time.LocalDate
 
 /**
  * Writes Android-produced `.fin` files for the cross-implementation gate so the Go `finador` CLI
- * can be pointed at them. Not a pure assertion test — driven by `scripts/crossimpl.sh`.
+ * can be pointed at them. Not a pure assertion test - driven by `scripts/crossimpl.sh`.
  */
 class CrossImplProducerTest {
     private val outDir = File(System.getProperty("crossimpl.out") ?: "build/crossimpl")
@@ -32,10 +32,10 @@ class CrossImplProducerTest {
             amount = Money(BigDecimal("5000"), "EUR"),
             note = "from-android",
         ).putAccount(
-            // A net-new account written by Android — the Go CLI must read it back (crossimpl.sh §3).
+            // A net-new account written by Android - the Go CLI must read it back (crossimpl.sh §3).
             Account(Ids.newId(), "Android Test Account", "USD", TaxRule.Gains(BigDecimal("0.25")), listOf("android-acct")),
         ).putAsset(
-            // A net-new asset written by Android — the Go CLI must read it back (crossimpl.sh §3).
+            // A net-new asset written by Android - the Go CLI must read it back (crossimpl.sh §3).
             Asset(Ids.newId(), AssetKind.SECURITY, "Android Test Asset", "AND.TST", "US0000000000",
                 listOf("android-asset"), "USD", "test/group", 0.15),
         )

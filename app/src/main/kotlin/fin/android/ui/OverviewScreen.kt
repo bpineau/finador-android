@@ -112,7 +112,7 @@ fun GainsScreen(vm: AppViewModel, ready: AppState.Ready, onAssetClick: (String) 
             if (gains == null) {
                 item {
                     Text(
-                        "Gains are unavailable — refresh quotes to compute them.",
+                        "Gains are unavailable - refresh quotes to compute them.",
                         style = MaterialTheme.typography.bodyMedium,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )

@@ -3,14 +3,14 @@ package fin.android.domain
 import java.time.LocalDate
 
 /**
- * One daily close. Closes are analytics data: a [Double] is fine — decimal exactness lives in the
+ * One daily close. Closes are analytics data: a [Double] is fine - decimal exactness lives in the
  * ledger ([Money]), not in market quotes.
  */
 data class PricePoint(val date: LocalDate, val close: Double)
 
 /**
  * A date-sorted daily close series with forward-fill lookup. [fetchedAt] records the last refresh
- * day even when no new point appeared (week-ends) — staleness is judged on it, not on the last point.
+ * day even when no new point appeared (week-ends) - staleness is judged on it, not on the last point.
  * Instances are immutable: [merge] returns a new series.
  */
 data class PriceSeries(
@@ -48,7 +48,7 @@ data class DividendEvent(val exDate: LocalDate, val amount: Double)
 
 /**
  * The cached public market state. It lives inside the encrypted sidecar: the list of held tickers is
- * sensitive metadata. Everything here is refetchable — losing it costs one refresh, never user data.
+ * sensitive metadata. Everything here is refetchable - losing it costs one refresh, never user data.
  * Maps are keyed by asset id ([prices], [dividends]) or currency ([fx]); `fx[C]` is the value of one
  * unit of currency C in USD.
  */

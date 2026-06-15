@@ -81,7 +81,7 @@ class Morningstar(
             prev = day
         }
         if (closes.isEmpty()) return null
-        // Currency intentionally null — Morningstar doesn't disclose it.
+        // Currency intentionally null - Morningstar doesn't disclose it.
         return DailyData(currency = null, closes = closes)
     }
 
