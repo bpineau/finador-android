@@ -23,19 +23,17 @@ import java.time.LocalDate
 data class PeriodGain(val label: String, val absolute: Double, val relative: Double?)
 
 /**
- * One per-security row. Each value is the ABSOLUTE gain in the reference currency
- * of the CURRENT holding due to the price + FX move over the period (null when a
- * price or FX rate is missing at either endpoint). See [Gains.report] for the
- * intra-window-quantity caveat.
+ * One consolidated per-security row for the overview table. [value] is the asset's
+ * current GROSS value in the reference currency, summed across every account that
+ * holds it (before tax, at the current rate); it drives the table's descending sort.
+ * [d1] is the 1-day price/FX move as a fraction, null when a price or FX rate is
+ * missing at either endpoint.
  */
 data class AssetGain(
     val assetId: String,
     val name: String,
-    val ccy: String,
+    val value: Double,
     val d1: Double?,
-    val d7: Double?,
-    val m1: Double?,
-    val y1: Double?,
 )
 
 /** One per-asset period figure for the detail page: a % and an absolute, both in the ref ccy. */
@@ -113,10 +111,10 @@ object Gains {
      * Builds the [GainsReport] of [book] against [market] in [referenceCcy]
      * (defaults to `book.config["currency"]` then "EUR") as of [today].
      *
-     * Per-asset gains use the asset's CURRENT quantity: they approximate the gain
-     * as a pure price/FX move on today's holding. Intra-window quantity changes
-     * (buys/sells inside the period) are NOT attributed - for an exact, flow-aware
-     * figure use the portfolio-level absolute (which neutralizes external flows).
+     * The per-asset table consolidates each security across accounts into one row
+     * carrying its current gross value (ref ccy, before tax) and its 1-day move,
+     * sorted by value descending. The portfolio period figures neutralize external
+     * flows (deposits/withdraws are not gains).
      */
     fun report(
         book: Book,
@@ -181,51 +179,21 @@ object Gains {
             .positions.filter { it.kind == "security" && it.qty.signum() > 0 }
 
         val converter = Converter(market.fx)
-        val rows = positions.mapNotNull { p ->
-            val assetId = p.assetId ?: return@mapNotNull null
+        // One row per asset: sum the gross value across every account holding it, and
+        // take the asset's own 1-day move (a price/FX % on its last settled close - so
+        // it is the same whichever account the shares sit in).
+        val rows = positions.groupBy { it.assetId }.mapNotNull { (id, ps) ->
+            val assetId = id ?: return@mapNotNull null
             val asset = book.assets[assetId] ?: return@mapNotNull null
-            val qtyNow = p.qty.toDouble()
-            // Anchor each row on the asset's own last close so "1d" is its last session.
+            val value = ps.sumOf { it.gross }
             val anchor = assetAnchor(market, assetId, today)
-            fun gain(then: LocalDate): Double? =
-                assetGain(market, converter, assetId, asset.ccy, ccy, qtyNow, then, anchor)
-            val name = asset.ticker ?: asset.name
-            AssetGain(
-                assetId = assetId,
-                name = name,
-                ccy = asset.ccy,
-                d1 = gain(anchor.minusDays(1)),
-                d7 = gain(anchor.minusDays(7)),
-                m1 = gain(anchor.minusMonths(1)),
-                y1 = gain(anchor.minusYears(1)),
-            )
+            val pAnchor = priceRef(market, converter, assetId, asset.ccy, ccy, anchor)
+            val pThen = priceRef(market, converter, assetId, asset.ccy, ccy, anchor.minusDays(1))
+            val d1 = if (pAnchor != null && pThen != null && pThen != 0.0) pAnchor / pThen - 1 else null
+            AssetGain(assetId = assetId, name = asset.ticker ?: asset.name, value = value, d1 = d1)
         }
-        // Stable order: largest |1y| first, ties broken by name. Rows with a null
-        // 1y sink below the priced ones (treated as 0 magnitude) but keep name order.
-        return rows.sortedWith(
-            compareByDescending<AssetGain> { kotlin.math.abs(it.y1 ?: 0.0) }.thenBy { it.name },
-        )
-    }
-
-    /**
-     * Absolute gain in [ref] of `qtyNow` shares due to the price + FX move between
-     * [then] and [today]:  qtyNow × (priceRef(today) − priceRef(then)).
-     * `priceRef(d) = close(d) × fx(assetCcy→ref, d)`; null if either close or rate
-     * is missing at an endpoint.
-     */
-    private fun assetGain(
-        market: MarketData,
-        converter: Converter,
-        assetId: String,
-        assetCcy: String,
-        ref: String,
-        qtyNow: Double,
-        then: LocalDate,
-        today: LocalDate,
-    ): Double? {
-        val priceThen = priceRef(market, converter, assetId, assetCcy, ref, then) ?: return null
-        val priceToday = priceRef(market, converter, assetId, assetCcy, ref, today) ?: return null
-        return qtyNow * (priceToday - priceThen)
+        // Largest holding first; ties broken by name.
+        return rows.sortedWith(compareByDescending<AssetGain> { it.value }.thenBy { it.name })
     }
 
     /** One share's price in [ref] at [d] (forward-filled close × FX); null if missing. */

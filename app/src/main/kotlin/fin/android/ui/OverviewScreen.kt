@@ -139,7 +139,7 @@ fun GainsScreen(vm: AppViewModel, ready: AppState.Ready, onAssetClick: (String) 
                 item {
                     Card(colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant)) {
                         Column {
-                            AssetGainHeader()
+                            AssetGainHeader(gains.referenceCcy)
                             gains.assets.forEachIndexed { i, a ->
                                 if (i > 0) HairlineDivider()
                                 AssetGainRow(a, onAssetClick)
@@ -149,8 +149,8 @@ fun GainsScreen(vm: AppViewModel, ready: AppState.Ready, onAssetClick: (String) 
                 }
                 item {
                     Text(
-                        "Per-asset gains approximate a price/FX move on the current quantity; " +
-                            "intra-period buys/sells are not attributed.",
+                        "Holdings are the consolidated gross value across accounts (before tax), " +
+                            "converted at the current rate; 1d is the last-session price/FX move.",
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
@@ -242,23 +242,28 @@ private fun PeriodCard(pg: PeriodGain, ccy: String, modifier: Modifier = Modifie
 }
 
 @Composable
-private fun AssetGainHeader() {
+private fun AssetGainHeader(ccy: String) {
     Row(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 10.dp)) {
         Text(
             "Asset",
-            modifier = Modifier.weight(1.4f),
+            modifier = Modifier.weight(1.3f),
             style = MaterialTheme.typography.labelMedium,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
-        for (h in listOf("1d", "7d", "1m")) {
-            Text(
-                h,
-                modifier = Modifier.weight(1f),
-                textAlign = TextAlign.End,
-                style = MaterialTheme.typography.labelMedium,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
-        }
+        Text(
+            "1d",
+            modifier = Modifier.weight(1f),
+            textAlign = TextAlign.End,
+            style = MaterialTheme.typography.labelMedium,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+        Text(
+            "Holdings ($ccy)",
+            modifier = Modifier.weight(1.5f),
+            textAlign = TextAlign.End,
+            style = MaterialTheme.typography.labelMedium,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
         Spacer(Modifier.size(20.dp))
     }
 }
@@ -274,23 +279,31 @@ private fun AssetGainRow(a: AssetGain, onAssetClick: (String) -> Unit) {
     ) {
         Text(
             a.name,
-            modifier = Modifier.weight(1.4f),
+            modifier = Modifier.weight(1.3f),
             style = MaterialTheme.typography.bodyMedium,
             color = MaterialTheme.colorScheme.onSurface,
             maxLines = 1,
             overflow = TextOverflow.Ellipsis,
         )
-        for (cell in listOf(a.d1, a.d7, a.m1)) {
-            Text(
-                formatGainCellOrDash(cell),
-                modifier = Modifier.weight(1f),
-                textAlign = TextAlign.End,
-                style = MaterialTheme.typography.bodyMedium,
-                color = gainLossColor(cell),
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
-            )
-        }
+        Text(
+            formatSignedPercent(a.d1),
+            modifier = Modifier.weight(1f),
+            textAlign = TextAlign.End,
+            style = MaterialTheme.typography.bodyMedium,
+            color = gainLossColor(a.d1),
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+        )
+        Text(
+            formatWholeAmount(a.value),
+            modifier = Modifier.weight(1.5f),
+            textAlign = TextAlign.End,
+            style = MaterialTheme.typography.bodyMedium,
+            fontWeight = FontWeight.Medium,
+            color = MaterialTheme.colorScheme.onSurface,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+        )
         Spacer(Modifier.size(4.dp))
         Chevron()
     }
