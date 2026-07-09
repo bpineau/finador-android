@@ -51,10 +51,9 @@ class GainsTest {
     // ---- per-asset 1d / 7d absolute gain (single ccy, fx = 1) ----
 
     /**
-     * One security, 10 shares, EUR = ref. Closes: 7d-ago = 100, 1d-ago = 108,
-     * today = 110. Expected gains on the current 10 shares:
-     *   1d = 10 × (110 − 108) = 20
-     *   7d = 10 × (110 − 100) = 100
+     * One security, 10 shares, EUR = ref. Closes: 1d-ago = 108, today = 110.
+     *   value = 10 × 110 = 1100 (gross, ref ccy)
+     *   1d    = 110 / 108 − 1 (a fraction)
      */
     @Test fun perAssetSingleCcyGains() {
         seq = 0
@@ -77,8 +76,8 @@ class GainsTest {
         )
         val report = Gains.report(book, market, today = today)
         val a = asset(report, "AA")
-        assertEquals(20.0, a.d1!!, tol) // 10 × (110 − 108)
-        assertEquals(100.0, a.d7!!, tol) // 10 × (110 − 100)
+        assertEquals(110.0 / 108.0 - 1, a.d1!!, tol) // 1-day price move (fraction)
+        assertEquals(1100.0, a.value, tol) // 10 shares × 110 close, gross ref ccy
         assertEquals("EUR", report.referenceCcy)
     }
 
@@ -161,8 +160,9 @@ class GainsTest {
     /**
      * A USD security (ref = EUR), 10 shares. Closes 1d-ago = 100, today = 110 USD.
      * FX (value of 1 unit in USD) at both dates: USD = 1, EUR = 1.25 → rate
-     * USD→EUR = 1 / 1.25 = 0.8. Expected 1d gain in EUR:
-     *   10 × (110 × 0.8 − 100 × 0.8) = 10 × (88 − 80) = 80.
+     * USD→EUR = 1 / 1.25 = 0.8 (flat over the window). Expected:
+     *   d1    = 110 / 100 − 1 = 0.10 (a % - FX flat, so pure price move)
+     *   value = 10 × 110 × 0.8 = 880 EUR
      */
     @Test fun perAssetFxConversion() {
         seq = 0
@@ -194,16 +194,53 @@ class GainsTest {
         )
         val report = Gains.report(book, market, today = today)
         val a = asset(report, "UU")
-        assertEquals("USD", a.ccy)
-        assertEquals(80.0, a.d1!!, tol) // 10 × (110 − 100) × 0.8
+        assertEquals(0.10, a.d1!!, tol) // 110/100 − 1 (FX flat over the window)
+        assertEquals(880.0, a.value, tol) // 10 × 110 USD × 0.8 → EUR
+    }
+
+    // ---- consolidation across accounts + descending value sort ----
+
+    /**
+     * An asset held in two accounts is ONE row whose value sums both holdings, and rows are
+     * ordered by gross value descending. AA: 10 (cto) + 4 (pea) = 14 × 100 = 1400; BB: 5 × 50 = 250.
+     * Expect [AA(1400), BB(250)], with AA appearing exactly once.
+     */
+    @Test fun perAssetConsolidatesAcrossAccountsSortedByValue() {
+        seq = 0
+        val today = d("2026-06-15")
+        val accounts = mapOf(
+            "cto" to Account("cto", "CTO", "EUR", TaxRule.None),
+            "pea" to Account("pea", "PEA", "EUR", TaxRule.None),
+        )
+        val assets = mapOf(
+            "aa" to Asset("aa", AssetKind.SECURITY, "Alpha", ticker = "AA", ccy = "EUR", group = "g"),
+            "bb" to Asset("bb", AssetKind.SECURITY, "Bravo", ticker = "BB", ccy = "EUR", group = "g"),
+        )
+        val txs = mutableMapOf<String, Tx>()
+        listOf(
+            tx("2026-01-01", "cto", "aa", TxKind.buy, "10", eur("1000")),
+            tx("2026-01-01", "pea", "aa", TxKind.buy, "4", eur("400")),
+            tx("2026-01-01", "cto", "bb", TxKind.buy, "5", eur("250")),
+        ).forEach { txs[it.id] = it }
+        val book = Book(accounts = accounts, assets = assets, txs = txs, config = mapOf("currency" to "EUR"))
+        val market = MarketData(
+            prices = mapOf(
+                "aa" to PriceSeries(listOf(PricePoint(today, 100.0))),
+                "bb" to PriceSeries(listOf(PricePoint(today, 50.0))),
+            ),
+        )
+        val report = Gains.report(book, market, today = today)
+        assertEquals(listOf("AA", "BB"), report.assets.map { it.name }) // value-descending, AA once
+        assertEquals(1400.0, asset(report, "AA").value, tol) // (10 + 4) × 100, consolidated
+        assertEquals(250.0, asset(report, "BB").value, tol)
     }
 
     // ---- display-currency override: Gains.report(referenceCcy="USD") converts via FX ----
 
     /**
      * The SAME EUR security, valued once in EUR and once in USD. With FX value of 1 EUR = 1.25 USD,
-     * the USD per-asset gain must be the EUR one × 1.25, and the report's referenceCcy must be USD.
-     * EUR 1d gain = 10 × (110 − 108) = 20 → USD = 25.
+     * the USD holding value must be the EUR one × 1.25, while d1 (a percentage) is the same in
+     * either display currency. The report's referenceCcy must be USD.
      */
     @Test fun displayCurrencyOverrideConvertsGains() {
         seq = 0
@@ -232,10 +269,12 @@ class GainsTest {
         val eurReport = Gains.report(book, market, referenceCcy = "EUR", today = today)
         val usdReport = Gains.report(book, market, referenceCcy = "USD", today = today)
         assertEquals("USD", usdReport.referenceCcy)
-        val eurGain = asset(eurReport, "AA").d1!!
-        val usdGain = asset(usdReport, "AA").d1!!
-        assertEquals(20.0, eurGain, tol)
-        assertEquals(eurGain * 1.25, usdGain, tol) // converted by the fx factor
+        val eur = asset(eurReport, "AA")
+        val usd = asset(usdReport, "AA")
+        assertEquals(110.0 / 108.0 - 1, eur.d1!!, tol) // a percentage, currency-independent
+        assertEquals(eur.d1!!, usd.d1!!, tol) // same % in either display currency
+        assertEquals(1100.0, eur.value, tol) // 10 × 110 EUR
+        assertEquals(eur.value * 1.25, usd.value, tol) // value converted by the fx factor
     }
 
     // ---- assetDetail: periods, accounts, qty, value, and null for a non-held asset ----
