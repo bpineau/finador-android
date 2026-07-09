@@ -73,7 +73,8 @@ fun PortfolioScreen(vm: AppViewModel, ready: AppState.Ready, onAssetClick: (Stri
             }
 
             if (ready.perf != null) {
-                item { PerfCard(ready.perf) }
+                val dayChange = ready.gains?.periods?.firstOrNull { it.label == "1d" }?.relative
+                item { PerfCard(ready.perf, dayChange) }
             }
 
             if (v.lines.isNotEmpty()) {
@@ -380,7 +381,7 @@ private fun AmountRow(label: String, value: String) {
 }
 
 @Composable
-private fun PerfCard(perf: PerfMetrics) {
+private fun PerfCard(perf: PerfMetrics, dayChange: Double?) {
     Card(
         modifier = Modifier.fillMaxWidth(),
         colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant),
@@ -392,6 +393,7 @@ private fun PerfCard(perf: PerfMetrics) {
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
             HorizontalDivider(Modifier.padding(vertical = 2.dp), color = MaterialTheme.colorScheme.outlineVariant)
+            PerfRow("Day", formatPercent(dayChange), dayChange)
             PerfRow("TWR", formatPercent(perf.twr), perf.twr)
             PerfRow("XIRR", formatPercent(perf.xirr), perf.xirr)
             PerfRow("CAGR", formatPercent(perf.cagr), perf.cagr)
