@@ -81,7 +81,23 @@ data class GainsReport(
 )
 
 object Gains {
-    /** Portfolio periods, in display order: label → the day `then` is computed from `today`. */
+    /**
+     * The "as of" date for period windows: the most recent settled close at or before [today]
+     * across the book's priced securities. Calendar `today` routinely runs ahead of the last
+     * real session (a shut exchange, a pre-open morning). Anchoring windows on `today` then makes
+     * "1d" compare a stale, forward-filled close against yesterday while a fresh 24/5 FX point
+     * drifts underneath - noise, not a session. Anchoring on the last close makes "1d" mean
+     * "last close vs the previous close", matching Yahoo/Google. Falls back to [today] when no
+     * security has a close (e.g. a property-only book).
+     */
+    private fun closeAnchor(market: MarketData, today: LocalDate): LocalDate =
+        market.prices.values.mapNotNull { it.at(today)?.second }.maxOrNull() ?: today
+
+    /** Per-security "as of" date: that asset's own last close at or before [today] (else [today]). */
+    private fun assetAnchor(market: MarketData, assetId: String, today: LocalDate): LocalDate =
+        market.prices[assetId]?.at(today)?.second ?: today
+
+    /** Portfolio periods, in display order: label → the day `then` is computed from the anchor. */
     private fun portfolioWindows(today: LocalDate): List<Pair<String, LocalDate>> = listOf(
         "1d" to today.minusDays(1),
         "3d" to today.minusDays(3),
@@ -110,8 +126,10 @@ object Gains {
     ): GainsReport {
         val ccy = referenceCcy ?: book.config["currency"] ?: "EUR"
 
-        val periods = portfolioWindows(today).map { (label, then) ->
-            periodGain(book, market, ccy, label, then, today)
+        // Windows end at the last settled close, not calendar `today` - see [closeAnchor].
+        val anchor = closeAnchor(market, today)
+        val periods = portfolioWindows(anchor).map { (label, then) ->
+            periodGain(book, market, ccy, label, then, anchor)
         }
         val assets = assetGains(book, market, ccy, today)
         return GainsReport(referenceCcy = ccy, periods = periods, assets = assets)
@@ -167,17 +185,19 @@ object Gains {
             val assetId = p.assetId ?: return@mapNotNull null
             val asset = book.assets[assetId] ?: return@mapNotNull null
             val qtyNow = p.qty.toDouble()
+            // Anchor each row on the asset's own last close so "1d" is its last session.
+            val anchor = assetAnchor(market, assetId, today)
             fun gain(then: LocalDate): Double? =
-                assetGain(market, converter, assetId, asset.ccy, ccy, qtyNow, then, today)
+                assetGain(market, converter, assetId, asset.ccy, ccy, qtyNow, then, anchor)
             val name = asset.ticker ?: asset.name
             AssetGain(
                 assetId = assetId,
                 name = name,
                 ccy = asset.ccy,
-                d1 = gain(today.minusDays(1)),
-                d7 = gain(today.minusDays(7)),
-                m1 = gain(today.minusMonths(1)),
-                y1 = gain(today.minusYears(1)),
+                d1 = gain(anchor.minusDays(1)),
+                d7 = gain(anchor.minusDays(7)),
+                m1 = gain(anchor.minusMonths(1)),
+                y1 = gain(anchor.minusYears(1)),
             )
         }
         // Stable order: largest |1y| first, ties broken by name. Rows with a null
@@ -305,11 +325,15 @@ object Gains {
         val valueRefToday = priceRef(market, converter, assetId, asset.ccy, ccy, today)
         val value = if (valueRefToday != null) qty * valueRefToday else 0.0
 
-        val periods = assetWindows(today).map { (label, then) ->
+        // Period math ends at the asset's last settled close (see [closeAnchor]); the headline
+        // value/price above stay live at `today`, matching the Yahoo model (live price, close-to-
+        // close day change).
+        val anchor = assetAnchor(market, assetId, today)
+        val pAnchor = priceRef(market, converter, assetId, asset.ccy, ccy, anchor)
+        val periods = assetWindows(anchor).map { (label, then) ->
             val pThen = priceRef(market, converter, assetId, asset.ccy, ccy, then)
-            val pToday = valueRefToday
-            val relative = if (pThen != null && pToday != null && pThen != 0.0) pToday / pThen - 1 else null
-            val absolute = if (pThen != null && pToday != null) qty * (pToday - pThen) else 0.0
+            val relative = if (pThen != null && pAnchor != null && pThen != 0.0) pAnchor / pThen - 1 else null
+            val absolute = if (pThen != null && pAnchor != null) qty * (pAnchor - pThen) else 0.0
             AssetPeriodGain(label, relative, absolute)
         }
         val series = market.prices[assetId]?.points ?: emptyList()
