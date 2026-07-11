@@ -20,6 +20,20 @@ internal object Rfc3339 {
 
     fun now(): String = format(Instant.now())
 
+    /**
+     * Parses a `ts` into an instant for chronological ordering. A plain string compare of
+     * RFC3339Nano is NOT chronological: a whole second renders without a fractional part
+     * ("…03Z"), and 'Z' > '.', so it would sort after a later fractional instant of the same
+     * second - the last-writer-wins merge could silently elect the older write. A malformed ts
+     * (never produced by a conforming writer) collapses to the epoch, keeping the order
+     * deterministic.
+     */
+    fun instant(ts: String): Instant = try {
+        Instant.parse(ts)
+    } catch (_: Exception) {
+        Instant.EPOCH
+    }
+
     fun format(instant: Instant): String {
         val head = secs.format(instant)
         val nanos = instant.atOffset(ZoneOffset.UTC).nano
