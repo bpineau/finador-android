@@ -42,7 +42,12 @@ class Ledger internal constructor(
         qty: BigDecimal,
         amount: Money,
         note: String? = null,
-    ): Ledger = append(listOf(txEnvelope("tx", txDto(Ids.newId(), date, account, asset, kind, qty, amount, note))))
+        importHash: String? = null,
+    ): Ledger {
+        val dto = txDto(Ids.newId(), date, account, asset, kind, qty, amount, note)
+            .copy(importHash = importHash?.ifBlank { null })
+        return append(listOf(txEnvelope("tx", dto)))
+    }
 
     fun editTransaction(
         id: String,
@@ -53,7 +58,13 @@ class Ledger internal constructor(
         qty: BigDecimal,
         amount: Money,
         note: String? = null,
-    ): Ledger = append(listOf(txEnvelope("tx-edit", txDto(id, date, account, asset, kind, qty, amount, note))))
+    ): Ledger {
+        // An edit is not a re-import: carry the existing import fingerprint through,
+        // or a re-imported statement would duplicate the corrected transaction.
+        val dto = txDto(id, date, account, asset, kind, qty, amount, note)
+            .copy(importHash = book.txs[id]?.importHash)
+        return append(listOf(txEnvelope("tx-edit", dto)))
+    }
 
     fun deleteTransaction(id: String): Ledger {
         val d = wireJson.encodeToJsonElement(IdRefDto.serializer(), IdRefDto(id)).jsonObject

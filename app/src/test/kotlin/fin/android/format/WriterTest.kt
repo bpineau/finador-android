@@ -54,6 +54,22 @@ class WriterTest {
     }
 
     @Test
+    fun editPreservesImportHash() {
+        val imported = Ledger.open(sample(), pw).addTransaction(
+            LocalDate.parse("2026-06-10"), peaId, cw8Id, TxKind.buy, BigDecimal("5"),
+            Money(BigDecimal("2500"), "EUR"), note = null, importHash = "meridia:trade-42",
+        )
+        val id = imported.book.txs.values.first { it.importHash == "meridia:trade-42" }.id
+        val edited = imported.editTransaction(
+            id, LocalDate.parse("2026-06-10"), peaId, cw8Id, TxKind.buy, BigDecimal("5"),
+            Money(BigDecimal("2600"), "EUR"), note = "price fixed",
+        )
+        val reopened = Ledger.open(edited.toBytes(), pw)
+        assertEquals("meridia:trade-42", reopened.book.txs.getValue(id).importHash)
+        assertEquals(0, reopened.book.txs.getValue(id).amount.amount.compareTo(BigDecimal("2600")))
+    }
+
+    @Test
     fun createEmptyRoundTrips() {
         val reopened = Ledger.open(Ledger.create("pw").toBytes(), "pw")
         assertEquals(0, reopened.book.txs.size)

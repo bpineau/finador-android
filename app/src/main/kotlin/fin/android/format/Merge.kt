@@ -37,9 +37,12 @@ internal object Merge {
 
         val winners = ArrayList<Envelope>()
         for ((key, recs) in groups) {
-            val sorted = recs.sortedBy { it.env.ts } // stable
+            // Order by parsed instant, never lexically (see Rfc3339.instant); the sort is
+            // stable, so equal instants keep gather order (this file before other).
+            val sorted = recs.sortedBy { Rfc3339.instant(it.env.ts) }
             val maxTs = sorted.last().env.ts
-            val distinct = distinctByPayload(sorted.filter { it.env.ts == maxTs })
+            val maxInstant = Rfc3339.instant(maxTs)
+            val distinct = distinctByPayload(sorted.filter { Rfc3339.instant(it.env.ts) == maxInstant })
             val winner = when (distinct.size) {
                 1 -> distinct[0]
                 else -> {
@@ -50,7 +53,7 @@ internal object Merge {
             }
             if (!isTombstone(winner.env.k)) winners.add(winner.env)
         }
-        winners.sortBy { it.ts } // stable, preserves each record's own ts
+        winners.sortBy { Rfc3339.instant(it.ts) } // stable, preserves each record's own ts
 
         val newEntries = Writer.append(base.header, base.keys, emptyList(), winners)
         return Ledger(base.header, base.keys, newEntries, Replay.fold(newEntries))
