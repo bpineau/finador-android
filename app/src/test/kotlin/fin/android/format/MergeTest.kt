@@ -43,6 +43,17 @@ class MergeTest {
     }
 
     @Test
+    fun lastWriterWinsComparesInstantsNotStrings() {
+        val base = base()
+        // "…03Z" sorts lexically AFTER "…03.5Z" ('Z' > '.') yet is the OLDER instant:
+        // a lexical merge would silently elect the stale write.
+        val older = base.editEnv("2099-01-01T00:00:03Z", "100")
+        val newer = base.editEnv("2099-01-01T00:00:03.5Z", "999")
+        assertEquals(0, older.merge(newer).book.txs.getValue(buyId).amount.amount.compareTo(BigDecimal("999")))
+        assertEquals(0, newer.merge(older).book.txs.getValue(buyId).amount.amount.compareTo(BigDecimal("999")))
+    }
+
+    @Test
     fun identicalConcurrentWriteIsNotAConflict() {
         val base = base()
         val a = base.editEnv("2099-01-01T00:00:00Z", "9000")
