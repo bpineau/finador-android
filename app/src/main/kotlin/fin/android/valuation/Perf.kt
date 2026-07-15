@@ -146,33 +146,39 @@ object Perf {
     // ---- pure math (perf.go) ----
 
     /**
-     * TWR chain-links daily returns r_t = (V_t − F_t)/V_{t−1}, neutralizing
-     * external flows. Days with a non-positive base are skipped.
+     * TWR chain-links daily returns r_t = V_t / (V_{t−1} + F_t) − 1, neutralizing
+     * external flows. Flows are booked at the start of their day, so a same-day
+     * contribution earns that day and belongs in the return's base; dividing by
+     * V_{t−1} alone would charge a large flow's first-day P/L against the tiny
+     * pre-flow value and detonate the chain. Days with a non-positive base
+     * (V_{t−1} + F_t) are skipped. Mirrors Go pofo/metrics.TWR (v0.1.1).
      */
     internal fun twr(points: List<PricePoint>, flows: List<Flow>): Double {
         val byDay = flowsByDay(flows)
         var total = 1.0
         for (i in 1 until points.size) {
-            val prev = points[i - 1].close
-            if (prev <= 0) continue
-            total *= (points[i].close - (byDay[points[i].date] ?: 0.0)) / prev
+            val base = points[i - 1].close + (byDay[points[i].date] ?: 0.0)
+            if (base <= 0) continue
+            total *= points[i].close / base
         }
         return total - 1
     }
 
     /**
-     * Flow-adjusted weekday returns of a calendar-daily series. Week-ends are
-     * forward-filled flats and dropped (≈252 returns a year, annualized with √252).
+     * Flow-adjusted weekday returns of a calendar-daily series: V_t/(V_{t−1}+F_t)−1,
+     * the same start-of-day flow convention as [twr]. Week-ends are forward-filled
+     * flats and dropped (≈252 returns a year, annualized with √252). Days with a
+     * non-positive base (V_{t−1} + F_t) are skipped.
      */
     internal fun dailyReturns(points: List<PricePoint>, flows: List<Flow>): List<Double> {
         val byDay = flowsByDay(flows)
         val out = mutableListOf<Double>()
         for (i in 1 until points.size) {
-            val prev = points[i - 1].close
-            if (prev <= 0) continue
+            val base = points[i - 1].close + (byDay[points[i].date] ?: 0.0)
+            if (base <= 0) continue
             val wd = points[i].date.dayOfWeek
             if (wd == DayOfWeek.SATURDAY || wd == DayOfWeek.SUNDAY) continue
-            out += (points[i].close - (byDay[points[i].date] ?: 0.0)) / prev - 1
+            out += points[i].close / base - 1
         }
         return out
     }
