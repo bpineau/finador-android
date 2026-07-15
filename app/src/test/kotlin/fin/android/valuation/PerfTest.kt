@@ -43,12 +43,25 @@ class PerfTest {
         assertEquals(-0.01, Perf.twr(pts, emptyList()), tol)
     }
 
-    /** TestTWRNeutralizesFlows: day-3 deposit of 100 → r3 = (215.5−100)/105 = +10 %.
+    /** TestTWRNeutralizesFlows: a day-3 contribution of 100 lifts the base from 105
+     *  to 205, then +10 % → 225.5. Start-of-day flow: r3 = 225.5/(105+100) = +10 %.
      *  TWR = 1.05 × 1.10 − 1 = 0.155. */
     @Test fun twrNeutralizesFlows() {
-        val pts = listOf(p("2026-06-01", 100.0), p("2026-06-02", 105.0), p("2026-06-03", 215.5))
+        val pts = listOf(p("2026-06-01", 100.0), p("2026-06-02", 105.0), p("2026-06-03", 225.5))
         val flows = listOf(f("2026-06-03", 100.0))
         assertEquals(0.155, Perf.twr(pts, flows), tol)
+    }
+
+    /** TestTWRLargeFlowOnTinyBase (Go pofo): 100 sits, then 318000 arrives and is
+     *  invested, closing 68.71 under cost. End-of-day (V−F)/V0 would divide that by
+     *  the 100 base → a negative factor and a detonated chain; start-of-day keeps
+     *  the day at its true ~−0.05 %. */
+    @Test fun twrLargeFlowOnTinyBase() {
+        val pts = listOf(p("2026-06-01", 100.0), p("2026-06-02", 317931.29))
+        val flows = listOf(f("2026-06-02", 318000.0))
+        val got = Perf.twr(pts, flows)
+        assertEquals(317931.29 / 318100 - 1, got, tol)
+        assertTrue("large same-day flow detonated the chain: $got", got > -0.01)
     }
 
     /** TestTWRSkipsZeroBase: day-2 base is 0 → skipped; day-3 = +10 %. */
@@ -73,9 +86,10 @@ class PerfTest {
         assertEquals(104.0 / 102.0 - 1, rs[1], tol)
     }
 
-    /** TestDailyReturnsAdjustsFlows: Fri deposit of 100, value 210 → r = (210−100)/100 − 1 = +10 %. */
+    /** TestDailyReturnsAdjustsFlows: a Fri contribution of 100 lifts the base to 200,
+     *  then +10 % → 220. Start-of-day flow: r = 220/(100+100) − 1 = +10 %. */
     @Test fun dailyReturnsAdjustsFlows() {
-        val pts = listOf(p("2026-06-04", 100.0), p("2026-06-05", 210.0))
+        val pts = listOf(p("2026-06-04", 100.0), p("2026-06-05", 220.0))
         val rs = Perf.dailyReturns(pts, listOf(f("2026-06-05", 100.0)))
         assertEquals(1, rs.size)
         assertEquals(0.10, rs[0], tol)
