@@ -11,10 +11,6 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.filled.ArrowBack
-import androidx.compose.material.icons.filled.Add
-import androidx.compose.material.icons.filled.DeleteOutline
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
@@ -63,12 +59,12 @@ fun AccountListScreen(
                 title = { Text("Accounts", fontWeight = FontWeight.SemiBold) },
                 navigationIcon = {
                     IconButton(onClick = onBack) {
-                        Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
+                        Icon(FinIcons.ArrowBack, contentDescription = "Back")
                     }
                 },
                 actions = {
                     IconButton(onClick = onAdd) {
-                        Icon(Icons.Filled.Add, contentDescription = "Add account")
+                        Icon(FinIcons.Add, contentDescription = "Add account")
                     }
                 },
             )
@@ -141,7 +137,7 @@ private fun AccountRow(account: Account, onClick: () -> Unit, onDelete: () -> Un
             }
             IconButton(onClick = onDelete) {
                 Icon(
-                    Icons.Filled.DeleteOutline,
+                    FinIcons.DeleteOutline,
                     contentDescription = "Delete ${account.name}",
                     modifier = Modifier.size(20.dp),
                     tint = MaterialTheme.colorScheme.onSurfaceVariant,
