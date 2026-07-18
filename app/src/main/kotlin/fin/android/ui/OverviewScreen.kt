@@ -11,10 +11,6 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
-import androidx.compose.material.icons.filled.CloudOff
-import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularProgressIndicator
@@ -182,7 +178,7 @@ private fun FinTopBar(title: String, refreshing: Boolean, onRefresh: () -> Unit)
                 Spacer(Modifier.size(8.dp))
             } else {
                 IconButton(onClick = onRefresh) {
-                    Icon(Icons.Filled.Refresh, contentDescription = "Refresh sync & quotes")
+                    Icon(FinIcons.Refresh, contentDescription = "Refresh sync & quotes")
                 }
             }
         },
@@ -334,7 +330,7 @@ private fun SyncBanner(ready: AppState.Ready) {
             horizontalArrangement = Arrangement.spacedBy(10.dp),
         ) {
             Icon(
-                Icons.Filled.CloudOff,
+                FinIcons.CloudOff,
                 contentDescription = null,
                 tint = MaterialTheme.colorScheme.onSurfaceVariant,
                 modifier = Modifier.size(18.dp),
@@ -484,7 +480,7 @@ private fun PositionRow(p: Position, ccy: String, onAssetClick: (String) -> Unit
 @Composable
 private fun Chevron() {
     Icon(
-        Icons.AutoMirrored.Filled.KeyboardArrowRight,
+        FinIcons.KeyboardArrowRight,
         contentDescription = null,
         tint = MaterialTheme.colorScheme.onSurfaceVariant,
         modifier = Modifier.size(20.dp),

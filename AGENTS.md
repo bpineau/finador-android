@@ -112,8 +112,11 @@ that state; per-asset detail pages are **precomputed** into `Ready.assetDetails`
   plain SharedPreferences (the deprecated Jetpack `EncryptedSharedPreferences` was replaced).
   `data/LegacySecretMigration.kt` + the `androidx.security:security-crypto` dependency exist ONLY
   to migrate pre-v0.1.6 installs - delete both together once installed devices have migrated.
-- **material-icons-extended is frozen upstream** (pinned at 1.7.8 in `libs.versions.toml`, no
-  longer BOM-managed). Long-term exit: inline the ~11 used icons as ImageVectors and drop it.
+- **The 11 Material icons the app draws are inlined** in `ui/FinIcons.kt` (as `FinIcons.<Name>`
+  `ImageVector`s, path data copied verbatim from androidx material-icons 1.7.8, Apache 2.0). There
+  is no `material-icons-extended` dependency anymore - the old one was frozen upstream. Need another
+  icon? Copy its `materialPath { ... }` body from the 1.7.8 sources into `FinIcons` (set
+  `autoMirror = true` for direction-carrying icons); don't re-add the dependency.
 - **Build types**: `debug` = dev (slow, debuggable). `release` = R8-minified, non-debuggable, ~6 MB,
   validated end-to-end. It's signed with the **real release key** when `FINADOR_STORE_FILE` & co. are
   set in `~/.gradle/gradle.properties` (never committed), and **falls back to debug signing** when
