@@ -66,10 +66,14 @@ Always with `JAVA_HOME`/`ANDROID_HOME` exported (see above):
 ```sh
 cd finador-android               # the cloned repo
 
-./gradlew testDebugUnitTest      # unit tests (JVM, no device) - the engine layer
-./gradlew assembleDebug          # build the debug APK
-./gradlew installDebug           # install on the connected device/emulator
+make test                        # unit tests (JVM, no device) - the engine layer
+make build                       # build the debug APK
+make install                     # install on the connected device/emulator
+make help                        # every other target (run, lint, release, emulator, ...)
 ```
+
+(The Makefile exports `JAVA_HOME`/`ANDROID_HOME` itself; the raw `./gradlew` tasks it wraps
+work too if you prefer, with those variables exported.)
 
 - **First run** is slow (downloads Gradle + dependencies). Subsequent runs are fast.
 - The **debug build** is for everyday work. An optimized **release build** (R8: faster, ~3× smaller)
@@ -142,7 +146,7 @@ app/src/main/kotlin/fin/android/
   remote/  market/  valuation/ # GitHub sync, multi-source quotes, valuation/perf/gains
   data/    ui/                 # DI + repository, Compose screens
 scripts/crossimpl.sh           # bidirectional compatibility test against the Go binary
-docs/superpowers/              # spec, plan, decision log
+Makefile                       # common commands (`make help`)
 ```
 
 The file format and sync model are specified on the finador side:
