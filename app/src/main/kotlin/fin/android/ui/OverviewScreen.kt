@@ -61,7 +61,7 @@ fun PortfolioScreen(vm: AppViewModel, ready: AppState.Ready, onAssetClick: (Stri
             if (v.taxNote != null) {
                 item {
                     Text(
-                        v.taxNote!!,
+                        v.taxNote,
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
