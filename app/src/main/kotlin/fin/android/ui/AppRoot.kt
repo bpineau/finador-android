@@ -17,11 +17,6 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.filled.TrendingUp
-import androidx.compose.material.icons.filled.Add
-import androidx.compose.material.icons.filled.PieChart
-import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.FloatingActionButton
 import androidx.compose.material3.Icon
@@ -70,9 +65,9 @@ object Routes {
 
 /** Top-level sections reachable from the bottom NavigationBar. */
 private enum class TopLevel(val route: String, val label: String, val icon: ImageVector) {
-    Portfolio(Routes.PORTFOLIO, "Portfolio", Icons.Filled.PieChart),
-    Gains(Routes.GAINS, "Gains", Icons.AutoMirrored.Filled.TrendingUp),
-    Settings(Routes.SETTINGS, "Settings", Icons.Filled.Settings),
+    Portfolio(Routes.PORTFOLIO, "Portfolio", FinIcons.PieChart),
+    Gains(Routes.GAINS, "Gains", FinIcons.TrendingUp),
+    Settings(Routes.SETTINGS, "Settings", FinIcons.Settings),
 }
 
 /**
@@ -175,7 +170,7 @@ private fun ReadyNav(vm: AppViewModel, ready: AppState.Ready, snackbar: Snackbar
                     containerColor = MaterialTheme.colorScheme.primary,
                     contentColor = MaterialTheme.colorScheme.onPrimary,
                 ) {
-                    Icon(Icons.Filled.Add, contentDescription = "Add transaction")
+                    Icon(FinIcons.Add, contentDescription = "Add transaction")
                 }
             }
         },
