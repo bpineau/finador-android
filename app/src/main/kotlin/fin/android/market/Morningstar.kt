@@ -76,7 +76,7 @@ class Morningstar(
             val day = Instant.ofEpochMilli(millis).atZone(ZoneOffset.UTC).toLocalDate()
             if (day.isBefore(from)) continue
             // Keep dates strictly increasing.
-            if (prev != null && !prev!!.isBefore(day)) continue
+            if (prev != null && !prev.isBefore(day)) continue
             closes.add(PricePoint(day, value))
             prev = day
         }
@@ -95,7 +95,7 @@ class Morningstar(
                     val retriable = resp.code == 429 || resp.code >= 500
                     if (retriable && attempt == 0) return@repeat
                     if (resp.code != 200) return null
-                    return resp.body?.string()
+                    return resp.body.string()
                 }
             } catch (_: Exception) {
                 if (attempt == 0) return@repeat
