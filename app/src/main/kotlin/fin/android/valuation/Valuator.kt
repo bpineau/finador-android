@@ -40,8 +40,8 @@ data class ValuationLine(val label: String, val gross: Double, val tax: Double, 
 /**
  * The value of the whole book at [asOf], in [referenceCcy]. Line taxes are the
  * per-position approximation; [gross]/[tax]/[net] use the exact per-account
- * envelope rule, and [taxNote] is set when the two visibly diverge (or when a
- * held security could not be priced - its value was counted as 0).
+ * envelope rule, and [taxNote] is set when the two visibly diverge (or when an
+ * FX rate was missing - the affected value was counted as 0).
  */
 data class Valuation(
     val asOf: LocalDate,
@@ -278,15 +278,25 @@ internal class Valuer(
 
     // ---- valuation (value.go) ----
 
-    /** market close → last statement of the pair → 0; converted to ref ccy at `at`. */
+    /**
+     * market close → last statement of the pair (a NAV observation, scaled per share when the
+     * quantity changed since) → the cost basis (a bought position is never worth 0 just because
+     * nothing observed it yet, or the buy itself would read as a loss). Converted to ref ccy at
+     * `at`. Mirrors Go `value.go positionValue`.
+     */
     private fun positionValue(h: Holding): Double {
         val close = prices[h.asset.id]?.at(at)?.first
         if (close != null) {
             return toRef(toF(h.qty) * close, h.asset.ccy, at)
         }
         val tx = lastStatement(h.account.id, h.asset.id)
-        if (tx != null) return toRef(tx.amount.amount, tx.amount.ccy, at)
-        return 0.0 // no quote nor statement
+        if (tx != null) {
+            var total = toRef(tx.amount.amount, tx.amount.ccy, at)
+            val qAt = quantity(h.account.id, h.asset.id, tx.date)
+            if (qAt.signum() > 0) total = total / toF(qAt) * toF(h.qty)
+            return total
+        }
+        return positionBasis(h.account.id, h.asset.id)
     }
 
     private fun statementValue(acc: String, asset: Asset): Double {
@@ -411,10 +421,13 @@ internal class Valuer(
         return toRef(balance, acc.ccy, at)
     }
 
+    /** Assets with at least one manual Dividend tx (their cached distributions are ignored). */
+    private val manualDividendAssets: Set<String?> =
+        book.txs.values.filter { it.kind == TxKind.dividend && it.asset != null }.map { it.asset }.toHashSet()
+
     /** Yahoo-known distributions for assets without any manual Dividend tx. */
     private fun autoDividends(acc: Account, after: LocalDate?): Double {
-        val manual = book.txs.values.filter { it.kind == TxKind.dividend && it.asset != null }
-            .map { it.asset }.toHashSet()
+        val manual = manualDividendAssets
         var total = 0.0
         for ((id, events) in dividends) {
             if (id in manual) continue
