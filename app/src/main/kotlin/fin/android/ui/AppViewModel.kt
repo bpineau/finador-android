@@ -188,9 +188,11 @@ class AppViewModel(private val container: AppContainer) : ViewModel() {
         viewModelScope.launch { repo.setDisplayCurrency(code) }
     }
 
-    /** The current display-currency override ("EUR" when unset), for the Settings dropdown. */
+    /** The effective display currency (override → book's currency → EUR), for the Settings dropdown. */
     fun displayCurrency(): String =
-        runCatching { container.loadConfig().displayCurrency }.getOrNull() ?: "EUR"
+        runCatching { container.loadConfig().displayCurrency }.getOrNull()
+            ?: (state.value as? fin.android.data.AppState.Ready)?.book?.config?.get("currency")
+            ?: "EUR"
 
     /**
      * The per-asset detail for the detail screen. Reads the copy precomputed in [AppState.Ready]
