@@ -13,8 +13,6 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.ContentPaste
 import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.FilledTonalIconButton
@@ -112,7 +110,7 @@ fun OnboardingScreen(vm: AppViewModel) {
                 modifier = Modifier.weight(1f),
             )
             FilledTonalIconButton(onClick = { readClipboard(context)?.let { token = it } }) {
-                Icon(Icons.Filled.ContentPaste, contentDescription = "Paste token")
+                Icon(FinIcons.ContentPaste, contentDescription = "Paste token")
             }
         }
 

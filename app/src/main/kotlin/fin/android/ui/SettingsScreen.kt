@@ -12,9 +12,6 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
-import androidx.compose.material.icons.filled.DeleteOutline
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.DropdownMenu
@@ -98,7 +95,7 @@ fun SettingsScreen(
                 onClick = { vm.forget() },
                 modifier = Modifier.fillMaxWidth(),
             ) {
-                Icon(Icons.Filled.DeleteOutline, contentDescription = null, modifier = Modifier.size(18.dp))
+                Icon(FinIcons.DeleteOutline, contentDescription = null, modifier = Modifier.size(18.dp))
                 Spacer(Modifier.size(8.dp))
                 Text("Forget - purge token, passphrase & config")
             }
@@ -127,7 +124,7 @@ private fun NavRow(label: String, onClick: () -> Unit) {
             color = MaterialTheme.colorScheme.onSurface,
         )
         Icon(
-            Icons.AutoMirrored.Filled.KeyboardArrowRight,
+            FinIcons.KeyboardArrowRight,
             contentDescription = null,
             tint = MaterialTheme.colorScheme.onSurfaceVariant,
         )

@@ -74,3 +74,14 @@ questions or confirmations). Each non-trivial decision is tracked here.
 - Docs: AGENTS.md gotchas extended (unquoted fallback, secrets, icons, auth-blocks-unlock note);
   README scope line updated (accounts/assets manageable on mobile); CLAUDE.md states the two
   hard gates.
+
+## 2026-07-18 - inline material icons
+
+- **Dropped `material-icons-extended`** (frozen upstream, was pinned at 1.7.8): the 11 icons the
+  app draws are now hand-written `ImageVector`s in `ui/FinIcons.kt` (`FinIcons.<Name>`). Path data
+  is copied **verbatim** from the androidx material-icons 1.7.8 sources (Apache 2.0); a private
+  `finIcon`/path helper reproduces the library's `materialIcon`/`materialPath` defaults (24x24 dp,
+  solid-black fill) so the glyphs render identically. The three direction-carrying icons
+  (ArrowBack, KeyboardArrowRight, TrendingUp) keep `autoMirror = true` for RTL. Verified: unit
+  tests + `assembleDebug` green, emulator smoke confirmed the bottom-bar, refresh, FAB and CloudOff
+  icons render.

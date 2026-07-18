@@ -10,8 +10,6 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.Close
 import androidx.compose.material3.Button
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
@@ -79,7 +77,7 @@ fun AccountEditorScreen(vm: AppViewModel, ready: AppState.Ready, accountId: Stri
             TopAppBar(
                 title = { Text(if (existing == null) "New account" else "Edit account", fontWeight = FontWeight.SemiBold) },
                 navigationIcon = {
-                    IconButton(onClick = onDone) { Icon(Icons.Filled.Close, contentDescription = "Cancel") }
+                    IconButton(onClick = onDone) { Icon(FinIcons.Close, contentDescription = "Cancel") }
                 },
             )
         },
