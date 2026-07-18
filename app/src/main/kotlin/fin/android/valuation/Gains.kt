@@ -10,10 +10,12 @@
 // Nothing here changes existing semantics; it only reads the engine.
 package fin.android.valuation
 
+import fin.android.domain.Asset
 import fin.android.domain.AssetKind
 import fin.android.domain.Book
 import fin.android.domain.MarketData
 import fin.android.domain.PricePoint
+import fin.android.domain.Tx
 import fin.android.domain.TxKind
 import fin.android.market.Converter
 import java.math.BigDecimal
@@ -69,7 +71,7 @@ data class AssetDetail(
 )
 
 /** One dated declared value of an asset (a statement), shown as native amount. */
-data class AssetValuation(val date: java.time.LocalDate, val amount: Double, val ccy: String)
+data class AssetValuation(val date: LocalDate, val amount: Double, val ccy: String)
 
 /** The full report the UI renders. */
 data class GainsReport(
@@ -250,40 +252,63 @@ object Gains {
         val stmts = book.txs.values
             .filter { it.kind == TxKind.statement && it.asset == assetId }
             .sortedBy { it.date }
-        val valuations = stmts.map { AssetValuation(it.date, it.amount.amount.toDouble(), it.amount.ccy) }
 
-        if (asset.kind == AssetKind.PROPERTY) {
-            val positions = valuationPositions.filter { it.kind == "property" && it.assetId == assetId }
-            if (positions.isEmpty()) return null // declared but unvalued
-            val value = positions.sumOf { it.gross }
-            val bases = positions.mapNotNull { it.costBasis }
-            // Purchase / initial value: the engine's basis if tracked, else the first declared value.
-            val purchaseRef = when {
-                bases.isNotEmpty() -> bases.sum()
-                stmts.isNotEmpty() -> stmts.first().let { converter.convert(it.amount.amount.toDouble(), it.amount.ccy, ccy, it.date) }
-                else -> null
-            }
-            val unrealized = if (purchaseRef != null) value - purchaseRef else null
-            val unrealizedPct = if (purchaseRef != null && purchaseRef != 0.0) (value - purchaseRef) / purchaseRef else null
-            return AssetDetail(
-                assetId = assetId, name = asset.name, ticker = asset.ticker, isin = asset.isin,
-                assetCcy = asset.ccy, referenceCcy = ccy,
-                qty = positions.fold(BigDecimal.ZERO) { a, p -> a + p.qty },
-                price = null, value = value, accounts = positions.map { it.accountName }.distinct(),
-                periods = emptyList(), priceHistory = emptyList(),
-                costBasis = purchaseRef, avgBuyPrice = null, unrealized = unrealized, unrealizedPct = unrealizedPct,
-                kind = "property", taxRule = taxRule, valuations = valuations,
-            )
+        return if (asset.kind == AssetKind.PROPERTY) {
+            propertyDetail(asset, ccy, converter, valuationPositions, taxRule, stmts)
+        } else {
+            securityDetail(asset, ccy, converter, market, today, valuationPositions, taxRule, stmts)
         }
+    }
 
-        // ---- security ----
-        val positions = valuationPositions.filter { it.kind == "security" && it.assetId == assetId }
+    /** Property detail: declaration-valued (no price, no periods), gains measured from the first estimate. */
+    private fun propertyDetail(
+        asset: Asset,
+        ccy: String,
+        converter: Converter,
+        valuationPositions: List<Position>,
+        taxRule: String?,
+        stmts: List<Tx>,
+    ): AssetDetail? {
+        val positions = valuationPositions.filter { it.kind == "property" && it.assetId == asset.id }
+        if (positions.isEmpty()) return null // declared but unvalued
+        val value = positions.sumOf { it.gross }
+        val bases = positions.mapNotNull { it.costBasis }
+        // Purchase / initial value: the engine's basis if tracked, else the first declared value.
+        val purchaseRef = when {
+            bases.isNotEmpty() -> bases.sum()
+            stmts.isNotEmpty() -> stmts.first().let { converter.convert(it.amount.amount.toDouble(), it.amount.ccy, ccy, it.date) }
+            else -> null
+        }
+        return AssetDetail(
+            assetId = asset.id, name = asset.name, ticker = asset.ticker, isin = asset.isin,
+            assetCcy = asset.ccy, referenceCcy = ccy,
+            qty = positions.fold(BigDecimal.ZERO) { a, p -> a + p.qty },
+            price = null, value = value, accounts = positions.map { it.accountName }.distinct(),
+            periods = emptyList(), priceHistory = emptyList(),
+            costBasis = purchaseRef, avgBuyPrice = null,
+            unrealized = purchaseRef?.let { value - it },
+            unrealizedPct = purchaseRef?.takeIf { it != 0.0 }?.let { (value - it) / it },
+            kind = "property", taxRule = taxRule, valuations = valuationsOf(stmts),
+        )
+    }
+
+    /** Security detail: live price/value at `today`, period math anchored on the last settled close. */
+    private fun securityDetail(
+        asset: Asset,
+        ccy: String,
+        converter: Converter,
+        market: MarketData,
+        today: LocalDate,
+        valuationPositions: List<Position>,
+        taxRule: String?,
+        stmts: List<Tx>,
+    ): AssetDetail? {
+        val positions = valuationPositions.filter { it.kind == "security" && it.assetId == asset.id }
         val qtyNow = positions.fold(BigDecimal.ZERO) { acc, p -> acc + p.qty }
         if (qtyNow.signum() <= 0) return null // not a held security
-        val accounts = positions.map { it.accountName }.distinct()
         val qty = qtyNow.toDouble()
-        val priceNow = market.prices[assetId]?.at(today)?.first
-        val valueRefToday = priceRef(market, converter, assetId, asset.ccy, ccy, today)
+        val priceNow = market.prices[asset.id]?.at(today)?.first
+        val valueRefToday = priceRef(market, converter, asset.id, asset.ccy, ccy, today)
         // Unpriced security (no quote or missing FX): fall back to the engine's valuation
         // (statement / cost basis) instead of showing a held position as worth 0.
         val value = if (valueRefToday != null) qty * valueRefToday else positions.sumOf { it.gross }
@@ -291,31 +316,34 @@ object Gains {
         // Period math ends at the asset's last settled close (see [closeAnchor]); the headline
         // value/price above stay live at `today`, matching the Yahoo model (live price, close-to-
         // close day change).
-        val anchor = assetAnchor(market, assetId, today)
-        val pAnchor = priceRef(market, converter, assetId, asset.ccy, ccy, anchor)
+        val anchor = assetAnchor(market, asset.id, today)
+        val pAnchor = priceRef(market, converter, asset.id, asset.ccy, ccy, anchor)
         val periods = windows(anchor).map { (label, then) ->
-            val pThen = priceRef(market, converter, assetId, asset.ccy, ccy, then)
+            val pThen = priceRef(market, converter, asset.id, asset.ccy, ccy, then)
             val relative = if (pThen != null && pAnchor != null && pThen != 0.0) pAnchor / pThen - 1 else null
             val absolute = if (pThen != null && pAnchor != null) qty * (pAnchor - pThen) else 0.0
             AssetPeriodGain(label, relative, absolute)
         }
-        val series = market.prices[assetId]?.points ?: emptyList()
-        val priceHistory = series.mapNotNull { pt ->
+        val priceHistory = (market.prices[asset.id]?.points ?: emptyList()).mapNotNull { pt ->
             val rate = converter.rate(asset.ccy, ccy, pt.date) ?: return@mapNotNull null
             PricePoint(pt.date, pt.close * rate)
         }
         val bases = positions.mapNotNull { it.costBasis }
         val costBasis = if (bases.isEmpty()) null else bases.sum()
-        val avgBuyPrice = if (costBasis != null && qty > 0.0) costBasis / qty else null
-        val unrealized = if (costBasis != null) value - costBasis else null
-        val unrealizedPct = if (costBasis != null && costBasis != 0.0) (value - costBasis) / costBasis else null
-
         return AssetDetail(
-            assetId = assetId, name = asset.name, ticker = asset.ticker, isin = asset.isin,
+            assetId = asset.id, name = asset.name, ticker = asset.ticker, isin = asset.isin,
             assetCcy = asset.ccy, referenceCcy = ccy, qty = qtyNow, price = priceNow, value = value,
-            accounts = accounts, periods = periods, priceHistory = priceHistory,
-            costBasis = costBasis, avgBuyPrice = avgBuyPrice, unrealized = unrealized, unrealizedPct = unrealizedPct,
-            kind = "security", taxRule = taxRule, valuations = valuations,
+            accounts = positions.map { it.accountName }.distinct(),
+            periods = periods, priceHistory = priceHistory,
+            costBasis = costBasis,
+            avgBuyPrice = costBasis?.let { it / qty },
+            unrealized = costBasis?.let { value - it },
+            unrealizedPct = costBasis?.takeIf { it != 0.0 }?.let { (value - it) / it },
+            kind = "security", taxRule = taxRule, valuations = valuationsOf(stmts),
         )
     }
+
+    /** The dated declared values (statements) of an asset, as native amounts. */
+    private fun valuationsOf(stmts: List<Tx>): List<AssetValuation> =
+        stmts.map { AssetValuation(it.date, it.amount.amount.toDouble(), it.amount.ccy) }
 }
