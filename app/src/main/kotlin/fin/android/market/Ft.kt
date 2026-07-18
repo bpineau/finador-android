@@ -127,7 +127,7 @@ class Ft(
                     val retriable = resp.code == 429 || resp.code >= 500
                     if (retriable && attempt == 0) return@repeat
                     if (resp.code != 200) return null
-                    return resp.body?.string()
+                    return resp.body.string()
                 }
             } catch (_: Exception) {
                 if (attempt == 0) return@repeat

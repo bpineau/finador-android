@@ -75,7 +75,7 @@ class GitHubBackend(
                 http.newCall(req).execute().use { resp ->
                     val code = resp.code
                     if ((code >= 500 || code == 429) && attempt == 0) return@repeat
-                    return code to (resp.body?.string() ?: "")
+                    return code to (resp.body.string())
                 }
             } catch (e: IOException) {
                 last = e
