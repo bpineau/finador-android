@@ -216,11 +216,9 @@ private fun validate(
     runCatching { LocalDate.parse(dateText.trim(), DateTimeFormatter.ISO_LOCAL_DATE) }
         .getOrElse { return "Date must be yyyy-MM-dd" }
     if (kind == TxKind.buy || kind == TxKind.sell) {
-        if (qty.toBigDecimalOrNull() == null) return "Quantity must be a number"
+        if (qty.trim().toBigDecimalOrNull() == null) return "Quantity must be a number"
     }
-    if (amount.toBigDecimalOrNull() == null) return "Amount must be a number"
+    if (amount.trim().toBigDecimalOrNull() == null) return "Amount must be a number"
     if (ccy.isBlank()) return "Currency required"
     return null
 }
-
-private fun String.toBigDecimalOrNull(): BigDecimal? = runCatching { BigDecimal(this.trim()) }.getOrNull()

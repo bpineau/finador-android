@@ -259,19 +259,19 @@ internal class Valuer(
 
     // ---- statement pairs (value.go) ----
 
-    private class Pair2(val account: Account, val asset: Asset)
+    private class StatementPair(val account: Account, val asset: Asset)
 
     /** Distinct (account, asset) couples with at least one statement dated ≤ at, first-seen. */
-    private fun statementPairs(): List<Pair2> {
+    private fun statementPairs(): List<StatementPair> {
         val seen = HashSet<Pair<String, String?>>()
-        val out = mutableListOf<Pair2>()
+        val out = mutableListOf<StatementPair>()
         for (t in sortedTxs) {
             if (t.date.isAfter(at) || t.kind != TxKind.statement || t.asset == null) continue
             val k = t.account to t.asset
             if (!seen.add(k)) continue
             val acc = book.accounts[t.account] ?: continue
             val asset = book.assets[t.asset] ?: continue
-            out += Pair2(acc, asset)
+            out += StatementPair(acc, asset)
         }
         return out
     }

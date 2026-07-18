@@ -7,7 +7,9 @@ import androidx.lifecycle.viewmodel.CreationExtras
 import fin.android.App
 import fin.android.data.AppContainer
 import fin.android.data.AppRepository
+import fin.android.data.AppState
 import fin.android.domain.AssetKind
+import fin.android.valuation.AssetDetail
 import fin.android.domain.TaxRule
 import fin.android.domain.TxKind
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -27,7 +29,7 @@ data class RepoSummary(val owner: String, val repo: String, val path: String, va
 class AppViewModel(private val container: AppContainer) : ViewModel() {
     private val repo: AppRepository = container.repository
 
-    val state: StateFlow<fin.android.data.AppState> = repo.state
+    val state: StateFlow<AppState> = repo.state
 
     private val _message = MutableStateFlow<String?>(null)
     /** Transient text for a snackbar (errors and outcome messages). */
@@ -191,15 +193,15 @@ class AppViewModel(private val container: AppContainer) : ViewModel() {
     /** The effective display currency (override → book's currency → EUR), for the Settings dropdown. */
     fun displayCurrency(): String =
         runCatching { container.loadConfig().displayCurrency }.getOrNull()
-            ?: (state.value as? fin.android.data.AppState.Ready)?.book?.config?.get("currency")
+            ?: (state.value as? AppState.Ready)?.book?.config?.get("currency")
             ?: "EUR"
 
     /**
      * The per-asset detail for the detail screen. Reads the copy precomputed in [AppState.Ready]
      * (instant); only falls back to an on-demand computation if it's somehow absent.
      */
-    fun assetDetail(assetId: String): fin.android.valuation.AssetDetail? =
-        (state.value as? fin.android.data.AppState.Ready)?.assetDetails?.get(assetId) ?: repo.assetDetail(assetId)
+    fun assetDetail(assetId: String): AssetDetail? =
+        (state.value as? AppState.Ready)?.assetDetails?.get(assetId) ?: repo.assetDetail(assetId)
 
     /** Reads the persisted remote config for the Settings screen (no secrets). */
     fun repoSummary(): RepoSummary? {
