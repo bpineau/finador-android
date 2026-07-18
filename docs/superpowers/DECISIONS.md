@@ -85,3 +85,11 @@ questions or confirmations). Each non-trivial decision is tracked here.
   (ArrowBack, KeyboardArrowRight, TrendingUp) keep `autoMirror = true` for RTL. Verified: unit
   tests + `assembleDebug` green, emulator smoke confirmed the bottom-bar, refresh, FAB and CloudOff
   icons render.
+
+## 2026-07-18 - remove the secrets migration shim
+
+The single-user fleet is entirely on v0.1.6 (migration ran on every device), so the one-shot
+`LegacySecretMigration` and the deprecated `androidx.security:security-crypto` dependency it
+required are deleted together, as planned when they were introduced. `KeystoreSecretStore` no
+longer runs any startup migration; the `legacy_migrated` flag may linger in existing prefs,
+unreferenced.

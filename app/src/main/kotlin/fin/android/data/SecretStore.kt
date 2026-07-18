@@ -45,25 +45,13 @@ class InMemorySecretStore : SecretStore {
  * Security `EncryptedSharedPreferences` with the primitives it wrapped - same at-rest guarantee,
  * no deprecated dependency. Biometric unlock is enforced by the UI before these are read.
  *
- * A legacy `EncryptedSharedPreferences` store ("finador_secrets") is migrated once on first
- * access - see [LegacySecretMigration].
+ * History: installs older than v0.1.6 kept their secrets in an `EncryptedSharedPreferences` store;
+ * a one-shot migration (removed once the whole fleet ran v0.1.6) re-encrypted them into this
+ * format, which is why the prefs may carry a leftover `legacy_migrated` flag.
  */
 class KeystoreSecretStore(context: Context) : SecretStore {
     private val prefs: SharedPreferences =
         context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
-
-    init {
-        // One-shot migration from the deprecated EncryptedSharedPreferences store. Runs before any
-        // read; a failed read leaves the new store empty (the user re-onboards, nothing corrupts).
-        if (!prefs.getBoolean(KEY_MIGRATED, false)) {
-            LegacySecretMigration.read(context)?.let { legacy ->
-                legacy.pat?.let(::putPat)
-                legacy.passphrase?.let(::putPassphrase)
-            }
-            LegacySecretMigration.wipe(context)
-            prefs.edit { putBoolean(KEY_MIGRATED, true) }
-        }
-    }
 
     override fun putPat(token: String) = put(KEY_PAT, token)
     override fun getPat(): String? = get(KEY_PAT)
@@ -117,6 +105,5 @@ class KeystoreSecretStore(context: Context) : SecretStore {
         const val IV_LEN = 12
         const val KEY_PAT = "github_pat"
         const val KEY_PASS = "ledger_passphrase"
-        const val KEY_MIGRATED = "legacy_migrated"
     }
 }
