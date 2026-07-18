@@ -15,8 +15,8 @@ android {
         applicationId = "fin.android"
         minSdk = 26
         targetSdk = 36
-        versionCode = 6
-        versionName = "0.1.5"
+        versionCode = 7
+        versionName = "0.1.6"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
 
@@ -84,6 +84,8 @@ dependencies {
     implementation(libs.kotlinx.serialization.json)
     implementation(libs.bouncycastle)
     implementation(libs.okhttp)
+    // Deprecated upstream; kept ONLY to migrate secrets written by old installs
+    // (data/LegacySecretMigration.kt). Delete both together once installs have migrated.
     implementation(libs.androidx.security.crypto)
     implementation(libs.androidx.biometric)
     testImplementation(libs.junit)
