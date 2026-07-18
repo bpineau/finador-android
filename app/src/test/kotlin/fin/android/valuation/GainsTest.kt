@@ -273,7 +273,7 @@ class GainsTest {
         val eur = asset(eurReport, "AA")
         val usd = asset(usdReport, "AA")
         assertEquals(110.0 / 108.0 - 1, eur.d1!!, tol) // a percentage, currency-independent
-        assertEquals(eur.d1!!, usd.d1!!, tol) // same % in either display currency
+        assertEquals(eur.d1, usd.d1!!, tol) // same % in either display currency
         assertEquals(1100.0, eur.value, tol) // 10 × 110 EUR
         assertEquals(eur.value * 1.25, usd.value, tol) // value converted by the fx factor
     }

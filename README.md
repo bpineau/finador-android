@@ -128,9 +128,9 @@ compared to a tall screen like the S21).
   config + secrets).
 - **Screenshots**: `adb exec-out screencap -p > shot.png`.
 - **`local.properties`, `build/`, `.gradle/`, `*.fin`** are not version-controlled (see `.gitignore`).
-- **No need to install Gradle**: `./gradlew` downloads the pinned version (8.13). You can still
+- **No need to install Gradle**: `./gradlew` downloads the pinned version (9.5.0). You can still
   `brew install gradle` for a global `gradle` command (not required here).
-- **Versions**: compileSdk/targetSdk **36**, minSdk **26**, JDK **21**, AGP 8.13.2, Kotlin 2.2.20.
+- **Versions**: compileSdk/targetSdk **36**, minSdk **26**, JDK **21**, AGP 9.3.0, Kotlin 2.4.10.
 - **Onboarding (first launch)**: you need a **private GitHub repo** + a **fine-grained PAT**
   (Settings → Developer settings → Personal access tokens → Fine-grained; *Repository access* =
   that one repo; *Permissions → Contents: Read and write*). Paste the token + a passphrase; after
