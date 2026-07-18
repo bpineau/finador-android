@@ -31,39 +31,32 @@ class Yahoo(
 
     override fun daily(ref: Ref, from: LocalDate): DailyData? {
         val symbol = ref.symbol?.takeIf { it.isNotEmpty() } ?: return null // a ticker provider needs a symbol
-        val resp = chart(symbol, from) ?: return null
-        val r = resp.chart.result?.firstOrNull() ?: return null
-
-        val closes = mutableListOf<PricePoint>()
-        val quoteCloses = r.indicators?.quote?.firstOrNull()?.close
-        val timestamps = r.timestamp ?: emptyList()
-        if (quoteCloses != null) {
-            for (i in timestamps.indices) {
-                if (i >= quoteCloses.size) break
-                val c = quoteCloses[i] ?: continue // holiday or missing close
-                closes.add(PricePoint(dateOf(timestamps[i]), c))
-            }
-        }
+        val r = chart(symbol, from)?.chart?.result?.firstOrNull() ?: return null
         val dividends = (r.events?.dividends?.values ?: emptyList())
             .map { DividendEvent(dateOf(it.date), it.amount) }
             .sortedBy { it.exDate }
-        return DailyData(currency = r.meta?.currency, closes = closes, dividends = dividends)
+        return DailyData(currency = r.meta?.currency, closes = closesOf(r), dividends = dividends)
     }
 
     /** Quotes `"{ccy}USD=X"` and returns its close series - the value of one unit of [ccy] in USD. */
     fun fxToUsd(ccy: String, from: LocalDate): PriceSeries? {
-        val resp = chart("${ccy}USD=X", from) ?: return null
-        val r = resp.chart.result?.firstOrNull() ?: return null
-        val quoteCloses = r.indicators?.quote?.firstOrNull()?.close ?: return null
-        val timestamps = r.timestamp ?: return null
-        val points = mutableListOf<PricePoint>()
-        for (i in timestamps.indices) {
-            if (i >= quoteCloses.size) break
-            val c = quoteCloses[i] ?: continue
-            points.add(PricePoint(dateOf(timestamps[i]), c))
-        }
+        val r = chart("${ccy}USD=X", from)?.chart?.result?.firstOrNull() ?: return null
+        val points = closesOf(r)
         if (points.isEmpty()) return null
         return PriceSeries(points)
+    }
+
+    /** Pairs the result's timestamps with its close values, skipping holidays (null closes). */
+    private fun closesOf(r: ChartResponse.Result): List<PricePoint> {
+        val quoteCloses = r.indicators?.quote?.firstOrNull()?.close ?: return emptyList()
+        val timestamps = r.timestamp ?: return emptyList()
+        val closes = mutableListOf<PricePoint>()
+        for (i in timestamps.indices) {
+            if (i >= quoteCloses.size) break
+            val c = quoteCloses[i] ?: continue // holiday or missing close
+            closes.add(PricePoint(dateOf(timestamps[i]), c))
+        }
+        return closes
     }
 
     private fun chart(symbol: String, from: LocalDate): ChartResponse? {
