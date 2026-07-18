@@ -152,5 +152,6 @@ that state; per-asset detail pages are **precomputed** into `Ready.assetDetails`
 
 - Format spec (authoritative): `../finador/docs/FORMAT.md`.
 - Go reference: `../finador/internal/{store,domain,portfolio,perf,market}`.
-- Design/decisions: `docs/superpowers/{specs,plans,DECISIONS.md}`.
-- Human setup + run: `README.md`.
+- Design rationale lives in commit messages (no separate decision log - write commit messages
+  that carry the why).
+- Human setup + run: `README.md`. Common commands: `Makefile` (`make help`).
