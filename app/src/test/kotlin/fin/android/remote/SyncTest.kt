@@ -17,21 +17,24 @@ import java.time.Duration
 import java.time.Instant
 import java.time.LocalDate
 
-/** In-memory remote with knobs to drive offline and conflict paths. */
+/** In-memory remote with knobs to drive offline, auth-failure and conflict paths. */
 private class FakeBackend : Backend {
     var data: ByteArray? = null
     var version = 0
     var offline = false
+    var auth = false // true = the token is rejected (401/403)
     var conflictNext = false
 
     override fun fetch(): Fetched {
         if (offline) throw RemoteError.Offline("offline")
+        if (auth) throw RemoteError.Auth("token rejected (HTTP 401)")
         val d = data ?: throw RemoteError.Missing()
         return Fetched(d, version.toString())
     }
 
     override fun push(data: ByteArray, base: Version?, message: String): Version {
         if (offline) throw RemoteError.Offline("offline")
+        if (auth) throw RemoteError.Auth("token rejected (HTTP 401)")
         if (conflictNext) { conflictNext = false; throw RemoteError.Conflict() }
         if (this.data != null && base != version.toString()) throw RemoteError.Conflict()
         this.data = data; version++; return version.toString()
@@ -87,6 +90,53 @@ class SyncTest {
         assertNull(be.data) // nothing reached the remote
         assertTrue(sync(be).state().dirty)
         assertEquals(1, Ledger.open(wc.readBytes(), pw).book.txs.size) // change persisted locally
+    }
+
+    // ---- auth failures: a rejected token must not lock the user out of local data ----
+
+    @Test
+    fun authWithLocalCopyReadsLocallyAndRecordsError() {
+        val be = FakeBackend().apply { auth = true }
+        wc.writeBytes(emptyLedgerBytes())
+        val ledger = sync(be).openForRead(pw) // must NOT throw: local copy is readable
+        assertEquals(0, ledger.book.txs.size)
+        assertNotNull("authError recorded for the re-login banner", sync(be).state().authError)
+    }
+
+    @Test(expected = RemoteError.Auth::class)
+    fun authWithoutLocalCopySurfaces() {
+        val be = FakeBackend().apply { auth = true }
+        sync(be).openForRead(pw) // nothing local to show: the error must surface
+    }
+
+    @Test
+    fun authMutateKeepsLocalDirtyAndRecordsError() {
+        val be = FakeBackend().apply { auth = true }
+        wc.writeBytes(emptyLedgerBytes())
+        val out = sync(be).mutate(pw, "add") { addDeposit(it) }
+        assertFalse(out.pushed)
+        assertTrue(out.dirty)
+        assertNull(be.data) // nothing reached the remote
+        val st = sync(be).state()
+        assertTrue(st.dirty)
+        assertNotNull(st.authError)
+        assertEquals(1, Ledger.open(wc.readBytes(), pw).book.txs.size) // change persisted locally
+    }
+
+    @Test
+    fun successfulSyncClearsAuthErrorAndPushesDirty() {
+        val be = FakeBackend().apply { auth = true }
+        wc.writeBytes(emptyLedgerBytes())
+        sync(be).mutate(pw, "add") { addDeposit(it) } // rejected: dirty + authError
+        assertNotNull(sync(be).state().authError)
+
+        be.auth = false // the user re-logged in
+        val out = sync(be).sync(pw)
+        assertTrue(out.pushed)
+        val st = sync(be).state()
+        assertNull("healthy auth clears the banner", st.authError)
+        assertFalse(st.dirty)
+        assertEquals(1, Ledger.open(be.data!!, pw).book.txs.size) // the kept-local change reached the remote
     }
 
     @Test

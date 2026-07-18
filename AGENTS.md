@@ -136,9 +136,9 @@ that state; per-asset detail pages are **precomputed** into `Ready.assetDetails`
   would remove drift risk, but it touches parity-tested numbers - do it under the full suite.
 - **`Gains.periodGain` rebuilds a full series per window** (8 windows). Building one series over the
   widest window and slicing (as Go's `report.go` does) is a pure speedup - verify TWR-per-window parity.
-- **An expired GitHub token blocks unlock even with a local copy** (`Sync.pullIfStale` lets
-  `RemoteError.Auth` propagate). Letting the user read local data with a "re-login" banner would be
-  friendlier - product decision pending.
+- **A rejected GitHub token never blocks local data.** `Sync` records it as `SyncState.authError`
+  (persistent "re-login" banner in the UI), reads/writes keep working locally (writes stay `dirty`),
+  and the next successful fetch/push clears it. Only an unlock with NO local copy surfaces the error.
 - The *data* lives in the user's separate private GitHub repo; this code repo is public at
   `github.com/bpineau/finador-android`.
 
