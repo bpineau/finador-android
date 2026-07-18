@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Deliberate suppressions only - each one documents why the "fix" lint suggests is wrong here.
+     Goal: `lintDebug` reports nothing but version-bump notices, so any new warning is a signal. -->
+<lint>
+    <!-- Lint suggests merging mipmap-anydpi-v26 into mipmap-anydpi since minSdk is 26, but AAPT
+         then fails to resolve the manifest's mipmap/ic_launcher (tried: build breaks). Adaptive
+         icons stay in the conventional -v26 folder. -->
+    <issue id="ObsoleteSdkInt">
+        <ignore path="src/main/res/mipmap-anydpi-v26" />
+    </issue>
+    <!-- enableOnBackInvokedCallback (predictive back) only applies from API 33; it is required
+         there and harmlessly ignored below. -->
+    <issue id="UnusedAttribute">
+        <ignore regexp="enableOnBackInvokedCallback" />
+    </issue>
+</lint>
