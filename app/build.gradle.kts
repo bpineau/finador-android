@@ -83,9 +83,6 @@ dependencies {
     implementation(libs.kotlinx.serialization.json)
     implementation(libs.bouncycastle)
     implementation(libs.okhttp)
-    // Deprecated upstream; kept ONLY to migrate secrets written by old installs
-    // (data/LegacySecretMigration.kt). Delete both together once installs have migrated.
-    implementation(libs.androidx.security.crypto)
     implementation(libs.androidx.biometric)
     testImplementation(libs.junit)
     testImplementation(libs.okhttp.mockwebserver)
