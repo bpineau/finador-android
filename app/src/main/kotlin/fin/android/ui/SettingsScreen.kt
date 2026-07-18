@@ -34,7 +34,9 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import fin.android.BuildConfig
 import fin.android.data.AppState
+import fin.android.format.Header
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -102,7 +104,7 @@ fun SettingsScreen(
 
             Spacer(Modifier.height(4.dp))
             Text(
-                "finador android · ledger format v1",
+                "finador android v${BuildConfig.VERSION_NAME} · ledger format v${Header.VERSION}",
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
