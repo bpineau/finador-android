@@ -12,9 +12,12 @@ EMULATOR := $(ANDROID_HOME)/emulator/emulator
 
 RELEASE_APK := app/build/outputs/apk/release/app-release.apk
 APKSIGNER = $$(ls -d "$(ANDROID_HOME)"/build-tools/* | sort -V | tail -1)/apksigner
+# The app version is read from the build file (single source of truth); lazy so it is
+# evaluated when a target runs, after any bump commit.
+VERSION = $(shell sed -n 's/.*versionName = "\(.*\)".*/\1/p' app/build.gradle.kts)
 
 .PHONY: help test test-class build install run reinstall release verify-signature smoke-release \
-	lint crossimpl emulator emulator-kill clean
+	gh-release lint crossimpl emulator emulator-kill clean
 
 help: ## List available targets
 	@grep -E '^[a-z-]+:.*##' $(MAKEFILE_LIST) | awk -F':.*## ' '{printf "  %-18s %s\n", $$1, $$2}'
@@ -60,6 +63,23 @@ smoke-release: ## Install the release APK on the emulator (WIPES app state), lau
 	else \
 	  echo "SMOKE OK (inspect the screen: /tmp/finador-release-smoke.png)"; \
 	fi
+
+gh-release: ## End-to-end release of v<versionName>: tests, signed APK, tag+push, GitHub release with the APK. Bump versionName/versionCode + commit first. NOTES=file.md for hand-written notes (default: GitHub-generated).
+	@test -z "$$(git status --porcelain)" || { echo "ERROR: working tree not clean - commit the version bump first"; exit 1; }
+	@test -n "$(VERSION)" || { echo "ERROR: cannot read versionName from app/build.gradle.kts"; exit 1; }
+	@! git rev-parse -q --verify "refs/tags/v$(VERSION)" >/dev/null \
+	  || { echo "ERROR: tag v$(VERSION) already exists - bump versionName/versionCode and commit first"; exit 1; }
+	$(MAKE) test
+	$(MAKE) release
+	@if $(APKSIGNER) verify --print-certs $(RELEASE_APK) | grep -q "CN=Android Debug"; then \
+	  echo "ERROR: APK is debug-signed - set FINADOR_STORE_FILE & co. in ~/.gradle/gradle.properties"; exit 1; \
+	fi
+	git tag -a "v$(VERSION)" -m "v$(VERSION)"
+	git push origin master "v$(VERSION)"
+	cp $(RELEASE_APK) "/tmp/finador-android-v$(VERSION).apk"
+	gh release create "v$(VERSION)" "/tmp/finador-android-v$(VERSION).apk" \
+	  --title "v$(VERSION)" $(if $(NOTES),--notes-file "$(NOTES)",--generate-notes)
+	@echo "released: https://github.com/bpineau/finador-android/releases/tag/v$(VERSION)"
 
 lint: ## Android Lint; report in app/build/reports/lint-results-debug.txt
 	$(GRADLE) lintDebug
