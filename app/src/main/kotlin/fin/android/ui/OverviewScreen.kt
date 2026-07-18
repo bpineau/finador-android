@@ -314,9 +314,14 @@ private fun AssetGainRow(a: AssetGain, onAssetClick: (String) -> Unit) {
 /* Portfolio pieces                                                                               */
 /* ---------------------------------------------------------------------------------------------- */
 
+/** Quiet by default: shows only for a token rejection (re-login) or unpushed local changes. */
 @Composable
 private fun SyncBanner(ready: AppState.Ready) {
-    if (!ready.sync.dirty) return // a clean state needs no banner; quiet by default.
+    val text = when {
+        ready.sync.authError != null -> "GitHub token rejected - re-login (Settings → Forget) to sync"
+        ready.sync.dirty -> "Unpushed changes (offline)"
+        else -> return
+    }
     Card(
         colors = CardDefaults.cardColors(
             containerColor = MaterialTheme.colorScheme.surfaceVariant,
@@ -335,7 +340,7 @@ private fun SyncBanner(ready: AppState.Ready) {
                 modifier = Modifier.size(18.dp),
             )
             Text(
-                "Unpushed changes (offline)",
+                text,
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
