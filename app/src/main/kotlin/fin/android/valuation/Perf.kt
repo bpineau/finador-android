@@ -9,7 +9,9 @@ package fin.android.valuation
 import fin.android.domain.AssetKind
 import fin.android.domain.Book
 import fin.android.domain.MarketData
+import fin.android.domain.Money
 import fin.android.domain.PricePoint
+import fin.android.domain.Tx
 import fin.android.domain.TxKind
 import fin.android.market.Converter
 import java.time.DayOfWeek
@@ -355,7 +357,7 @@ internal class SeriesBuilder(
     private inner class PairState(val accId: String, val assetId: String) {
         var qty = 0.0
         var basis = 0.0 // average cost in ref ccy, flows converted at their date
-        var stmt: fin.android.domain.Money? = null // last seen statement (property/unpriced security)
+        var stmt: Money? = null // last seen statement (property/unpriced security)
         var stmtQty = 0.0 // quantity held when [stmt] was taken (per-share scaling of the NAV observation)
     }
 
@@ -386,7 +388,7 @@ internal class SeriesBuilder(
             if (collect && amount != 0.0) flows += Flow(d, amount)
         }
 
-        fun applyTx(t: fin.android.domain.Tx, collect: Boolean, flows: MutableList<Flow>) {
+        fun applyTx(t: Tx, collect: Boolean, flows: MutableList<Flow>) {
             val acc = accounts[t.account] ?: return
             val accCcy = book.accounts[t.account]?.ccy ?: return
 
