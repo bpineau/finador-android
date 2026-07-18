@@ -8,9 +8,9 @@ when you change architecture or invariants.
 
 `finador-android` is a native Android app (Kotlin + Jetpack Compose) - the mobile companion to
 **finador** (a Go CLI+web personal wealth tracker, at `../finador`). It reads/writes the same
-**encrypted `.fin` ledger** and syncs it through a **private GitHub repo**. v1 = read everything
-(value, gains, per-asset detail) + quick transaction entry. Accounts AND assets are now manageable
-on both web and mobile (Settings → Manage accounts / Manage assets), alongside the CLI.
+**encrypted `.fin` ledger** and syncs it through a **private GitHub repo**. Scope: full read
+(value, gains, per-asset detail), quick transaction entry, and account/asset management
+(Settings → Manage accounts / Manage assets) - everyday parity with the desktop CLI and web.
 
 ## Golden rules (do not break)
 
@@ -31,28 +31,31 @@ on both web and mobile (Settings → Manage accounts / Manage assets), alongside
 
 ## Build / test / run (env is required)
 
-The Gradle wrapper needs both env vars (the build shell usually doesn't inherit the user's profile):
+The `Makefile` is the entry point - it exports `JAVA_HOME`/`ANDROID_HOME` itself, so targets work
+from a fresh shell (run from the repo root):
 
 ```sh
-export JAVA_HOME=/Library/Java/JavaVirtualMachines/temurin-21.jdk/Contents/Home
-export ANDROID_HOME=/opt/homebrew/share/android-commandlinetools
-P="$(git rev-parse --show-toplevel)"   # the repo root
-
-"$P/gradlew" --project-dir "$P" testDebugUnitTest            # unit tests (host JVM, no device) - your main loop
-"$P/gradlew" --project-dir "$P" assembleDebug               # compile the APK (catches Compose/Android errors)
-"$P/gradlew" --project-dir "$P" testDebugUnitTest --tests "*GainsTest*" --rerun-tasks   # one test class (cheap)
+make test                 # full unit suite (host JVM, no device) - your main loop
+make test-class T=Gains   # one test class (cheap)
+make build                # compile the debug APK (catches Compose/Android errors)
+make lint                 # Android Lint (report: app/build/reports/lint-results-debug.txt)
+make crossimpl            # byte-compat gate vs the Go reference (builds /tmp/finador first)
+make help                 # everything else (install, run, release, emulator up/down, clean)
 ```
 
-- **Cheap feedback**: `testDebugUnitTest` compiles the whole `main` (so it catches engine/UI compile
-  errors) AND runs the pure-Kotlin tests, without a device. Prefer it. Use `--tests "*Foo*"` to scope.
+(The raw `./gradlew` tasks behind these work too, with `JAVA_HOME`/`ANDROID_HOME` exported:
+`JAVA_HOME=/Library/Java/JavaVirtualMachines/temurin-21.jdk/Contents/Home`,
+`ANDROID_HOME=/opt/homebrew/share/android-commandlinetools`.)
+
+- **Cheap feedback**: `make test` compiles the whole `main` (so it catches engine/UI compile
+  errors) AND runs the pure-Kotlin tests, without a device. Prefer it.
 - Test counts come from `app/build/test-results/testDebugUnitTest/*.xml` (grep `failures=`), since
   `--console=plain` only prints failures.
-- Emulator (named `test`, API 36): boot headless
-  `"$ANDROID_HOME/emulator/emulator" -avd test -no-window -no-audio -no-boot-anim &`, then
-  `adb wait-for-device`, poll `adb shell getprop sys.boot_completed`, `gradlew installDebug`,
-  `adb shell am start -n fin.android/.ui.MainActivity`, check `adb logcat -d -s AndroidRuntime:E`.
+- Emulator (AVD named `test`, API 36): `make emulator` boots it headless and waits; `make run`
+  installs + launches; check `adb logcat -d -s AndroidRuntime:E`; `make emulator-kill` stops it.
   A fresh install lands on **Onboarding** (no config); a configured emulator lands on **Unlock**
-  (tap "Unlock"; it has no biometric so it falls back to a direct button).
+  (tap "Unlock" at `adb shell input tap 160 324`, screen 320x640; it has no enrolled biometric so
+  it falls back to a direct button).
 - Full repo workflow doc for humans: `README.md`.
 
 ## Architecture map
@@ -102,6 +105,9 @@ that state; per-asset detail pages are **precomputed** into `Ready.assetDetails`
 - **`Ledger.toBytes()` is diff-on-save**: existing record lines are re-emitted verbatim; only new
   records are sealed and the trailer re-sealed. `merge` re-seals the whole chain (matches Go).
 - **Timestamps must be `Locale.ROOT`** (`format/Timestamps.kt`) - the `ts` is the sealed LWW key.
+- **A rejected GitHub token never blocks local data.** `Sync` records it as `SyncState.authError`
+  (persistent "re-login" banner in the UI), reads/writes keep working locally (writes stay `dirty`),
+  and the next successful fetch/push clears it. Only an unlock with NO local copy surfaces the error.
 - **Argon2id is Bouncy Castle** (pure-JVM, so host unit tests run); not `argon2kt`.
 - **Unquoted securities are never worth 0.** Valuation fallback chain (mirrors Go, asserted by
   `valuation/UnquotedTest`): market close → last statement of the (account, asset) pair (a NAV
@@ -125,10 +131,9 @@ that state; per-asset detail pages are **precomputed** into `Ready.assetDetails`
 
 ## Verifying a change cheaply
 
-1. Engine/format/valuation/market change → `testDebugUnitTest --tests "*<Area>Test*"` first, then the
-   full `testDebugUnitTest`. For format edits also run `scripts/crossimpl.sh` (needs a built
-   `/tmp/finador`: `cd ../finador && go build -trimpath -o /tmp/finador ./cmd/finador`).
-2. UI change → `assembleDebug` (compile) + optional emulator smoke (no crash on the relevant screen).
+1. Engine/format/valuation/market change → `make test-class T=<Area>` first, then the full
+   `make test`. For format edits (and toolchain/serialization upgrades) also run `make crossimpl`.
+2. UI change → `make build` (compile) + optional emulator smoke (no crash on the relevant screen).
 3. Always end on green tests + green build before claiming done. Don't trust a change you didn't run.
 4. Deprecation/obsolescence sweep (occasional): a clean recompile prints zero `w:` deprecation
    warnings, and `lintDebug` (report in `app/build/reports/lint-results-debug.txt`) reports ONLY
@@ -142,9 +147,11 @@ that state; per-asset detail pages are **precomputed** into `Ready.assetDetails`
   would remove drift risk, but it touches parity-tested numbers - do it under the full suite.
 - **`Gains.periodGain` rebuilds a full series per window** (8 windows). Building one series over the
   widest window and slicing (as Go's `report.go` does) is a pure speedup - verify TWR-per-window parity.
-- **A rejected GitHub token never blocks local data.** `Sync` records it as `SyncState.authError`
-  (persistent "re-login" banner in the UI), reads/writes keep working locally (writes stay `dirty`),
-  and the next successful fetch/push clears it. Only an unlock with NO local copy surfaces the error.
+- **The SDK 37 wave is deliberately deferred** (user decision, July 2026): compileSdk/targetSdk
+  36 → 37, lifecycle 2.10 → 2.11 (it hard-requires compileSdk 37) and Gradle 9.5 → 9.6 wait until
+  the Android 17 platform settles and an API 37 emulator image is available for the smoke test.
+  They are the ONLY remaining `lintDebug` notices - do not "fix" them piecemeal; do the wave in one
+  pass under the full gates.
 - The *data* lives in the user's separate private GitHub repo; this code repo is public at
   `github.com/bpineau/finador-android`.
 
