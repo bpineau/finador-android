@@ -15,8 +15,10 @@ import fin.android.market.Quotes
 import fin.android.remote.GithubConfig
 import fin.android.remote.RemoteConfig
 import fin.android.remote.RemoteError
+import fin.android.remote.Sync
 import fin.android.remote.SyncOutcome
 import fin.android.remote.SyncState
+import fin.android.valuation.AssetDetail
 import fin.android.valuation.Gains
 import fin.android.valuation.Perf
 import fin.android.valuation.PerfMetrics
@@ -128,7 +130,7 @@ class AppRepository(private val container: AppContainer) {
         refreshQuotesLocked() // already holding the lock
     }
 
-    fun assetDetail(assetId: String): fin.android.valuation.AssetDetail? =
+    fun assetDetail(assetId: String): AssetDetail? =
         ledger?.let { Gains.assetDetail(it.book, market, container.loadConfig().displayCurrency, LocalDate.now(), assetId) }
 
     suspend fun addTransaction(
@@ -193,7 +195,7 @@ class AppRepository(private val container: AppContainer) {
      * from stored config/secrets, runs [op], then reopens the (possibly merged) working copy and
      * re-emits Ready. The lock is already held.
      */
-    private fun withSyncLocked(op: (fin.android.remote.Sync, String) -> SyncOutcome): Result<SyncOutcome> {
+    private fun withSyncLocked(op: (Sync, String) -> SyncOutcome): Result<SyncOutcome> {
         val cfg = container.loadConfig()
         val token = container.secretStore.getPat() ?: return Result.failure(IllegalStateException("no token"))
         val pass = passphrase ?: return Result.failure(IllegalStateException("locked"))
