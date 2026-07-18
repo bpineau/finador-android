@@ -51,11 +51,13 @@ make help                 # everything else (install, run, release, emulator up/
   errors) AND runs the pure-Kotlin tests, without a device. Prefer it.
 - Test counts come from `app/build/test-results/testDebugUnitTest/*.xml` (grep `failures=`), since
   `--console=plain` only prints failures.
-- Emulator (AVD named `test`, API 36): `make emulator` boots it headless and waits; `make run`
-  installs + launches; check `adb logcat -d -s AndroidRuntime:E`; `make emulator-kill` stops it.
-  A fresh install lands on **Onboarding** (no config); a configured emulator lands on **Unlock**
-  (tap "Unlock" at `adb shell input tap 160 324`, screen 320x640; it has no enrolled biometric so
-  it falls back to a direct button).
+- Emulator (AVD named `test`, API 36, screen 320x640): `make emulator` boots it headless and
+  waits; `make run` installs + launches; check `adb logcat -d -s AndroidRuntime:E`;
+  `make emulator-kill` stops it. The AVD holds NO configured state (wiped during the v0.1.7
+  release smoke), so the app lands on **Onboarding** - smoke tests verify boot + first screen,
+  not an unlocked portfolio. (If someone re-onboards it with real credentials, a configured
+  install lands on **Unlock**; no enrolled biometric, so it falls back to a direct button at
+  `adb shell input tap 160 324`.)
 - Full repo workflow doc for humans: `README.md`.
 
 ## Architecture map

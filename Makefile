@@ -10,13 +10,20 @@ GRADLE := ./gradlew --console=plain
 ADB := $(ANDROID_HOME)/platform-tools/adb
 EMULATOR := $(ANDROID_HOME)/emulator/emulator
 
-.PHONY: help test test-class build install run release lint crossimpl emulator emulator-kill clean
+RELEASE_APK := app/build/outputs/apk/release/app-release.apk
+APKSIGNER = $$(ls -d "$(ANDROID_HOME)"/build-tools/* | sort -V | tail -1)/apksigner
+
+.PHONY: help test test-class build install run reinstall release verify-signature smoke-release \
+	lint crossimpl emulator emulator-kill clean
 
 help: ## List available targets
-	@grep -E '^[a-z-]+:.*##' $(MAKEFILE_LIST) | awk -F':.*## ' '{printf "  %-14s %s\n", $$1, $$2}'
+	@grep -E '^[a-z-]+:.*##' $(MAKEFILE_LIST) | awk -F':.*## ' '{printf "  %-18s %s\n", $$1, $$2}'
 
 test: ## Run the full unit-test suite (host JVM, no device) - the main dev loop
 	$(GRADLE) testDebugUnitTest
+	@cat app/build/test-results/testDebugUnitTest/*.xml \
+	  | grep -ho '\(tests\|failures\|errors\)="[0-9]*"' | tr -dc '0-9tfe="\n' \
+	  | awk -F'"' '/^t/ {t+=$$2} /^f/ {f+=$$2} /^e/ {e+=$$2} END {printf "summary: %d tests, %d failures, %d errors\n", t, f, e}'
 
 test-class: ## Run one test class, e.g. `make test-class T=GainsTest`
 	$(GRADLE) testDebugUnitTest --tests "*$(T)*" --rerun-tasks
@@ -30,8 +37,29 @@ install: ## Build and install the debug APK on the connected device/emulator
 run: install ## Install, then (re)launch the app
 	$(ADB) shell am start -n fin.android/.ui.MainActivity
 
+reinstall: ## Uninstall then install the debug APK (fixes the signature mismatch after a release smoke)
+	-$(ADB) uninstall fin.android
+	$(GRADLE) installDebug
+
 release: ## Build the R8-minified release APK (real key when configured, else debug-signed)
 	$(GRADLE) assembleRelease
+	@ls -lh $(RELEASE_APK) | awk '{print "APK: '"$(RELEASE_APK)"' (" $$5 ")"}'
+
+verify-signature: ## Print the release APK's signing certs (CN=Android Debug means: do NOT publish)
+	$(APKSIGNER) verify --print-certs $(RELEASE_APK)
+
+smoke-release: ## Install the release APK on the emulator (WIPES app state), launch, check for crashes
+	-$(ADB) uninstall fin.android
+	$(ADB) install $(RELEASE_APK)
+	$(ADB) logcat -c
+	$(ADB) shell am start -n fin.android/.ui.MainActivity
+	sleep 6
+	$(ADB) exec-out screencap -p > /tmp/finador-release-smoke.png
+	@if $(ADB) logcat -d -s AndroidRuntime:E | grep -v '^---------' | grep -q .; then \
+	  echo "SMOKE FAIL - crash in logcat:"; $(ADB) logcat -d -s AndroidRuntime:E | tail -20; exit 1; \
+	else \
+	  echo "SMOKE OK (inspect the screen: /tmp/finador-release-smoke.png)"; \
+	fi
 
 lint: ## Android Lint; report in app/build/reports/lint-results-debug.txt
 	$(GRADLE) lintDebug
