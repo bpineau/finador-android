@@ -185,13 +185,21 @@ class AppRepository(private val container: AppContainer) {
      * this in [exclusive]); a validation failure inside [fn] propagates as Result.failure without
      * touching the persisted copy (see [fin.android.remote.Sync.mutate]).
      */
-    private fun mutateLocked(message: String, fn: (Ledger) -> Ledger): Result<SyncOutcome> {
+    private fun mutateLocked(message: String, fn: (Ledger) -> Ledger): Result<SyncOutcome> =
+        withSyncLocked { sync, pass -> sync.mutate(pass, "finador-android: $message", fn = fn) }
+
+    /**
+     * Shared run-sync-op→reopen→emit plumbing for [mutateLocked] and [syncNow]: builds the [Sync]
+     * from stored config/secrets, runs [op], then reopens the (possibly merged) working copy and
+     * re-emits Ready. The lock is already held.
+     */
+    private fun withSyncLocked(op: (fin.android.remote.Sync, String) -> SyncOutcome): Result<SyncOutcome> {
         val cfg = container.loadConfig()
         val token = container.secretStore.getPat() ?: return Result.failure(IllegalStateException("no token"))
         val pass = passphrase ?: return Result.failure(IllegalStateException("locked"))
         return runCatching {
             val sync = container.buildSync(cfg, token)
-            val outcome = sync.mutate(pass, "finador-android: $message", fn = fn)
+            val outcome = op(sync, pass)
             ledger = Ledger.open(container.workingCopy(cfg).readBytes(), pass)
             emitReady(sync.state(), outcome.message, refreshing = false)
             outcome
@@ -199,16 +207,7 @@ class AppRepository(private val container: AppContainer) {
     }
 
     suspend fun syncNow(): Result<SyncOutcome> = exclusive {
-        val cfg = container.loadConfig()
-        val token = container.secretStore.getPat() ?: return@exclusive Result.failure(IllegalStateException("no token"))
-        val pass = passphrase ?: return@exclusive Result.failure(IllegalStateException("locked"))
-        runCatching {
-            val sync = container.buildSync(cfg, token)
-            val outcome = sync.sync(pass)
-            ledger = Ledger.open(container.workingCopy(cfg).readBytes(), pass)
-            emitReady(sync.state(), outcome.message, refreshing = false)
-            outcome
-        }
+        withSyncLocked { sync, pass -> sync.sync(pass) }
     }
 
     suspend fun forget() = exclusive {
