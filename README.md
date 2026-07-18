@@ -86,8 +86,9 @@ work too if you prefer, with those variables exported.)
 
 ## 3. Run on the emulator
 
-The emulator must be running **before** `installDebug` (otherwise: *"No connected devices"*).
-In a **separate terminal** (it stays in the foreground):
+Shortcut: `make emulator` boots the AVD headless and waits until it is ready, then `make run`
+installs and launches the app; `make emulator-kill` stops it. The manual way, with a visible
+window, in a **separate terminal** (it stays in the foreground):
 
 ```sh
 export ANDROID_HOME="$(brew --prefix)/share/android-commandlinetools"
@@ -98,8 +99,7 @@ $ANDROID_HOME/emulator/emulator -avd test           # leave it running
 Then, once the Android home screen is up, from the project terminal:
 
 ```sh
-./gradlew installDebug
-adb shell am start -n fin.android/.ui.MainActivity   # (re)launch without reinstalling
+make run    # or: ./gradlew installDebug && adb shell am start -n fin.android/.ui.MainActivity
 ```
 
 Stop the emulator: close its window, or `adb emu kill`.
