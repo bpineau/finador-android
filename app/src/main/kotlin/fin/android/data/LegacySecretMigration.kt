@@ -1,6 +1,7 @@
 package fin.android.data
 
 import android.content.Context
+import androidx.core.content.edit
 
 /**
  * One-shot read of secrets written by the deprecated Jetpack Security
@@ -37,7 +38,7 @@ internal object LegacySecretMigration {
     /** Deletes the legacy store; call after a successful (or empty) migration. */
     fun wipe(context: Context) {
         runCatching {
-            context.getSharedPreferences(LEGACY_PREFS, Context.MODE_PRIVATE).edit().clear().apply()
+            context.getSharedPreferences(LEGACY_PREFS, Context.MODE_PRIVATE).edit { clear() }
             context.deleteSharedPreferences(LEGACY_PREFS)
         }
     }
