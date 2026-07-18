@@ -14,6 +14,12 @@ data class SyncState(
     val sha: String? = null,
     val lastPull: String? = null,
     val dirty: Boolean = false,
+    /**
+     * Message of the last GitHub auth failure (expired/under-scoped token); null when auth is
+     * healthy. Set so the UI can show a persistent "re-login" banner while local reads keep
+     * working; cleared by the next successful fetch or push.
+     */
+    val authError: String? = null,
 )
 
 /** Outcome of a mutate/sync, for UI feedback. */
@@ -51,11 +57,17 @@ class Sync(
         try {
             val f = backend.fetch()
             writeCopy(f.data)
-            saveState(st.copy(sha = f.version, lastPull = now().toString()))
+            saveState(st.copy(sha = f.version, lastPull = now().toString(), authError = null))
         } catch (e: RemoteError.Missing) {
             // No remote file yet - keep whatever local copy exists (possibly none).
         } catch (e: RemoteError.Offline) {
             if (!workingCopy.exists()) throw e // can't read without any copy
+        } catch (e: RemoteError.Auth) {
+            // A rejected token must not lock the user out of their local data: record it (the UI
+            // shows a persistent re-login banner) and read the local copy. Without any copy there
+            // is nothing to show - let the error surface.
+            saveState(st.copy(authError = e.message))
+            if (!workingCopy.exists()) throw e
         }
     }
 
@@ -81,12 +93,14 @@ class Sync(
         try {
             val f = backend.fetch()
             writeCopy(f.data)
-            st = st.copy(sha = f.version, lastPull = now().toString())
+            st = st.copy(sha = f.version, lastPull = now().toString(), authError = null)
             saveState(st)
         } catch (e: RemoteError.Missing) {
             st = st.copy(sha = null)
         } catch (e: RemoteError.Offline) {
             // proceed on the local copy
+        } catch (e: RemoteError.Auth) {
+            // proceed on the local copy; the push below will fail too and keep the change dirty
         }
 
         require(workingCopy.exists()) { "no local copy to mutate and remote unavailable" }
@@ -94,18 +108,26 @@ class Sync(
         var bytes = local.toBytes() // serialize once; re-derived only after a merge
         writeCopy(bytes)
 
+        /** The change is written locally but could not reach the remote: keep it dirty.
+         *  [authError] records a token rejection; an offline failure preserves any existing one. */
+        fun keptLocally(message: String, authError: String? = st.authError): SyncOutcome {
+            saveState(st.copy(dirty = true, authError = authError))
+            return SyncOutcome(pushed = false, dirty = true, message = message)
+        }
+
         repeat(MAX_PUSH_TRIES) {
             try {
                 val newSha = backend.push(bytes, st.sha, message)
-                saveState(st.copy(sha = newSha, lastPull = now().toString(), dirty = false))
+                saveState(st.copy(sha = newSha, lastPull = now().toString(), dirty = false, authError = null))
                 return SyncOutcome(pushed = true, dirty = false, message = "synced")
             } catch (e: RemoteError.Conflict) {
-                // Going offline mid-reconcile must still honor the offline-dirty guarantee.
+                // Going offline (or losing auth) mid-reconcile must still honor the dirty guarantee.
                 val remote = try {
                     backend.fetch()
                 } catch (off: RemoteError.Offline) {
-                    saveState(st.copy(dirty = true))
-                    return SyncOutcome(pushed = false, dirty = true, message = "saved locally (offline) - will push later")
+                    return keptLocally("saved locally (offline) - will push later")
+                } catch (auth: RemoteError.Auth) {
+                    return keptLocally("saved locally - GitHub token rejected, re-login to push", auth.message)
                 }
                 local = local.merge(Ledger.open(remote.data, passphrase), resolve)
                 bytes = local.toBytes()
@@ -113,12 +135,12 @@ class Sync(
                 st = st.copy(sha = remote.version)
                 saveState(st)
             } catch (e: RemoteError.Offline) {
-                saveState(st.copy(dirty = true))
-                return SyncOutcome(pushed = false, dirty = true, message = "saved locally (offline) - will push later")
+                return keptLocally("saved locally (offline) - will push later")
+            } catch (e: RemoteError.Auth) {
+                return keptLocally("saved locally - GitHub token rejected, re-login to push", e.message)
             }
         }
-        saveState(st.copy(dirty = true))
-        return SyncOutcome(pushed = false, dirty = true, message = "could not resolve remote conflict - kept locally")
+        return keptLocally("could not resolve remote conflict - kept locally")
     }
 
     /** Force pull (and push if there are unpushed local changes). */
@@ -130,7 +152,11 @@ class Sync(
             null
         } catch (e: RemoteError.Offline) {
             return SyncOutcome(pushed = false, dirty = st.dirty, message = "offline")
+        } catch (e: RemoteError.Auth) {
+            saveState(st.copy(authError = e.message))
+            return SyncOutcome(pushed = false, dirty = st.dirty, message = "GitHub token rejected - re-login")
         }
+        st = st.copy(authError = null) // the fetch went through: auth is healthy again
 
         if (!st.dirty) {
             if (fetched != null) {
@@ -163,6 +189,9 @@ class Sync(
         } catch (e: RemoteError.Offline) {
             saveState(st.copy(dirty = true))
             SyncOutcome(pushed = false, dirty = true, message = "offline - will push later")
+        } catch (e: RemoteError.Auth) {
+            saveState(st.copy(dirty = true, authError = e.message))
+            SyncOutcome(pushed = false, dirty = true, message = "saved locally - GitHub token rejected, re-login to push")
         }
     }
 
