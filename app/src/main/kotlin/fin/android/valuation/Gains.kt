@@ -95,8 +95,13 @@ object Gains {
     private fun assetAnchor(market: MarketData, assetId: String, today: LocalDate): LocalDate =
         market.prices[assetId]?.at(today)?.second ?: today
 
-    /** Portfolio periods, in display order: label → the day `then` is computed from the anchor. */
-    private fun portfolioWindows(today: LocalDate): List<Pair<String, LocalDate>> = listOf(
+    /**
+     * Period windows, in display order: label → the day `then` is computed from the anchor.
+     * Shared by the portfolio table and the per-asset detail page. The value at `then` is the
+     * comparison BASE, so YTD starts at Dec 31 of last year (mirrors Go `perf.PeriodRange`:
+     * Jan 1 would silently drop the year's first session).
+     */
+    private fun windows(today: LocalDate): List<Pair<String, LocalDate>> = listOf(
         "1d" to today.minusDays(1),
         "3d" to today.minusDays(3),
         "5d" to today.minusDays(5),
@@ -104,7 +109,7 @@ object Gains {
         "1m" to today.minusMonths(1),
         "6m" to today.minusMonths(6),
         "1y" to today.minusYears(1),
-        "YTD" to LocalDate.of(today.year, 1, 1),
+        "YTD" to LocalDate.of(today.year - 1, 12, 31),
     )
 
     /**
@@ -126,7 +131,7 @@ object Gains {
 
         // Windows end at the last settled close, not calendar `today` - see [closeAnchor].
         val anchor = closeAnchor(market, today)
-        val periods = portfolioWindows(anchor).map { (label, then) ->
+        val periods = windows(anchor).map { (label, then) ->
             periodGain(book, market, ccy, label, then, anchor)
         }
         val assets = assetGains(book, market, ccy, today)
@@ -212,18 +217,6 @@ object Gains {
 
     // ---- per-asset detail page ----
 
-    /** Detail-page period windows, in display order: label → the day `then` is computed from `today`. */
-    private fun assetWindows(today: LocalDate): List<Pair<String, LocalDate>> = listOf(
-        "1d" to today.minusDays(1),
-        "3d" to today.minusDays(3),
-        "5d" to today.minusDays(5),
-        "7d" to today.minusDays(7),
-        "1m" to today.minusMonths(1),
-        "6m" to today.minusMonths(6),
-        "1y" to today.minusYears(1),
-        "YTD" to LocalDate.of(today.year, 1, 1),
-    )
-
     /**
      * Builds the simplified [AssetDetail] for [assetId] as of [today], in [referenceCcy] (defaults
      * to `book.config["currency"]` then "EUR"). Only period % increase + absolute gain are computed
@@ -291,14 +284,16 @@ object Gains {
         val qty = qtyNow.toDouble()
         val priceNow = market.prices[assetId]?.at(today)?.first
         val valueRefToday = priceRef(market, converter, assetId, asset.ccy, ccy, today)
-        val value = if (valueRefToday != null) qty * valueRefToday else 0.0
+        // Unpriced security (no quote or missing FX): fall back to the engine's valuation
+        // (statement / cost basis) instead of showing a held position as worth 0.
+        val value = if (valueRefToday != null) qty * valueRefToday else positions.sumOf { it.gross }
 
         // Period math ends at the asset's last settled close (see [closeAnchor]); the headline
         // value/price above stay live at `today`, matching the Yahoo model (live price, close-to-
         // close day change).
         val anchor = assetAnchor(market, assetId, today)
         val pAnchor = priceRef(market, converter, assetId, asset.ccy, ccy, anchor)
-        val periods = assetWindows(anchor).map { (label, then) ->
+        val periods = windows(anchor).map { (label, then) ->
             val pThen = priceRef(market, converter, assetId, asset.ccy, ccy, then)
             val relative = if (pThen != null && pAnchor != null && pThen != 0.0) pAnchor / pThen - 1 else null
             val absolute = if (pThen != null && pAnchor != null) qty * (pAnchor - pThen) else 0.0

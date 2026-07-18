@@ -106,8 +106,7 @@ object Perf {
             sortino = sortino(returns, rf)
         }
         val cagr = if (days >= MIN_DAYS_FOR_CAGR) cagr(twr, days) else null
-        val dd = maxDrawdown(points)
-        val maxDd = if (dd == 0.0) 0.0 else dd
+        val maxDd = maxDrawdown(points) + 0.0 // + 0.0 folds a possible -0.0 into 0.0
 
         return PerfMetrics(
             from = from,
@@ -355,7 +354,9 @@ internal class SeriesBuilder(
 
     private inner class PairState(val accId: String, val assetId: String) {
         var qty = 0.0
+        var basis = 0.0 // average cost in ref ccy, flows converted at their date
         var stmt: fin.android.domain.Money? = null // last seen statement (property/unpriced security)
+        var stmtQty = 0.0 // quantity held when [stmt] was taken (per-share scaling of the NAV observation)
     }
 
     private inner class AccountState(val accId: String, val ccyAcc: String) {
@@ -400,9 +401,12 @@ internal class SeriesBuilder(
 
                     if (asset.kind != AssetKind.PROPERTY) {
                         if (t.kind == TxKind.buy) {
+                            p.basis += disp
                             p.qty += t.qty.toDouble()
                         } else if (p.qty > 0) {
-                            p.qty -= minOf(t.qty.toDouble(), p.qty)
+                            val sold = minOf(t.qty.toDouble(), p.qty)
+                            p.basis -= p.basis * sold / p.qty
+                            p.qty -= sold
                         }
                     }
 
@@ -472,17 +476,23 @@ internal class SeriesBuilder(
                     val isFirstStmt = p.stmt == null
                     val prevHeld = if (isFirstStmt) 0.0 else toRef(p.stmt!!.amount.toDouble(), p.stmt!!.ccy, t.date)
                     p.stmt = t.amount
+                    p.stmtQty = p.qty
                     val newDisp = toRef(t.amount.amount.toDouble(), t.amount.ccy, t.date)
                     // A statement re-declares a value: the gap since the previously-held
                     // value is an adjustment (a flow), not performance.
                     //   - property: always declaration-valued → re-baseline every statement
-                    //   - security: only while it has no market price that day
+                    //   - security: only a position that entered the ledger with NO basis (a
+                    //     declared holding) adopts at its first statement. A position BOUGHT
+                    //     in the ledger already entered through its buy flow and is valued at
+                    //     cost until observed: its first statement is a NAV observation, and
+                    //     the cost→declared gap is performance - a flow there would count the
+                    //     same money twice.
                     when {
                         asset.kind == AssetKind.PROPERTY ->
                             addFlow(flows, t.date, newDisp - prevHeld, collect)
                         isFirstStmt -> {
                             val hasPx = prices[t.asset]?.at(t.date) != null
-                            if (!hasPx && p.qty > 0) addFlow(flows, t.date, newDisp, collect)
+                            if (!hasPx && p.qty > 0 && p.basis == 0.0) addFlow(flows, t.date, newDisp, collect)
                         }
                     }
                 }
@@ -517,11 +527,17 @@ internal class SeriesBuilder(
                 if (asset.kind == AssetKind.PROPERTY) {
                     p.stmt?.let { v = toRef(it.amount.toDouble(), it.ccy, d) }
                 } else if (p.qty > 0) {
+                    // Same fallback chain as Valuator.positionValue: market close → last
+                    // statement (a NAV observation, scaled per share) → cost basis.
                     val close = prices[p.assetId]?.at(d)?.first
                     v = when {
                         close != null -> convert(p.qty * close, asset.ccy, ccy, d)
-                        p.stmt != null -> toRef(p.stmt!!.amount.toDouble(), p.stmt!!.ccy, d)
-                        else -> 0.0
+                        p.stmt != null -> {
+                            var total = toRef(p.stmt!!.amount.toDouble(), p.stmt!!.ccy, d)
+                            if (p.stmtQty > 0) total = total / p.stmtQty * p.qty
+                            total
+                        }
+                        else -> p.basis
                     }
                 }
                 gross += v

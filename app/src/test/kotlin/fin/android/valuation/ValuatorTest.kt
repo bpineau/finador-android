@@ -266,8 +266,12 @@ class ValuatorTest {
         assertNull(v.taxNote)
     }
 
-    /** A held security with no price and no statement is counted as 0 (pragmatic, flagged). */
-    @Test fun missingPriceCountsAsZero() {
+    /**
+     * A held security with no price and no statement is valued at its cost basis
+     * (mirrors Go `positionValue`): a bought position is never worth 0 just because
+     * nothing observed it yet, or the buy itself would read as a loss.
+     */
+    @Test fun missingPriceFallsBackToCostBasis() {
         nextSeq = 0
         val accounts = mapOf("cto" to Account("cto", "CTO", "EUR", TaxRule.None))
         val assets = mapOf("xyz" to Asset("xyz", AssetKind.SECURITY, "XYZ", ccy = "EUR", group = "actions"))
@@ -275,7 +279,7 @@ class ValuatorTest {
             .associateBy { it.id }
         val book = Book(accounts = accounts, assets = assets, txs = txs)
         val v = Valuator.value(book, MarketData(), at = d("2026-06-05"))
-        assertEquals(0.0, v.gross, tol)
+        assertEquals(5000.0, v.gross, tol)
         assertEquals(0.0, v.tax, tol)
     }
 
