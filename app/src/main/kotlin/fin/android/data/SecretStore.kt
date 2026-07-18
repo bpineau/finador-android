@@ -5,6 +5,7 @@ import android.content.SharedPreferences
 import android.security.keystore.KeyGenParameterSpec
 import android.security.keystore.KeyProperties
 import android.util.Base64
+import androidx.core.content.edit
 import java.security.KeyStore
 import javax.crypto.Cipher
 import javax.crypto.KeyGenerator
@@ -60,7 +61,7 @@ class KeystoreSecretStore(context: Context) : SecretStore {
                 legacy.passphrase?.let(::putPassphrase)
             }
             LegacySecretMigration.wipe(context)
-            prefs.edit().putBoolean(KEY_MIGRATED, true).apply()
+            prefs.edit { putBoolean(KEY_MIGRATED, true) }
         }
     }
 
@@ -69,14 +70,14 @@ class KeystoreSecretStore(context: Context) : SecretStore {
     override fun putPassphrase(passphrase: String) = put(KEY_PASS, passphrase)
     override fun getPassphrase(): String? = get(KEY_PASS)
     override fun hasPassphrase(): Boolean = prefs.contains(KEY_PASS)
-    override fun purge() { prefs.edit().clear().apply() }
+    override fun purge() { prefs.edit { clear() } }
 
     private fun put(name: String, value: String) {
         val cipher = Cipher.getInstance(TRANSFORM)
         cipher.init(Cipher.ENCRYPT_MODE, key()) // Keystore generates a fresh random IV
         val sealed = cipher.doFinal(value.toByteArray(Charsets.UTF_8))
         val blob = cipher.iv + sealed
-        prefs.edit().putString(name, Base64.encodeToString(blob, Base64.NO_WRAP)).apply()
+        prefs.edit { putString(name, Base64.encodeToString(blob, Base64.NO_WRAP)) }
     }
 
     /** Null when absent; also null (never a crash) if the Keystore key was lost or rotated. */
