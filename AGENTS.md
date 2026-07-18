@@ -23,9 +23,11 @@ on both web and mobile (Settings → Manage accounts / Manage assets), alongside
    `../finador/internal/{portfolio,perf,market}`. The unit tests assert the *same numbers* as the Go
    `*_test.go`. Don't change the math without checking parity; if you must, update the Go reference too.
 3. **All docs / comments / code in English.** (User convention.)
-4. **Keep the suite green.** 123 unit tests today. Run them before claiming done.
-5. **Don't weaken security.** Secrets live in the Android Keystore (`data/SecretStore`); the repo
-   holds only the *encrypted* `.fin`; never log secrets or write them to disk in clear.
+4. **Keep the suite green.** Run the full `testDebugUnitTest` before claiming done; every test must
+   pass (count them from `app/build/test-results/testDebugUnitTest/*.xml`, 143 today).
+5. **Don't weaken security.** Secrets are encrypted under an Android Keystore key
+   (`data/SecretStore.kt`); the repo holds only the *encrypted* `.fin`; never log secrets or write
+   them to disk in clear.
 
 ## Build / test / run (env is required)
 
@@ -66,7 +68,7 @@ market/valuation` layers are **pure Kotlin (no Android imports)** → fast to un
 | `market/` | Yahoo, Ft, Morningstar, MultiSource, Converter, CacheSidecar, Quotes, Source | fetch quotes (JSON + a Boursorama regex), FX via USD, FINCACHE2 cache | ✅ |
 | `valuation/` | Valuator, Perf, Gains | gross/tax/net, TWR/XIRR/etc., period & per-asset gains, asset detail | ✅ |
 | `remote/` | Backend, GitHubBackend, RemoteConfig, Sync | GitHub Contents API, pull/mutate/push + conflict→merge + offline-dirty | Android-light |
-| `data/` | AppContainer, AppRepository, AppState, SecretStore | manual DI, the single facade, Keystore secrets | Android |
+| `data/` | AppContainer, AppRepository, AppState, SecretStore, LegacySecretMigration | manual DI, the single facade, Keystore-encrypted secrets | Android |
 | `ui/` | AppRoot, AppViewModel, *Screen, Theme, Format | Compose screens, MVVM, theme | Android |
 
 Data flow: `MainActivity` → `AppRoot` renders `AppViewModel.state: StateFlow<AppState>`
@@ -101,6 +103,17 @@ that state; per-asset detail pages are **precomputed** into `Ready.assetDetails`
   records are sealed and the trailer re-sealed. `merge` re-seals the whole chain (matches Go).
 - **Timestamps must be `Locale.ROOT`** (`format/Timestamps.kt`) - the `ts` is the sealed LWW key.
 - **Argon2id is Bouncy Castle** (pure-JVM, so host unit tests run); not `argon2kt`.
+- **Unquoted securities are never worth 0.** Valuation fallback chain (mirrors Go, asserted by
+  `valuation/UnquotedTest`): market close → last statement of the (account, asset) pair (a NAV
+  observation, scaled per share when the quantity changed since) → cost basis. The first statement
+  of a position *bought* in the ledger (basis > 0) is a NAV observation (performance), not an
+  adoption flow; only a declared holding (basis == 0) adopts.
+- **Secrets**: `KeystoreSecretStore` encrypts values with an Android Keystore AES-GCM key into
+  plain SharedPreferences (the deprecated Jetpack `EncryptedSharedPreferences` was replaced).
+  `data/LegacySecretMigration.kt` + the `androidx.security:security-crypto` dependency exist ONLY
+  to migrate pre-v0.1.6 installs - delete both together once installed devices have migrated.
+- **material-icons-extended is frozen upstream** (pinned at 1.7.8 in `libs.versions.toml`, no
+  longer BOM-managed). Long-term exit: inline the ~11 used icons as ImageVectors and drop it.
 - **Build types**: `debug` = dev (slow, debuggable). `release` = R8-minified, non-debuggable, ~6 MB,
   validated end-to-end. It's signed with the **real release key** when `FINADOR_STORE_FILE` & co. are
   set in `~/.gradle/gradle.properties` (never committed), and **falls back to debug signing** when
@@ -123,6 +136,9 @@ that state; per-asset detail pages are **precomputed** into `Ready.assetDetails`
   would remove drift risk, but it touches parity-tested numbers - do it under the full suite.
 - **`Gains.periodGain` rebuilds a full series per window** (8 windows). Building one series over the
   widest window and slicing (as Go's `report.go` does) is a pure speedup - verify TWR-per-window parity.
+- **An expired GitHub token blocks unlock even with a local copy** (`Sync.pullIfStale` lets
+  `RemoteError.Auth` propagate). Letting the user read local data with a "re-login" banner would be
+  friendlier - product decision pending.
 - The *data* lives in the user's separate private GitHub repo; this code repo is public at
   `github.com/bpineau/finador-android`.
 

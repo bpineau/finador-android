@@ -53,3 +53,24 @@ questions or confirmations). Each non-trivial decision is tracked here.
   on the Android side the vectors are already asserted + the cross-impl gate protects the contract.
 - Visual enrichments: icons (material-icons-extended), curves (Canvas), pull-to-refresh.
 - Real GitHub E2E: requires a private repo + the user's PAT (to do on first use).
+
+## 2026-07-18 - audit (calculations parity, future-proofing, docs)
+
+- **Unquoted-security parity fix**: `Valuator.positionValue` and `Perf.SeriesBuilder` now mirror
+  the Go fallback chain (market close → last statement scaled per share → cost basis) and the
+  basis-aware first-statement adoption rule (`p.basis == 0`). Previously an unpriced bought
+  security was valued 0 and its first statement double-counted as a flow. Ported
+  `portfolio/unquoted_test.go` → `valuation/UnquotedTest.kt` (same numbers).
+- **YTD base = Dec 31 of last year** (was Jan 1), matching Go `perf.PeriodRange`: the window
+  start is the comparison base, so Jan 1 silently dropped the year's first session.
+- **Asset detail value fallback**: an unpriced held security shows the engine's valuation
+  (statement/basis) instead of 0 on its detail page.
+- **Secrets store rewritten without deprecated APIs**: `KeystoreSecretStore` = Android Keystore
+  AES-GCM key + plain SharedPreferences (replaces Jetpack Security `EncryptedSharedPreferences`,
+  deprecated upstream). One-shot migration (`LegacySecretMigration`) verified end-to-end on the
+  emulator (legacy PAT+passphrase re-encrypted, legacy file wiped). The `security-crypto`
+  dependency remains ONLY for that migration; delete both together later.
+- **material-icons-extended pinned at 1.7.8** (frozen upstream, may drop out of future BOMs).
+- Docs: AGENTS.md gotchas extended (unquoted fallback, secrets, icons, auth-blocks-unlock note);
+  README scope line updated (accounts/assets manageable on mobile); CLAUDE.md states the two
+  hard gates.
