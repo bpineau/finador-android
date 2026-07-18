@@ -123,15 +123,15 @@ class GainsTest {
         assertEquals(100.0, period(report, "7d").absolute, 1e-2)
     }
 
-    // ---- relative: null with < 2 points, finite with a multi-point window ----
+    // ---- YTD base: Dec 31 of last year (mirrors Go perf.PeriodRange) ----
 
     /**
-     * A degenerate window (from == to, a single value point) yields a null
-     * relative; a normal multi-day window yields a finite relative.
+     * The value at the window start is the comparison BASE, so YTD starts at Dec 31
+     * of last year: on Jan 1 the YTD window is [Dec 31, Jan 1] and measures the
+     * year's first session (a Jan 1 base would silently drop it).
      */
-    @Test fun relativeNullWhenTooFewPoints() {
+    @Test fun ytdBaseIsDec31OfLastYear() {
         seq = 0
-        // today = Jan 1 → the YTD window is [Jan 1, Jan 1] = one point → null relative.
         val today = d("2026-01-01")
         val accounts = mapOf("cto" to Account("cto", "CTO", "EUR", TaxRule.None))
         val assets = mapOf("aa" to Asset("aa", AssetKind.SECURITY, "Alpha", ticker = "AA", ccy = "EUR", group = "g"))
@@ -149,8 +149,9 @@ class GainsTest {
             ),
         )
         val report = Gains.report(book, market, today = today)
-        assertNull("single-point YTD window → null relative", period(report, "YTD").relative)
-        assertEquals(0.0, period(report, "YTD").absolute, tol) // no window → graceful 0
+        // Window [Dec 31, Jan 1]: V(Dec 31) = 10 × 100 (forward-fill) = 1000, V(Jan 1) = 1200.
+        assertEquals(0.2, period(report, "YTD").relative!!, tol)
+        assertEquals(200.0, period(report, "YTD").absolute, tol)
         // The 7d window [Dec 25, Jan 1] has multiple points → a finite relative.
         assertNotNull("multi-point 7d window → finite relative", period(report, "7d").relative)
     }
