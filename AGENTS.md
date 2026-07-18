@@ -68,7 +68,7 @@ market/valuation` layers are **pure Kotlin (no Android imports)** → fast to un
 | `market/` | Yahoo, Ft, Morningstar, MultiSource, Converter, CacheSidecar, Quotes, Source | fetch quotes (JSON + a Boursorama regex), FX via USD, FINCACHE2 cache | ✅ |
 | `valuation/` | Valuator, Perf, Gains | gross/tax/net, TWR/XIRR/etc., period & per-asset gains, asset detail | ✅ |
 | `remote/` | Backend, GitHubBackend, RemoteConfig, Sync | GitHub Contents API, pull/mutate/push + conflict→merge + offline-dirty | Android-light |
-| `data/` | AppContainer, AppRepository, AppState, SecretStore, LegacySecretMigration | manual DI, the single facade, Keystore-encrypted secrets | Android |
+| `data/` | AppContainer, AppRepository, AppState, SecretStore | manual DI, the single facade, Keystore-encrypted secrets | Android |
 | `ui/` | AppRoot, AppViewModel, *Screen, Theme, Format | Compose screens, MVVM, theme | Android |
 
 Data flow: `MainActivity` → `AppRoot` renders `AppViewModel.state: StateFlow<AppState>`
@@ -109,9 +109,8 @@ that state; per-asset detail pages are **precomputed** into `Ready.assetDetails`
   of a position *bought* in the ledger (basis > 0) is a NAV observation (performance), not an
   adoption flow; only a declared holding (basis == 0) adopts.
 - **Secrets**: `KeystoreSecretStore` encrypts values with an Android Keystore AES-GCM key into
-  plain SharedPreferences (the deprecated Jetpack `EncryptedSharedPreferences` was replaced).
-  `data/LegacySecretMigration.kt` + the `androidx.security:security-crypto` dependency exist ONLY
-  to migrate pre-v0.1.6 installs - delete both together once installed devices have migrated.
+  plain SharedPreferences. (The deprecated Jetpack `EncryptedSharedPreferences` and its one-shot
+  migration shim were removed after v0.1.6 - the whole fleet had migrated.)
 - **The 11 Material icons the app draws are inlined** in `ui/FinIcons.kt` (as `FinIcons.<Name>`
   `ImageVector`s, path data copied verbatim from androidx material-icons 1.7.8, Apache 2.0). There
   is no `material-icons-extended` dependency anymore - the old one was frozen upstream. Need another
