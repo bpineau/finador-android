@@ -5,8 +5,9 @@ A **native Android** client (Kotlin / Jetpack Compose) - the mobile companion to
 `.fin` file**, synced through a **private GitHub repository**, so you manage your wealth
 interchangeably from desktop and mobile.
 
-- **v1 scope**: full read (gross/tax/net value, gains, per-asset detail) + quick transaction
-  entry. Creating accounts/assets stays on the desktop.
+- **Scope**: full read (gross/tax/net value, gains, per-asset detail), quick transaction entry,
+  and account/asset management (Settings → Manage accounts / Manage assets) - at parity with the
+  desktop CLI and web for everyday operations.
 - **Compatibility**: bit-for-bit with `finador/docs/FORMAT.md` (verified by the format test
   vectors and a cross-implementation test against the Go binary).
 - **Storage**: GitHub only (the encrypted `.fin` never leaves the repo in clear text); market
