@@ -131,6 +131,10 @@ that state; per-asset detail pages are **precomputed** into `Ready.assetDetails`
    `/tmp/finador`: `cd ../finador && go build -trimpath -o /tmp/finador ./cmd/finador`).
 2. UI change → `assembleDebug` (compile) + optional emulator smoke (no crash on the relevant screen).
 3. Always end on green tests + green build before claiming done. Don't trust a change you didn't run.
+4. Deprecation/obsolescence sweep (occasional): a clean recompile prints zero `w:` deprecation
+   warnings, and `lintDebug` (report in `app/build/reports/lint-results-debug.txt`) reports ONLY
+   version-bump notices - anything else is a regression. Deliberate suppressions live in
+   `app/lint.xml`, each with its rationale (read them before "fixing" what they cover).
 
 ## Known deferred work (intentional, with rationale)
 
