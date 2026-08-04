@@ -97,11 +97,11 @@ class ValuatorTest {
     // ---- Ported Go cases ----
 
     /**
-     * TestValueAll (gains-taxed PEA security + tracked cash, gains CTO, none Livret, gains property).
-     *   PEA: 12×560 = 6720 ; cash tracked = 10000 − 5000 − 2750 + 1800 = 4050
+     * TestValueAll (gains-taxed PEA security + declared cash, gains CTO, none Livret, gains property).
+     *   PEA: 12×560 = 6720 ; declared cash = the 10000 deposit, untouched by the trades (D29)
      *   CTO: 2×560 = 1120 ; Livret: 12000 ; Maison: 450000
-     *   gross = 6720+4050+1120+12000+450000 = 473890
-     *   Exact tax: PEA gains:17.2% base 10000 (deposits), value 10770 → 770×0.172 = 132.44
+     *   gross = 6720+10000+1120+12000+450000 = 479840
+     *   Exact tax: PEA gains:17.2% base (5000+2750−1800)+10000 = 15950, value 16720 → 770×0.172 = 132.44
      *              CTO gains:30% base 1100 (buys−sells), value 1120 → 20×0.30 = 6
      *              Livret none → 0 ; Immo gains:30% base 400000, value 450000 → 50000×0.30 = 15000
      *   tax = 132.44 + 6 + 15000 = 15138.44
@@ -109,7 +109,7 @@ class ValuatorTest {
     @Test fun valueAll() {
         val (book, market) = valuationBook()
         val v = Valuator.value(book, market, at = d("2026-06-05"))
-        assertEquals(473890.0, v.gross, tol)
+        assertEquals(479840.0, v.gross, tol)
         assertEquals(132.44 + 6 + 15000, v.tax, tol)
         assertEquals(v.gross - v.tax, v.net, tol)
         // Per-line breakdown tax diverges from the exact envelope total → taxNote set.
@@ -123,18 +123,18 @@ class ValuatorTest {
     /**
      * TestValueAtEarlierDate: at 2026-03-21 the forward-filled close is 540 (Mar 20),
      * the property uses its first statement (400000).
-     *   PEA 12×540=6480, cash 4050 ; CTO 2×540=1080 ; livret 12000 ; maison 400000
+     *   PEA 12×540=6480, declared cash 10000 ; CTO 2×540=1080 ; livret 12000 ; maison 400000
      */
     @Test fun valueAtEarlierDate() {
         val (book, market) = valuationBook()
         val v = Valuator.value(book, market, at = d("2026-03-21"))
-        assertEquals(6480.0 + 4050 + 1080 + 12000 + 400000, v.gross, tol)
+        assertEquals(6480.0 + 10000 + 1080 + 12000 + 400000, v.gross, tol)
     }
 
     /**
      * TestValueOtherCurrency: reference USD with EUR→USD = 1.10. Only the PEA scope in Go,
      * but here value() is whole-book; we check the PEA envelope line in USD instead.
-     *   PEA gross (EUR) = 6720 + 4050 = 10770 → ×1.10 = 11847 (USD).
+     *   PEA gross (EUR) = 6720 + 10000 = 16720 → ×1.10 = 18392 (USD).
      * fx[EUR] = value of 1 EUR in USD = 1.10 (Converter crosses via USD).
      */
     @Test fun valueOtherCurrency() {
@@ -142,7 +142,7 @@ class ValuatorTest {
         val withFx = market.copy(fx = mapOf("EUR" to PriceSeries(listOf(PricePoint(d("2026-01-01"), 1.10)))))
         val v = Valuator.value(book, withFx, referenceCcy = "USD", at = d("2026-06-05"), byGroup = false)
         val pea = v.lines.first { it.label == "PEA" }
-        assertEquals((6720.0 + 4050) * 1.10, pea.gross, tol)
+        assertEquals((6720.0 + 10000) * 1.10, pea.gross, tol)
         assertEquals("USD", v.referenceCcy)
     }
 
@@ -161,32 +161,28 @@ class ValuatorTest {
     }
 
     /**
-     * TestValueAutoDividends: a Yahoo dividend of 2/share on cw8, ex-date 2026-03-01.
-     *   PEA holds 15 shares at Mar 1 (10+5 bought, sell on Mar 15 is later) → +30 EUR cash.
-     *   PEA gross = 6720 + 4050 + 30.
-     * Then a manual Dividend on cw8 disables the auto one → +25 instead of +30.
+     * Income never lands on the declared cash (D29): a Yahoo dividend, like a manual one,
+     * leaves the pocket as a negative flow, so the valuation is positions + what was declared.
      */
     @Test fun valueAutoDividends() {
         val (book, market) = valuationBook()
         val withDiv = market.copy(dividends = mapOf("cw8" to listOf(DividendEvent(d("2026-03-01"), 2.0))))
         val v = Valuator.value(withTx(book), withDiv, at = d("2026-06-05"), byGroup = false)
-        assertEquals(6720.0 + 4050 + 30, v.lines.first { it.label == "PEA" }.gross, tol)
+        assertEquals(6720.0 + 10000, v.lines.first { it.label == "PEA" }.gross, tol)
 
         val book2 = withTx(book, tx("2026-03-02", "pea", "cw8", TxKind.dividend, amount = eur("25")))
         val v2 = Valuator.value(book2, withDiv, at = d("2026-06-05"), byGroup = false)
-        assertEquals(6720.0 + 4050 + 25, v2.lines.first { it.label == "PEA" }.gross, tol)
+        assertEquals(6720.0 + 10000, v2.lines.first { it.label == "PEA" }.gross, tol)
     }
 
-    /**
-     * TestAutoDividendWithholding: cw8 withholding 15% → 15×2×(1−0.15) = 25.50.
-     */
-    @Test fun autoDividendWithholding() {
+    /** A withholding rate no longer changes the valuation: it only nets the dividend flow. */
+    @Test fun withholdingDoesNotChangeValuation() {
         val (book, market) = valuationBook()
         val cw8 = book.assets.getValue("cw8").copy(withholding = 0.15)
         val book2 = book.copy(assets = book.assets + ("cw8" to cw8))
         val withDiv = market.copy(dividends = mapOf("cw8" to listOf(DividendEvent(d("2026-03-01"), 2.0))))
         val v = Valuator.value(book2, withDiv, at = d("2026-06-05"), byGroup = false)
-        assertEquals(6720.0 + 4050 + 25.5, v.lines.first { it.label == "PEA" }.gross, tol)
+        assertEquals(6720.0 + 10000, v.lines.first { it.label == "PEA" }.gross, tol)
     }
 
     /**
@@ -201,34 +197,33 @@ class ValuatorTest {
     }
 
     /**
-     * TestNegativeEnvelopeBasisClamped: a 15000 PEA withdraw makes contributions negative.
-     *   base = max(0, 10000−15000) = 0 ; cash = 10000−5000−2750+1800−15000 = −10950
-     *   cw8 PEA = 12×560 = 6720 ; PEA gross = 6720 − 10950 = −4230
-     *   gain = −4230 − 0 < 0 → tax = 0.
+     * The declared cash cancels out of gross − basis, so an over-withdrawal changes the
+     * gross but not the taxable gain (D29).
+     *   cash = 10000 − 15000 = −5000 ; cw8 PEA = 12×560 = 6720 ; gross = 1720
+     *   base = (5000+2750−1800) − 5000 = 950 ; gain = 770 → tax = 132.44, as without it.
      */
     @Test fun negativeEnvelopeBasisClamped() {
         val (book, market) = valuationBook()
         val book2 = withTx(book, tx("2026-04-01", "pea", null, TxKind.withdraw, amount = eur("15000")))
         val v = Valuator.value(book2, market, at = d("2026-06-05"), byGroup = false)
         val pea = v.lines.first { it.label == "PEA" }
-        assertEquals(-4230.0, pea.gross, tol)
-        // PEA's exact envelope tax is 0; the only other taxed envelopes are CTO (6) and Immo (15000).
-        assertEquals(6.0 + 15000, v.tax, tol)
+        assertEquals(1720.0, pea.gross, tol)
+        assertEquals(132.44 + 6 + 15000, v.tax, tol)
     }
 
     /**
      * TestValueLinesByAccount: byGroup=false → one line per envelope carrying positions AND cash.
-     *   PEA = 6720 + 4050 ; CTO = 1120 ; Livret = 12000 ; Immo = 450000 ; total 473890.
+     *   PEA = 6720 + 10000 ; CTO = 1120 ; Livret = 12000 ; Immo = 450000 ; total 479840.
      */
     @Test fun valueLinesByAccount() {
         val (book, market) = valuationBook()
         val v = Valuator.value(book, market, at = d("2026-06-05"), byGroup = false)
         val got = v.lines.associate { it.label to it.gross }
-        assertEquals(6720.0 + 4050, got.getValue("PEA"), tol)
+        assertEquals(6720.0 + 10000, got.getValue("PEA"), tol)
         assertEquals(1120.0, got.getValue("CTO"), tol)
         assertEquals(12000.0, got.getValue("Livret"), tol)
         assertEquals(450000.0, got.getValue("Immo"), tol)
-        assertEquals(473890.0, v.gross, tol)
+        assertEquals(479840.0, v.gross, tol)
     }
 
     /**
@@ -259,10 +254,10 @@ class ValuatorTest {
         val book = Book(accounts = accounts, assets = assets, txs = txs, config = mapOf("currency" to "EUR"))
         val market = MarketData(prices = mapOf("cw8" to PriceSeries(listOf(PricePoint(d("2026-06-01"), 600.0)))))
         val v = Valuator.value(book, market, at = d("2026-06-05"))
-        // security 10×600 = 6000 ; cash 10000 − 5000 = 5000 ; gross = 11000.
-        assertEquals(11000.0, v.gross, tol)
-        // value:30% taxes the whole value → 11000 × 0.30 = 3300. Per-line == envelope → no note.
-        assertEquals(3300.0, v.tax, tol)
+        // security 10×600 = 6000 ; declared cash 10000 (the buy does not spend it) ; gross = 16000.
+        assertEquals(16000.0, v.gross, tol)
+        // value:30% taxes the whole value → 16000 × 0.30 = 4800. Per-line == envelope → no note.
+        assertEquals(4800.0, v.tax, tol)
         assertNull(v.taxNote)
     }
 
@@ -297,12 +292,12 @@ class ValuatorTest {
      *
      * Derivation (at 2026-12-31):
      *   PEA cw8 = 20 × 500 = 10000.
-     *   PEA cash tracked (has a deposit) = 10000 (deposit) − 9000 (buy) = 1000.
+     *   PEA declared cash = the 10000 deposit; the buy does not spend it (D29).
      *   Livret cash = 15000 (statement). Property has no statement → not a position.
-     *   gross = 10000 + 1000 + 15000 = 26000.
-     *   PEA exact envelope tax: gains:17.2%, base = deposits 10000, value = 10000 + 1000 = 11000
-     *     → max(0, 11000 − 10000) × 0.172 = 1000 × 0.172 = 172.
-     *   Livret none → 0. Total tax = 172. net = 26000 − 172 = 25828.
+     *   gross = 10000 + 10000 + 15000 = 35000.
+     *   PEA exact envelope tax: gains:17.2%, base = buy 9000 + cash 10000 = 19000,
+     *     value = 20000 → max(0, 20000 − 19000) × 0.172 = 172.
+     *   Livret none → 0. Total tax = 172. net = 35000 − 172 = 34828.
      */
     @Test fun sampleLedgerValuation() {
         val ledger = Ledger.open(sampleBytes(), "finador-format-spec-v3")
@@ -311,14 +306,14 @@ class ValuatorTest {
             prices = mapOf(cw8Id to PriceSeries(listOf(PricePoint(d("2024-12-31"), 500.0)))),
         )
         val v = Valuator.value(ledger.book, market, at = d("2026-12-31"))
-        assertEquals(26000.0, v.gross, tol)
+        assertEquals(35000.0, v.gross, tol)
         assertEquals(172.0, v.tax, tol)
-        assertEquals(25828.0, v.net, tol)
+        assertEquals(34828.0, v.net, tol)
         // The property carries no statement, so it produces no position.
         assertTrue(v.positions.none { it.kind == "property" })
         // Both the PEA security/cash and the Livret cash appear.
         assertTrue(v.positions.any { it.kind == "security" && it.gross == 10000.0 })
-        assertTrue(v.positions.any { it.kind == "cash" && it.gross == 1000.0 })
+        assertTrue(v.positions.any { it.kind == "cash" && it.gross == 10000.0 })
         assertTrue(v.positions.any { it.kind == "cash" && it.gross == 15000.0 })
     }
 }
