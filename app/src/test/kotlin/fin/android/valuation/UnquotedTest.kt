@@ -72,22 +72,24 @@ class UnquotedTest {
      * never a second adoption.
      */
     @Test fun seriesUnquotedBuyThenStatement() {
-        data class Case(val tracked: Boolean, val wantFlows: Int, val wantTwr: Double)
+        data class Case(val declaresCash: Boolean, val wantFlows: Int, val wantTwr: Double)
         for (tc in listOf(
-            Case(tracked = false, wantFlows = 1, wantTwr = 4200.0 / 4000 - 1),
-            Case(tracked = true, wantFlows = 0, wantTwr = 10200.0 / 10000 - 1),
+            Case(declaresCash = false, wantFlows = 1, wantTwr = 4200.0 / 4000 - 1),
+            // Declaring cash changes no flow (D29); the idle balance only dilutes the return.
+            Case(declaresCash = true, wantFlows = 1, wantTwr = 14200.0 / 14000 - 1),
         )) {
-            val book = unquotedFundBook(tc.tracked)
+            val book = unquotedFundBook(tc.declaresCash)
             val series = SeriesBuilder(book, MarketData(), "EUR").build(d("2026-01-01"), d("2026-03-01"))
-            assertEquals("flows (tracked=${tc.tracked})", tc.wantFlows, series.flows.size)
-            assertEquals("TWR (tracked=${tc.tracked})", tc.wantTwr, Perf.twr(series.points, series.flows), tol)
+            assertEquals("flows (cash=${tc.declaresCash})", tc.wantFlows, series.flows.size)
+            assertEquals("TWR (cash=${tc.declaresCash})", tc.wantTwr, Perf.twr(series.points, series.flows), tol)
 
-            // The buy day must not move the measured value (cost fallback).
-            if (tc.tracked) {
-                assertEquals("value across the buy day", valueAt(series, "2026-01-09"), valueAt(series, "2026-01-10"), tol)
-            } else {
-                assertEquals("buy day value = cost", 4000.0, valueAt(series, "2026-01-10"), tol)
-            }
+            // The buy adds the position at cost against a flow of the same size: neutral.
+            assertEquals(
+                "buy day value = previous + cost",
+                valueAt(series, "2026-01-09") + 4000.0,
+                valueAt(series, "2026-01-10"),
+                tol,
+            )
         }
     }
 
