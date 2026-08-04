@@ -18,7 +18,7 @@ import fin.android.market.Converter
 import java.math.BigDecimal
 import java.time.LocalDate
 
-/** One valued position. [assetId] is null for an envelope's tracked cash. */
+/** One valued position. [assetId] is null for an envelope's declared cash. */
 data class Position(
     val accountId: String,
     val accountName: String,
@@ -87,7 +87,6 @@ internal class Valuer(
 ) {
     private val fx = Converter(market.fx)
     private val prices = market.prices
-    private val dividends = market.dividends
 
     /** True when an FX rate was missing and a value was counted as 0. */
     private var fxMissing = false
@@ -137,9 +136,8 @@ internal class Valuer(
             )
         }
 
-        // 3. cash of tracked envelopes.
+        // 3. declared cash of the envelopes.
         for (acc in book.accounts.values) {
-            if (!cashTracked(acc.id)) continue
             val gross = cashValue(acc)
             if (gross == 0.0) continue
             val tax = if (acc.tax is TaxRule.Value) gross * rate(acc.tax) else 0.0
@@ -245,12 +243,6 @@ internal class Valuer(
             }
         }
         return if (q.signum() < 0) BigDecimal.ZERO else q
-    }
-
-    /** True when the account's cash is tracked: any pure-cash statement/deposit/withdraw. */
-    private fun cashTracked(acc: String): Boolean = book.txs.values.any {
-        it.account == acc && it.asset == null &&
-            (it.kind == TxKind.statement || it.kind == TxKind.deposit || it.kind == TxKind.withdraw)
     }
 
     /** Ledger in replay order: (date, id). */
@@ -372,22 +364,20 @@ internal class Valuer(
         is TaxRule.Gains -> maxOf(0.0, gross - accountBasis(acc)) * rate(acc.tax)
     }
 
-    /** Net external contributions (deposits−withdraws if cash tracked, else buys−sells), plus
-     *  property first estimates; clamped to 0. */
+    /** buys − sells + fees, plus the declared cash (counted in gross, never a gain) and the
+     *  property first estimates; clamped to 0. Mirrors Go `value.go accountBasis` (D29). */
     private fun accountBasis(acc: Account): Double {
-        val tracked = cashTracked(acc.id)
         var basis = 0.0
         for (t in sortedTxs) {
             if (t.date.isAfter(at) || t.account != acc.id) continue
-            val sign = when {
-                tracked && t.kind == TxKind.deposit -> 1.0
-                tracked && t.kind == TxKind.withdraw -> -1.0
-                !tracked && t.kind == TxKind.buy -> 1.0
-                !tracked && t.kind == TxKind.sell -> -1.0
+            val sign = when (t.kind) {
+                TxKind.buy, TxKind.fee -> 1.0
+                TxKind.sell -> -1.0
                 else -> continue
             }
             basis += sign * toRef(t.amount.amount, t.amount.ccy, t.date)
         }
+        basis += cashValue(acc)
         for (p in statementPairs()) {
             if (p.account.id != acc.id || p.asset.kind != AssetKind.PROPERTY) continue
             val first = firstStatement(acc.id, p.asset.id) ?: continue
@@ -398,7 +388,10 @@ internal class Valuer(
 
     // ---- cash (value.go) ----
 
-    /** Anchor on the last cash statement ≤ at, then post-anchor flows + auto-dividends. */
+    /**
+     * The declared balance: anchor on the last pure-cash statement ≤ at, then the deposits and
+     * withdrawals that follow it. Trades, dividends and fees never move it (D29).
+     */
     private fun cashValue(acc: Account): Double {
         var balance = 0.0
         var anchor: LocalDate? = null
@@ -411,37 +404,13 @@ internal class Valuer(
             if (t.date.isAfter(at) || t.account != acc.id) continue
             if (anchor != null && !anchor.isBefore(t.date)) continue // already in the anchor statement
             val sign = when (t.kind) {
-                TxKind.deposit, TxKind.sell, TxKind.dividend -> 1.0
-                TxKind.withdraw, TxKind.buy, TxKind.fee -> -1.0
+                TxKind.deposit -> 1.0
+                TxKind.withdraw -> -1.0
                 else -> continue
             }
             balance += sign * convert(t.amount.amount.toDouble(), t.amount.ccy, acc.ccy, t.date)
         }
-        balance += autoDividends(acc, anchor)
         return toRef(balance, acc.ccy, at)
-    }
-
-    /** Assets with at least one manual Dividend tx (their cached distributions are ignored). */
-    private val manualDividendAssets: Set<String?> =
-        book.txs.values.filter { it.kind == TxKind.dividend && it.asset != null }.map { it.asset }.toHashSet()
-
-    /** Yahoo-known distributions for assets without any manual Dividend tx. */
-    private fun autoDividends(acc: Account, after: LocalDate?): Double {
-        val manual = manualDividendAssets
-        var total = 0.0
-        for ((id, events) in dividends) {
-            if (id in manual) continue
-            val asset = book.assets[id] ?: continue
-            val withholding = asset.withholding ?: 0.0
-            for (ev in events) {
-                if (ev.exDate.isAfter(at)) continue
-                if (after != null && !after.isBefore(ev.exDate)) continue
-                val qty = quantity(acc.id, id, ev.exDate)
-                if (qty.signum() == 0) continue
-                total += convert(toF(qty) * ev.amount * (1 - withholding), asset.ccy, acc.ccy, ev.exDate)
-            }
-        }
-        return total
     }
 
     // ---- lines (scope.go) ----
