@@ -197,18 +197,37 @@ class ValuatorTest {
     }
 
     /**
-     * The declared cash cancels out of gross − basis, so an over-withdrawal changes the
-     * gross but not the taxable gain (D29).
+     * TestEnvelopeGainIgnoresDeclaredCash: the declared cash cancels out of
+     * gross − basis, so an over-withdrawal changes the gross but not the taxable gain (D29).
      *   cash = 10000 − 15000 = −5000 ; cw8 PEA = 12×560 = 6720 ; gross = 1720
      *   base = (5000+2750−1800) − 5000 = 950 ; gain = 770 → tax = 132.44, as without it.
      */
-    @Test fun negativeEnvelopeBasisClamped() {
+    @Test fun envelopeGainIgnoresDeclaredCash() {
         val (book, market) = valuationBook()
         val book2 = withTx(book, tx("2026-04-01", "pea", null, TxKind.withdraw, amount = eur("15000")))
         val v = Valuator.value(book2, market, at = d("2026-06-05"), byGroup = false)
         val pea = v.lines.first { it.label == "PEA" }
         assertEquals(1720.0, pea.gross, tol)
         assertEquals(132.44 + 6 + 15000, v.tax, tol)
+    }
+
+    /**
+     * TestNegativeEnvelopeBasisClamped: an envelope emptied of more cash than it ever
+     * held, with no position left, keeps its basis clamped at zero rather than taxing a loss.
+     *   basis = (5000+2750−1800−6600) + (10000−15000) = −5650 → clamped to 0
+     *   gross = 0 (no shares left) − 5000 (cash) = −5000 ; gain < 0 → PEA tax 0.
+     */
+    @Test fun negativeEnvelopeBasisClamped() {
+        val (book, market) = valuationBook()
+        val book2 = withTx(
+            book,
+            tx("2026-04-01", "pea", "cw8", TxKind.sell, "12", eur("6600")),
+            tx("2026-04-02", "pea", null, TxKind.withdraw, amount = eur("15000")),
+        )
+        val v = Valuator.value(book2, market, at = d("2026-06-05"), byGroup = false)
+        assertEquals(-5000.0, v.lines.first { it.label == "PEA" }.gross, tol)
+        // PEA owes nothing; only CTO (6) and Immo (15000) are still taxed.
+        assertEquals(6.0 + 15000, v.tax, tol)
     }
 
     /**
