@@ -43,13 +43,14 @@ class UnquotedTest {
 
     /**
      * The Go `unquotedFundBook` fixture: buy an unquoted fund, then value it with a
-     * statement. [tracked] toggles whether the account carries cash.
+     * statement. [declaresCash] toggles whether the envelope also declares a cash
+     * balance - which the trades must leave strictly alone (D29).
      */
-    private fun unquotedFundBook(tracked: Boolean): Book {
+    private fun unquotedFundBook(declaresCash: Boolean): Book {
         seq = 0
         val txs = mutableMapOf<String, Tx>()
         val list = buildList {
-            if (tracked) add(tx("2026-01-01", "cto", null, TxKind.deposit, amount = eur("10000")))
+            if (declaresCash) add(tx("2026-01-01", "cto", null, TxKind.deposit, amount = eur("10000")))
             add(tx("2026-01-10", "cto", "fund", TxKind.buy, "10", eur("4000")))
             add(tx("2026-02-10", "cto", "fund", TxKind.statement, amount = eur("4200")))
         }
@@ -100,7 +101,7 @@ class UnquotedTest {
      * not the stale 4200 total.
      */
     @Test fun valueMatchesSeriesOnUnquotedFallbacks() {
-        val book = unquotedFundBook(tracked = true).let { b ->
+        val book = unquotedFundBook(declaresCash = true).let { b ->
             val sell = tx("2026-02-20", "cto", "fund", TxKind.sell, "5", eur("2100"))
             b.copy(txs = b.txs + (sell.id to sell))
         }

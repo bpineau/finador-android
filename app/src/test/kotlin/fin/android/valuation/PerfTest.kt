@@ -300,6 +300,86 @@ class PerfTest {
     }
 
     /**
+     * Go TestFeeWeighsOnPerformanceWithoutCash: a fee is capital that enters the
+     * envelope and buys nothing - a positive flow with no value against it, so it
+     * reads as a loss of exactly the fee (D29). Flows: +10000 the buy, +20 the fee;
+     * the value never moves (flat quote), so TWR = 10000/10020 − 1.
+     */
+    @Test fun feeWeighsOnPerformanceWithoutCash() {
+        nextSeq = 0
+        val accounts = mapOf("cto" to Account("cto", "CTO", "EUR", TaxRule.None))
+        val assets = mapOf("cw8" to Asset("cw8", AssetKind.SECURITY, "CW8", ccy = "EUR", group = "g"))
+        val txs = listOf(
+            tx("2026-01-10", "cto", "cw8", TxKind.buy, "100", eur("10000")),
+            tx("2026-01-15", "cto", "cw8", TxKind.fee, amount = eur("20")),
+        ).associateBy { it.id }
+        val book = Book(accounts = accounts, assets = assets, txs = txs, config = mapOf("currency" to "EUR"))
+        val market = MarketData(prices = mapOf("cw8" to PriceSeries(listOf(PricePoint(d("2026-01-10"), 100.0)))))
+        val series = SeriesBuilder(book, market, "EUR").build(d("2026-01-01"), d("2026-01-20"))
+        assertEquals(2, series.flows.size)
+        assertEquals(10000.0, series.flows[0].amount, 0.01)
+        assertEquals(20.0, series.flows[1].amount, 0.01)
+        assertEquals(10000.0 / 10020 - 1, Perf.twr(series.points, series.flows), tol)
+    }
+
+    /**
+     * Go TestDividendLeavesPocketNetOfWithholding: an automatic dividend leaves the
+     * pocket as a negative flow, net of withholding tax, and never lands on the
+     * declared cash (D29). Whole-book deviation from the Go PEA-scoped −25.5: the
+     * CTO also holds 2 shares on the ex-date and adds its own −2×2×0.85 = −3.4.
+     */
+    @Test fun dividendLeavesPocketNetOfWithholding() {
+        val (book, market) = valuationBook()
+        val cw8 = book.assets.getValue("cw8").copy(withholding = 0.15)
+        val book2 = book.copy(assets = book.assets + ("cw8" to cw8))
+        val withDiv = market.copy(dividends = mapOf("cw8" to listOf(DividendEvent(d("2026-03-01"), 2.0))))
+        val series = SeriesBuilder(book2, withDiv, "EUR").build(d("2026-01-01"), d("2026-06-05"))
+        val divFlows = series.flows.filter { it.date == d("2026-03-01") }.map { it.amount }
+        assertEquals(2, divFlows.size)
+        assertEquals(-25.5, divFlows[0], 0.01) // PEA: 15 shares × 2 × (1 − 0.15)
+        assertEquals(-3.4, divFlows[1], 0.01) // CTO: 2 shares × 2 × (1 − 0.15)
+    }
+
+    /**
+     * Mirrors the Go walker's pair() guard: a fee whose (account, asset) pair does
+     * not resolve - no asset at all, or an orphaned reference left behind by an
+     * asset-del - is skipped entirely, so the phone and the laptop keep emitting
+     * the same flows for the same ledger.
+     */
+    @Test fun feeWithoutAssetPairEmitsNoFlow() {
+        val (book, flows) = flowsWithOrphans(TxKind.fee)
+        assertEquals(2, flows.size)
+        assertEquals(1000.0, flows[0].amount, 0.01) // the buy
+        assertEquals(20.0, flows[1].amount, 0.01) // the well-formed fee, and nothing else
+        assertEquals(3, book.txs.values.count { it.kind == TxKind.fee }) // the two orphans exist
+    }
+
+    /** Same pair() guard for manual dividends: no resolvable asset, no flow. */
+    @Test fun dividendWithoutAssetPairEmitsNoFlow() {
+        val (book, flows) = flowsWithOrphans(TxKind.dividend)
+        assertEquals(2, flows.size)
+        assertEquals(1000.0, flows[0].amount, 0.01) // the buy
+        assertEquals(-20.0, flows[1].amount, 0.01) // the well-formed dividend leaves the pocket
+        assertEquals(3, book.txs.values.count { it.kind == TxKind.dividend })
+    }
+
+    /** One buy, then a [kind] on the held asset, on no asset, and on a deleted asset. */
+    private fun flowsWithOrphans(kind: TxKind): Pair<Book, List<Flow>> {
+        nextSeq = 0
+        val accounts = mapOf("cto" to Account("cto", "CTO", "EUR", TaxRule.None))
+        val assets = mapOf("aa" to Asset("aa", AssetKind.SECURITY, "A", ccy = "EUR", group = "g"))
+        val txs = listOf(
+            tx("2026-01-02", "cto", "aa", TxKind.buy, "10", eur("1000")),
+            tx("2026-01-03", "cto", "aa", kind, amount = eur("20")),
+            tx("2026-01-04", "cto", null, kind, amount = eur("20")),
+            tx("2026-01-05", "cto", "ghost", kind, amount = eur("20")),
+        ).associateBy { it.id }
+        val book = Book(accounts = accounts, assets = assets, txs = txs, config = mapOf("currency" to "EUR"))
+        val series = SeriesBuilder(book, MarketData(), "EUR").build(d("2026-01-01"), d("2026-01-10"))
+        return book to series.flows
+    }
+
+    /**
      * Metrics over the rich fixture, starting at the earliest tx (V0 > 0, the
      * property statement 400000) and running > 365 days so risk and CAGR appear.
      * Cross-checked: TWR equals Perf.twr over the same series, XIRR is defined.
