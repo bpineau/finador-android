@@ -434,13 +434,17 @@ internal class SeriesBuilder(
 
                 TxKind.dividend -> {
                     // Income leaves the pocket: it never lands on the declared cash.
+                    // Like the Go walker, an unresolvable (account, asset) pair - no
+                    // asset, or an orphaned reference - emits nothing.
+                    pair(t.account, t.asset ?: return) ?: return
                     addFlow(flows, t.date, -toRef(t.amount.amount.toDouble(), t.amount.ccy, t.date), collect)
                 }
 
                 TxKind.fee -> {
                     // A cost is capital that enters the envelope and buys nothing: the
                     // positive flow with no value against it reads as a loss of the fee,
-                    // with or without declared cash (D29).
+                    // with or without declared cash (D29). Same pair guard as dividends.
+                    pair(t.account, t.asset ?: return) ?: return
                     addFlow(flows, t.date, toRef(t.amount.amount.toDouble(), t.amount.ccy, t.date), collect)
                 }
 
