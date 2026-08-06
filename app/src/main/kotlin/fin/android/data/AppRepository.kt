@@ -11,7 +11,11 @@ import fin.android.domain.TaxRule
 import fin.android.domain.TxKind
 import fin.android.format.Ledger
 import fin.android.market.CacheSidecar
+import fin.android.market.Ft
+import fin.android.market.Morningstar
+import fin.android.market.MultiSource
 import fin.android.market.Quotes
+import fin.android.market.Yahoo
 import fin.android.remote.GithubConfig
 import fin.android.remote.RemoteConfig
 import fin.android.remote.RemoteError
@@ -45,6 +49,12 @@ class AppRepository(private val container: AppContainer) {
     private var passphrase: String? = null
     private var ledger: Ledger? = null
     private var market: MarketData = MarketData()
+
+    // One provider chain for the whole session, not one per refresh: Yahoo's quote API needs a
+    // cookie + crumb pair, and rebuilding the provider would re-buy it (two requests) on every
+    // press. Only ever touched under [mutex].
+    private val yahoo = Yahoo()
+    private val sources = MultiSource(listOf(yahoo, Ft(), Morningstar()))
 
     // Serializes every mutation of the shared ledger/market/config (the UI can launch e.g. sync and
     // a quote refresh concurrently). Not reentrant - a locked method must call the *Locked helpers,
@@ -112,7 +122,7 @@ class AppRepository(private val container: AppContainer) {
             val ref = container.loadConfig().displayCurrency
             val updated = Quotes.refresh(
                 l.book, market, from = LocalDate.now().minusYears(2), now = LocalDate.now(),
-                referenceCcy = ref,
+                referenceCcy = ref, multi = sources, yahoo = yahoo,
             )
             market = updated
             CacheSidecar.write(container.marketCacheFile(l.fileId), l.cacheKey, updated)
