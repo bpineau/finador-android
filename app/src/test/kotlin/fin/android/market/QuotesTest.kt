@@ -40,11 +40,23 @@ class QuotesTest {
         }],"error":null}}
     """.trimIndent()
 
+    /** The v7 quote payload this server answers with; empty by default (no live quote). */
+    private var quoteBody = """{"quoteResponse":{"result":[]}}"""
+
     @Before fun setUp() {
         server = MockWebServer().also {
             it.dispatcher = object : Dispatcher() {
-                override fun dispatch(request: RecordedRequest): MockResponse =
-                    MockResponse().setResponseCode(200).setBody(fxBody)
+                override fun dispatch(request: RecordedRequest): MockResponse {
+                    val path = request.path.orEmpty()
+                    return when {
+                        // The cookie bootstrap: the header is the point, not the body.
+                        path.startsWith("/cookie") ->
+                            MockResponse().setResponseCode(404).addHeader("Set-Cookie", "A3=ck; Path=/")
+                        path.startsWith("/v1/test/getcrumb") -> MockResponse().setResponseCode(200).setBody("crumb1")
+                        path.startsWith("/v7/finance/quote") -> MockResponse().setResponseCode(200).setBody(quoteBody)
+                        else -> MockResponse().setResponseCode(200).setBody(fxBody)
+                    }
+                }
             }
             it.start()
         }
@@ -52,14 +64,19 @@ class QuotesTest {
 
     @After fun tearDown() { server.shutdown() }
 
-    private fun yahoo() = Yahoo(baseUrl = server.url("/").toString().trimEnd('/'))
+    private fun yahoo() = Yahoo(
+        baseUrl = server.url("/").toString().trimEnd('/'),
+        cookieUrl = server.url("/cookie").toString(),
+    )
 
     /** Provider stub answering every ref with the same closes/dividends. */
     private class FakeProvider(private val data: DailyData) : Provider {
         override val name = "fake"
         val seen = mutableListOf<Ref>()
+        val from = mutableListOf<LocalDate>()
         override fun daily(ref: Ref, from: LocalDate): DailyData? {
             seen += ref
+            this.from += from
             return data
         }
     }
@@ -143,5 +160,74 @@ class QuotesTest {
         // No provider data: the cached series survives untouched (fetchedAt included).
         assertEquals(existing.prices["aa"], out.prices["aa"])
         assertTrue(out.fx.keys.isNotEmpty()) // FX still refreshed independently
+    }
+
+    // The whole point of the spot pass: a live quote replaces today's daily bar, which a provider
+    // may still be publishing at yesterday's level hours into a session.
+    @Test fun liveQuoteOverwritesTodaysClose() {
+        val provider = FakeProvider(
+            DailyData(currency = "USD", closes = listOf(PricePoint(d("2026-06-03"), 100.0))),
+        )
+        quoteBody = """{"quoteResponse":{"result":[
+          {"symbol":"AA","currency":"USD","regularMarketPrice":80.0,"regularMarketTime":1780507800}]}}"""
+
+        val out = Quotes.refresh(
+            book(), MarketData(), from = d("2026-01-01"), now = d("2026-06-03"),
+            multi = MultiSource(listOf(provider)), yahoo = yahoo(),
+        )
+
+        // 1780507800 = 2026-06-03 17:30 UTC: same day as the daily bar, so it replaces it.
+        assertEquals(listOf(80.0), out.prices["aa"]!!.points.map { it.close })
+    }
+
+    // A quote from a twin listing in another currency must never splice into the series.
+    @Test fun offCurrencyQuoteIsDropped() {
+        val provider = FakeProvider(
+            DailyData(currency = "USD", closes = listOf(PricePoint(d("2026-06-03"), 100.0))),
+        )
+        quoteBody = """{"quoteResponse":{"result":[
+          {"symbol":"AA","currency":"EUR","regularMarketPrice":80.0,"regularMarketTime":1780507800}]}}"""
+
+        val out = Quotes.refresh(
+            book(), MarketData(), from = d("2026-01-01"), now = d("2026-06-03"),
+            multi = MultiSource(listOf(provider)), yahoo = yahoo(),
+        )
+
+        assertEquals(listOf(100.0), out.prices["aa"]!!.points.map { it.close })
+    }
+
+    // Re-downloading years of closes per asset on every refresh is what gets a phone throttled -
+    // and a throttled fetch falls through to end-of-day providers, which is the lag itself.
+    @Test fun deepSeriesRefetchesOnlyFromItsLastClose() {
+        val provider = FakeProvider(DailyData(currency = "USD", closes = emptyList()))
+        val existing = MarketData(
+            prices = mapOf(
+                "aa" to PriceSeries(
+                    listOf(PricePoint(d("2025-12-01"), 90.0), PricePoint(d("2026-06-02"), 100.0)),
+                ),
+            ),
+        )
+
+        Quotes.refresh(
+            book(), existing, from = d("2026-01-01"), now = d("2026-06-03"),
+            multi = MultiSource(listOf(provider)), yahoo = yahoo(),
+        )
+
+        assertEquals(listOf(d("2026-06-02")), provider.from)
+    }
+
+    // A series that does not reach the floor yet must still be back-filled in full.
+    @Test fun shallowSeriesRefetchesFromTheFloor() {
+        val provider = FakeProvider(DailyData(currency = "USD", closes = emptyList()))
+        val existing = MarketData(
+            prices = mapOf("aa" to PriceSeries(listOf(PricePoint(d("2026-06-02"), 100.0)))),
+        )
+
+        Quotes.refresh(
+            book(), existing, from = d("2026-01-01"), now = d("2026-06-03"),
+            multi = MultiSource(listOf(provider)), yahoo = yahoo(),
+        )
+
+        assertEquals(listOf(d("2026-01-01")), provider.from)
     }
 }
