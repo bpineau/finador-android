@@ -10,6 +10,7 @@ import fin.android.domain.Money
 import fin.android.domain.TaxRule
 import fin.android.domain.TxKind
 import fin.android.format.Ledger
+import fin.android.market.Airfund
 import fin.android.market.CacheSidecar
 import fin.android.market.Ft
 import fin.android.market.Morningstar
@@ -54,7 +55,7 @@ class AppRepository(private val container: AppContainer) {
     // cookie + crumb pair, and rebuilding the provider would re-buy it (two requests) on every
     // press. Only ever touched under [mutex].
     private val yahoo = Yahoo()
-    private val sources = MultiSource(listOf(yahoo, Ft(), Morningstar()))
+    private val sources = MultiSource(listOf(Airfund(), yahoo, Ft(), Morningstar()))
 
     // Serializes every mutation of the shared ledger/market/config (the UI can launch e.g. sync and
     // a quote refresh concurrently). Not reentrant - a locked method must call the *Locked helpers,

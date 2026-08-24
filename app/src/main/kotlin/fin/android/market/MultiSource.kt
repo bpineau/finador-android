@@ -6,7 +6,9 @@ import java.time.LocalDate
  * Quotes a daily series by trying an ordered chain of providers: the first that returns a non-null
  * result with a non-empty close series wins. The default chain mirrors the Go implementation -
  * Yahoo for ticker symbols, with Financial Times then Morningstar (via Boursorama) as ISIN fallbacks
- * for funds Yahoo lacks. Chain: Yahoo → FT → Morningstar.
+ * for funds Yahoo lacks. Airfund leads: it answers for a handful of employee-savings funds no other
+ * provider covers at all, and returns null instantly for every other ref.
+ * Chain: Airfund → Yahoo → FT → Morningstar.
  */
 class MultiSource(private val providers: List<Provider>) {
 
@@ -19,6 +21,6 @@ class MultiSource(private val providers: List<Provider>) {
     }
 
     companion object {
-        fun default(): MultiSource = MultiSource(listOf(Yahoo(), Ft(), Morningstar()))
+        fun default(): MultiSource = MultiSource(listOf(Airfund(), Yahoo(), Ft(), Morningstar()))
     }
 }
