@@ -53,9 +53,16 @@ object CacheSidecar {
         }
     }
 
-    /** Encrypts [data] under [keyCache] and writes it to [file] in FINCACHE2 format. */
+    /**
+     * Encrypts [data] under [keyCache] and writes it to [file] in FINCACHE2 format.
+     *
+     * Nowcast tails are dropped first ([MarketData.withoutEstimates]): the cache is the app's record
+     * of what a source published, and it is shared byte for byte with the Go implementation, which
+     * has no field for an estimate. This is the single door that keeps estimates off disk - every
+     * refresh recomputes them from the proxy of the moment.
+     */
     fun write(file: File, keyCache: ByteArray, data: MarketData) {
-        val jsonBytes = json.encodeToString(MarketDataDto.serializer(), MarketDataDto.from(data))
+        val jsonBytes = json.encodeToString(MarketDataDto.serializer(), MarketDataDto.from(data.withoutEstimates()))
             .toByteArray(Charsets.UTF_8)
         val gz = ByteArrayOutputStream()
         GZIPOutputStream(gz).use { it.write(jsonBytes) }

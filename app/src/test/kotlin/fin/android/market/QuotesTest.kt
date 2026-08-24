@@ -230,4 +230,111 @@ class QuotesTest {
 
         assertEquals(listOf(d("2026-01-01")), provider.from)
     }
+
+    // --- Employee-savings funds: the NAV source, its proxy, and the estimated tail. ---
+
+    /** A book holding one FCPE (and nothing of its proxy, which must be fetched all the same). */
+    private fun fcpeBook() = Book(
+        accounts = mapOf("pee" to Account("pee", "PEE", "EUR", TaxRule.None)),
+        assets = mapOf(
+            "fcpe" to Asset("fcpe", AssetKind.SECURITY, "Monde M", ticker = "ERESMONDEM", ccy = "EUR"),
+        ),
+    )
+
+    /** Provider stub answering per symbol: the fund's NAVs, the proxy's closes. */
+    private class BySymbolProvider(private val data: Map<String, DailyData>) : Provider {
+        override val name = "by-symbol"
+        val seen = mutableListOf<String>()
+        override fun daily(ref: Ref, from: LocalDate): DailyData? {
+            ref.symbol?.let { seen += it }
+            return data[ref.symbol]
+        }
+    }
+
+    private fun fcpeProvider() = BySymbolProvider(
+        mapOf(
+            // Two published NAVs, the last one on the 18th.
+            "ERESMONDEM" to DailyData(
+                currency = "EUR",
+                closes = listOf(PricePoint(d("2026-08-17"), 50.0), PricePoint(d("2026-08-18"), 51.0)),
+            ),
+            // The proxy in USD, closed two days further.
+            "URTH" to DailyData(
+                currency = "USD",
+                closes = listOf(
+                    PricePoint(d("2026-08-17"), 100.0), PricePoint(d("2026-08-18"), 102.0),
+                    PricePoint(d("2026-08-19"), 104.0), PricePoint(d("2026-08-20"), 106.0),
+                ),
+            ),
+        ),
+    )
+
+    @Test fun aHeldFundGetsItsProxyFetchedAndItsTailEstimated() {
+        val provider = fcpeProvider()
+        val out = Quotes.refresh(
+            fcpeBook(), MarketData(), from = d("2026-01-01"), now = d("2026-08-20"),
+            multi = MultiSource(listOf(provider)), yahoo = yahoo(),
+        )
+
+        // The proxy is fetched though the user holds none of it, and cached apart from the assets.
+        assertEquals(listOf("ERESMONDEM", "URTH"), provider.seen)
+        assertEquals(4, out.prices[Nowcast.proxyKey("URTH")]!!.points.size)
+
+        // The fund's own series: two published NAVs then two estimated days, flagged from the first.
+        val series = out.prices["fcpe"]!!
+        assertEquals(listOf(50.0, 51.0, 52.0, 53.0), series.points.map { Math.round(it.close * 1e6) / 1e6 })
+        assertEquals(d("2026-08-19"), series.estimatedFrom)
+        assertEquals("URTH", series.estimateProxy)
+    }
+
+    @Test fun theEstimatedTailIsRecomputedNotCompounded() {
+        val first = Quotes.refresh(
+            fcpeBook(), MarketData(), from = d("2026-01-01"), now = d("2026-08-20"),
+            multi = MultiSource(listOf(fcpeProvider())), yahoo = yahoo(),
+        )
+        // Refreshing over the previous result must strip its estimates before merging: the tail is
+        // read off the proxy of the moment, never off the estimate of the previous run.
+        val second = Quotes.refresh(
+            fcpeBook(), first, from = d("2026-01-01"), now = d("2026-08-20"),
+            multi = MultiSource(listOf(fcpeProvider())), yahoo = yahoo(),
+        )
+        assertEquals(first.prices["fcpe"], second.prices["fcpe"])
+        assertEquals(4, second.prices["fcpe"]!!.points.size)
+    }
+
+    @Test fun anUnreachableProxyLeavesTheFundAtItsLastNav() {
+        val provider = BySymbolProvider(
+            mapOf(
+                "ERESMONDEM" to DailyData(
+                    currency = "EUR",
+                    closes = listOf(PricePoint(d("2026-08-17"), 50.0), PricePoint(d("2026-08-18"), 51.0)),
+                ),
+            ),
+        )
+        val out = Quotes.refresh(
+            fcpeBook(), MarketData(), from = d("2026-01-01"), now = d("2026-08-20"),
+            multi = MultiSource(listOf(provider)), yahoo = yahoo(),
+        )
+        val series = out.prices["fcpe"]!!
+        assertEquals(listOf(50.0, 51.0), series.points.map { it.close })
+        assertNull(series.estimatedFrom)
+        assertNull(out.prices[Nowcast.proxyKey("URTH")])
+    }
+
+    @Test fun theProxysLiveQuoteEstimatesTheRunningSession() {
+        // 1787270400 = 2026-08-21 00:00 UTC. The proxy trades at 159, half again its 106 close.
+        quoteBody = """{"quoteResponse":{"result":[
+          {"symbol":"URTH","currency":"USD","regularMarketPrice":159.0,"regularMarketTime":1787270400},
+          {"symbol":"EURUSD=X","currency":"USD","regularMarketPrice":1.085,"regularMarketTime":1787270400}]}}"""
+        val out = Quotes.refresh(
+            fcpeBook(), MarketData(), from = d("2026-01-01"), now = d("2026-08-21"),
+            multi = MultiSource(listOf(fcpeProvider())), yahoo = yahoo(),
+        )
+        val series = out.prices["fcpe"]!!
+        assertEquals(d("2026-08-21"), series.points.last().date)
+        assertEquals(79.5, series.points.last().close, 1e-9) // 53 * 159 / 106
+        assertEquals(d("2026-08-19"), series.estimatedFrom) // the whole tail is still an estimate
+        // The proxy's own live price is recorded too, so the next refresh anchors on it.
+        assertEquals(159.0, out.prices[Nowcast.proxyKey("URTH")]!!.points.last().close, 0.0)
+    }
 }

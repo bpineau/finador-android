@@ -55,6 +55,11 @@ data class AssetDetail(
     val referenceCcy: String,
     val qty: BigDecimal,
     val price: Double?, // native-ccy close at `today` (current MARKET price)
+    // True when that price is a NOWCAST rather than a published one: the asset is a fund whose NAV
+    // is not out yet, and the value shown is estimated from [priceProxy] (see market/Nowcast.kt).
+    // The UI must say so - an estimate presented as a quote is a lie by omission.
+    val priceEstimated: Boolean = false,
+    val priceProxy: String? = null, // the instrument the estimate is read off, when estimated
     val value: Double, // value in ref ccy (now)
     val accounts: List<String>, // account names holding it
     val periods: List<AssetPeriodGain>, // 1d,3d,5d,7d,1m,6m,1y,YTD
@@ -307,7 +312,9 @@ object Gains {
         val qtyNow = positions.fold(BigDecimal.ZERO) { acc, p -> acc + p.qty }
         if (qtyNow.signum() <= 0) return null // not a held security
         val qty = qtyNow.toDouble()
-        val priceNow = market.prices[asset.id]?.at(today)?.first
+        val series = market.prices[asset.id]
+        val priceAt = series?.at(today)
+        val priceNow = priceAt?.first
         val valueRefToday = priceRef(market, converter, asset.id, asset.ccy, ccy, today)
         // Unpriced security (no quote or missing FX): fall back to the engine's valuation
         // (statement / cost basis) instead of showing a held position as worth 0.
@@ -333,6 +340,8 @@ object Gains {
         return AssetDetail(
             assetId = asset.id, name = asset.name, ticker = asset.ticker, isin = asset.isin,
             assetCcy = asset.ccy, referenceCcy = ccy, qty = qtyNow, price = priceNow, value = value,
+            priceEstimated = priceAt != null && series.isEstimatedAt(priceAt.second),
+            priceProxy = series?.estimateProxy,
             accounts = positions.map { it.accountName }.distinct(),
             periods = periods, priceHistory = priceHistory,
             costBasis = costBasis,
