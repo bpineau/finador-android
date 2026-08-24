@@ -141,6 +141,10 @@ class AirfundTest {
 
     @Test fun theRegistryIsCaseInsensitiveAndComplete() {
         assertEquals(fund, AirfundFunds.byTicker("eresmondem"))
+        // The desktop may store the share code as the ticker (its "asset add"
+        // resolves through the pofo catalog); the fund must match either name.
+        assertEquals(fund, AirfundFunds.byTicker("990000135629"))
+        assertEquals(AirfundFunds.byTicker("ERES_DATADOG"), AirfundFunds.byTicker("990000124099"))
         assertNull(AirfundFunds.byTicker(null))
         assertEquals(2, AirfundFunds.ALL.size)
         assertTrue(AirfundFunds.ALL.all { it.ccy == "EUR" && it.proxyCcy == "USD" })
