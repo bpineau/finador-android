@@ -41,6 +41,34 @@ class CacheSidecarTest {
         assertEquals(data, back)
     }
 
+    // An estimate is not a fact: the sidecar is the one door that keeps nowcast tails off disk,
+    // and the on-disk JSON stays byte-compatible with the Go implementation, which has no field
+    // for one.
+    @Test fun estimatesAreNeverWritten() {
+        val estimated = MarketData(
+            prices = mapOf(
+                "fcpe" to PriceSeries(
+                    listOf(
+                        PricePoint(d("2026-08-18"), 51.0),
+                        PricePoint(d("2026-08-19"), 52.0), // estimated
+                        PricePoint(d("2026-08-20"), 53.0), // estimated
+                    ),
+                    fetchedAt = d("2026-08-20"),
+                    estimatedFrom = d("2026-08-19"),
+                    estimateProxy = "URTH",
+                ),
+            ),
+        )
+        val f = tmp.newFile("estimated.cache")
+        CacheSidecar.write(f, keyCache, estimated)
+        val back = CacheSidecar.read(f, keyCache)!!
+        val series = back.prices["fcpe"]!!
+        assertEquals(listOf(d("2026-08-18")), series.points.map { it.date })
+        assertNull(series.estimatedFrom)
+        assertNull(series.estimateProxy)
+        assertEquals(d("2026-08-20"), series.fetchedAt) // the refresh day is still a fact
+    }
+
     @Test fun onDiskBytesStartWithMagic() {
         val f = tmp.newFile("magic.cache")
         CacheSidecar.write(f, keyCache, data)

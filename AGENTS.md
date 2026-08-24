@@ -24,7 +24,7 @@ when you change architecture or invariants.
    `*_test.go`. Don't change the math without checking parity; if you must, update the Go reference too.
 3. **All docs / comments / code in English.** (User convention.)
 4. **Keep the suite green.** Run the full `testDebugUnitTest` before claiming done; every test must
-   pass (count them from `app/build/test-results/testDebugUnitTest/*.xml`, 170 today).
+   pass (count them from `app/build/test-results/testDebugUnitTest/*.xml`, 197 today).
 5. **Don't weaken security.** Secrets are encrypted under an Android Keystore key
    (`data/SecretStore.kt`); the repo holds only the *encrypted* `.fin`; never log secrets or write
    them to disk in clear.
@@ -70,7 +70,7 @@ market/valuation` layers are **pure Kotlin (no Android imports)** → fast to un
 | `crypto/` | Argon2, Hkdf, AesGcm, Hashes, Bytes, Ids | KDF, AEAD, base64, Crockford ids | ✅ |
 | `domain/` | Models, Money, MarketData | data model (BigDecimal money, enums, Book) | ✅ |
 | `format/` | Header, Kdf, Wire, Log, Replay, Writer, Merge, Ledger | read/write the `.fin` (AAD-chained records, fold, diff-on-save, union+LWW merge) | ✅ |
-| `market/` | Yahoo, Ft, Morningstar, MultiSource, Converter, CacheSidecar, Quotes, Source | fetch quotes (JSON + a Boursorama regex), FX via USD, FINCACHE2 cache | ✅ |
+| `market/` | Yahoo, Ft, Morningstar, Airfund, Nowcast, MultiSource, Converter, CacheSidecar, Quotes, Source | fetch quotes (JSON + a Boursorama regex), FX via USD, FINCACHE2 cache; `Airfund` = the NAV feed of the employee-savings funds (FCPE) no quote site covers, with a bundled offline baseline; `Nowcast` = the estimated tail those funds need between their last published NAV and now | ✅ |
 | `valuation/` | Valuator, Perf, Gains | gross/tax/net, TWR/XIRR/etc., period & per-asset gains, asset detail | ✅ |
 | `remote/` | Backend, GitHubBackend, RemoteConfig, Sync | GitHub Contents API, pull/mutate/push + conflict→merge + offline-dirty | Android-light |
 | `data/` | AppContainer, AppRepository, AppState, SecretStore | manual DI, the single facade, Keystore-encrypted secrets | Android |
@@ -88,7 +88,11 @@ that state; per-asset detail pages are **precomputed** into `Ready.assetDetails`
   `FORMAT.md` + a test; bump version only per `FORMAT.md §8`.
 - **A valuation/gain/perf number** → `valuation/{Valuator,Perf,Gains}.kt`; mirror the Go change and
   the parity test.
-- **A quote source / parsing** → `market/{Yahoo,Ft,Morningstar}.kt`; fixtures in the market tests.
+- **A quote source / parsing** → `market/{Yahoo,Ft,Morningstar,Airfund}.kt`; fixtures in the market tests.
+- **Another employee-savings fund (FCPE)** → one entry in `market/Airfund.kt`'s `AirfundFunds.ALL`
+  (share code + nowcast proxy) plus its NAV baseline in
+  `app/src/main/resources/fin/android/market/<TICKER>-NAV.csv`, copied from the Go reference's
+  `refdata/`. The ledger asset just carries the ticker; nothing else changes.
 - **Sync behaviour** (conflict, offline, pull cadence) → `remote/Sync.kt`.
 - **A screen / styling** → `ui/<Screen>.kt`; colors/typography in `ui/Theme.kt`
   (accent = terracotta `#C2613C`; gain/loss via `gainLossColor(...)`); number formatting in `ui/Format.kt`.
@@ -99,6 +103,14 @@ that state; per-asset detail pages are **precomputed** into `Ready.assetDetails`
 - **`AppRepository` mutations are serialized by a `Mutex`** (`exclusive { }`). The Mutex is **not
   reentrant** - a locked public method must call the `*Locked` private helpers, never another public
   (locked) method (else deadlock). See `refreshQuotesLocked`.
+- **Estimates are never cached.** A fund published with a lag (`market/Airfund.kt`) gets a nowcast
+  tail read off a listed proxy (`market/Nowcast.kt`), flagged by `PriceSeries.estimatedFrom` /
+  `estimateProxy`. It is recomputed at every refresh, never stored: `Quotes.refresh` strips the
+  previous run's tail before merging anything, and `CacheSidecar.write` strips it again on the way
+  to disk (which also keeps the FINCACHE2 JSON byte-compatible with Go, whose DTO has no such
+  field). Anything showing an estimated price must SAY it is one, as `AssetDetailScreen` does.
+  The proxies are fetched even when the user holds none of them, cached under `proxy:<SYMBOL>` in
+  `MarketData.prices` (no ledger id can collide: those are Crockford base32).
 - **The market cache is NOT synced** (per-device, regenerable). A freshly synced device has the
   ledger but no prices until `refreshQuotes` runs → period gains read ~0 until quotes load, and
   statement-valued assets (property, cash) have no market "performance" by design.
