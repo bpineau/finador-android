@@ -12,10 +12,18 @@ data class PricePoint(val date: LocalDate, val close: Double)
  * A date-sorted daily close series with forward-fill lookup. [fetchedAt] records the last refresh
  * day even when no new point appeared (week-ends) - staleness is judged on it, not on the last point.
  * Instances are immutable: [merge] returns a new series.
+ *
+ * [estimatedFrom] marks the tail that is a NOWCAST rather than an observation: the first date from
+ * which every point was estimated from [estimateProxy] instead of published by the instrument's own
+ * source. Only a fund published with a lag ever carries one (see `market/Nowcast.kt`). The estimate
+ * is recomputed at every refresh and NEVER stored: [withoutEstimates] is the door every persisting
+ * consumer walks through, and the cache sidecar walks through it for all of them.
  */
 data class PriceSeries(
     val points: List<PricePoint> = emptyList(),
     val fetchedAt: LocalDate? = null,
+    val estimatedFrom: LocalDate? = null,
+    val estimateProxy: String? = null,
 ) {
     /** The last close at or before [d] (forward-fill), with its date; null if none or empty. */
     fun at(d: LocalDate): Pair<Double, LocalDate>? {
@@ -31,6 +39,22 @@ data class PriceSeries(
     }
 
     fun last(): PricePoint? = points.lastOrNull()
+
+    /** True when the value at [d] is an estimate rather than a published close. */
+    fun isEstimatedAt(d: LocalDate): Boolean = estimatedFrom?.let { !d.isBefore(it) } ?: false
+
+    /**
+     * This series without its nowcast tail: itself when it carries none, a copy ending at the last
+     * published point otherwise. Storing or validating an estimate is what this prevents.
+     */
+    fun withoutEstimates(): PriceSeries {
+        val from = estimatedFrom ?: return this
+        return copy(
+            points = points.filter { it.date.isBefore(from) },
+            estimatedFrom = null,
+            estimateProxy = null,
+        )
+    }
 
     /** Upserts [pts] by date, returning a new series kept sorted and deduplicated by date. */
     fun merge(pts: List<PricePoint>): PriceSeries {
@@ -56,4 +80,11 @@ data class MarketData(
     val prices: Map<String, PriceSeries> = emptyMap(),
     val fx: Map<String, PriceSeries> = emptyMap(),
     val dividends: Map<String, List<DividendEvent>> = emptyMap(),
-)
+) {
+    /**
+     * The same data with every nowcast tail dropped (see [PriceSeries.withoutEstimates]). What
+     * persists must be what a source published: an estimate is cheap to recompute and would
+     * otherwise linger as a fact long after the real NAV landed.
+     */
+    fun withoutEstimates(): MarketData = copy(prices = prices.mapValues { it.value.withoutEstimates() })
+}

@@ -136,8 +136,22 @@ private fun HeaderCard(d: AssetDetail) {
             DetailRow("Quantity", formatQuantity(d.qty))
             DetailRow(
                 "Market price",
-                if (d.price != null) "${formatAmount(d.price)} ${d.assetCcy}" else "-",
+                when {
+                    d.price == null -> "-"
+                    // An estimated price must never read like a quote: the fund has not published
+                    // this day's NAV, the figure is its proxy's move applied to the last one.
+                    d.priceEstimated -> "${formatAmount(d.price)} ${d.assetCcy} (est.)"
+                    else -> "${formatAmount(d.price)} ${d.assetCcy}"
+                },
             )
+            if (d.priceEstimated) {
+                Text(
+                    d.priceProxy?.let { "Estimated from $it since the last published NAV." }
+                        ?: "Estimated since the last published NAV.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
             DetailRow(
                 "Avg buy price",
                 if (d.avgBuyPrice != null) formatMoney(d.avgBuyPrice, d.referenceCcy) else "-",
