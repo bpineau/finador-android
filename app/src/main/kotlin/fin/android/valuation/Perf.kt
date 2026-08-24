@@ -300,10 +300,11 @@ internal data class Series(val points: List<PricePoint>, val flows: List<Flow>)
 /**
  * Walks the ledger once and produces the daily value of the WHOLE BOOK (the "All"
  * scope) between from and to, plus the external flows. Mirrors the Go
- * `portfolio.Series` walker for `Scope.All`: deposits/withdraws and untracked-cash
- * trades cross the scope boundary as flows, while statements re-base value as
- * adjustment flows rather than performance. Reuses the same holding/cash/dividend
- * rules as [Valuer]. Days lacking price/FX data contribute 0.
+ * `portfolio.Series` walker for `Scope.All`: deposits/withdraws, trades and fees
+ * cross the scope boundary as flows, while statements re-base value as adjustment
+ * flows rather than performance. Cash is declarative, so nothing but a cash record
+ * ever moves a balance (D29). Reuses the same holding/cash/dividend rules as
+ * [Valuer]. Days lacking price/FX data contribute 0.
  */
 internal class SeriesBuilder(
     private val book: Book,
@@ -344,12 +345,6 @@ internal class SeriesBuilder(
 
     private fun toRef(amount: Double, from: String, at: LocalDate): Double = convert(amount, from, ccy, at)
 
-    /** True when the account's cash is tracked: any pure-cash statement/deposit/withdraw. */
-    private fun cashTracked(acc: String): Boolean = book.txs.values.any {
-        it.account == acc && it.asset == null &&
-            (it.kind == TxKind.statement || it.kind == TxKind.deposit || it.kind == TxKind.withdraw)
-    }
-
     /** Yahoo-known distributions for assets without any manual Dividend tx. */
     private val manualDividendAssets: Set<String?> =
         book.txs.values.filter { it.kind == TxKind.dividend && it.asset != null }.map { it.asset }.toHashSet()
@@ -362,8 +357,7 @@ internal class SeriesBuilder(
     }
 
     private inner class AccountState(val accId: String, val ccyAcc: String) {
-        val tracked = cashTracked(accId)
-        var cash = 0.0 // balance in account currency, anchored on last statement
+        var cash = 0.0 // declared balance in account currency, anchored on last statement
         var hadCashStmt = false
     }
 
@@ -425,12 +419,9 @@ internal class SeriesBuilder(
                         }
                     }
 
-                    if (acc.tracked) {
-                        val cashAmt = convert(t.amount.amount.toDouble(), t.amount.ccy, accCcy, t.date)
-                        if (t.kind == TxKind.buy) acc.cash -= cashAmt else acc.cash += cashAmt
-                    }
-                    // All scope: a trade is an external flow only on an untracked cash account.
-                    if (!acc.tracked) addFlow(flows, t.date, sign * flowVal, collect)
+                    // A trade never moves the declared cash: it is capital crossing the
+                    // scope boundary, always an external flow (D29).
+                    addFlow(flows, t.date, sign * flowVal, collect)
                 }
 
                 TxKind.deposit, TxKind.withdraw -> {
@@ -442,35 +433,29 @@ internal class SeriesBuilder(
                 }
 
                 TxKind.dividend -> {
-                    val disp = toRef(t.amount.amount.toDouble(), t.amount.ccy, t.date)
-                    if (acc.tracked) {
-                        acc.cash += convert(t.amount.amount.toDouble(), t.amount.ccy, accCcy, t.date)
-                    }
-                    // All scope: revenue collected on an untracked account leaves the pocket.
-                    if (!acc.tracked) addFlow(flows, t.date, -disp, collect)
+                    // Income leaves the pocket: it never lands on the declared cash.
+                    addFlow(flows, t.date, -toRef(t.amount.amount.toDouble(), t.amount.ccy, t.date), collect)
                 }
 
                 TxKind.fee -> {
-                    if (acc.tracked) {
-                        acc.cash -= convert(t.amount.amount.toDouble(), t.amount.ccy, accCcy, t.date)
-                    }
-                    // never a flow: a cost must weigh on performance
+                    // A cost is capital that enters the envelope and buys nothing: the
+                    // positive flow with no value against it reads as a loss of the fee,
+                    // with or without declared cash (D29).
+                    addFlow(flows, t.date, toRef(t.amount.amount.toDouble(), t.amount.ccy, t.date), collect)
                 }
 
                 TxKind.statement -> {
                     if (t.asset == null) {
                         // Pure cash statement: first reconciliation = adoption (a flow);
                         // later ones measure performance (e.g. livret interest).
-                        if (acc.tracked) {
-                            val newBalance = convert(t.amount.amount.toDouble(), t.amount.ccy, accCcy, t.date)
-                            if (!acc.hadCashStmt) {
-                                val currentDisp = convert(acc.cash, accCcy, ccy, t.date)
-                                val newDisp = toRef(t.amount.amount.toDouble(), t.amount.ccy, t.date)
-                                addFlow(flows, t.date, newDisp - currentDisp, collect)
-                                acc.hadCashStmt = true
-                            }
-                            acc.cash = newBalance
+                        val newBalance = convert(t.amount.amount.toDouble(), t.amount.ccy, accCcy, t.date)
+                        if (!acc.hadCashStmt) {
+                            val currentDisp = convert(acc.cash, accCcy, ccy, t.date)
+                            val newDisp = toRef(t.amount.amount.toDouble(), t.amount.ccy, t.date)
+                            addFlow(flows, t.date, newDisp - currentDisp, collect)
+                            acc.hadCashStmt = true
                         }
+                        acc.cash = newBalance
                         return
                     }
                     val asset = book.assets[t.asset] ?: return
@@ -501,7 +486,10 @@ internal class SeriesBuilder(
             }
         }
 
-        /** Credits the day's automatic dividends and emits the matching scope flows. */
+        /**
+         * Emits the scope flows of the day's automatic dividends. Like every income they
+         * leave the pocket: they never land on the account's declared cash (D29).
+         */
         fun applyDividends(d: LocalDate, collect: Boolean, flows: MutableList<Flow>) {
             for (p in pairs.values) {
                 if (p.qty <= 0 || p.assetId in manualDividendAssets) continue
@@ -510,11 +498,7 @@ internal class SeriesBuilder(
                 for (ev in dividends[p.assetId] ?: emptyList()) {
                     if (ev.exDate != d) continue
                     val net = p.qty * ev.amount * (1 - withholding)
-                    val disp = toRef(net, asset.ccy, d)
-                    val acc = accounts[p.accId] ?: continue
-                    if (acc.tracked) acc.cash += convert(net, asset.ccy, acc.ccyAcc, d)
-                    // All scope: dividend collected on an untracked account leaves the pocket.
-                    if (!acc.tracked) addFlow(flows, d, -disp, collect)
+                    addFlow(flows, d, -toRef(net, asset.ccy, d), collect)
                 }
             }
         }
@@ -544,9 +528,8 @@ internal class SeriesBuilder(
                 }
                 gross += v
             }
-            // Cash of tracked envelopes.
+            // Declared cash of the envelopes.
             for (acc in accounts.values) {
-                if (!acc.tracked) continue
                 gross += convert(acc.cash, acc.ccyAcc, ccy, d)
             }
             return gross

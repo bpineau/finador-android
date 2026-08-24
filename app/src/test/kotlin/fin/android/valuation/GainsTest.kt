@@ -427,8 +427,10 @@ class GainsTest {
         val accounts = mapOf("pea" to Account("pea", "PEA", "EUR", TaxRule.Gains(BigDecimal("0.172"))))
         val assets = mapOf("aa" to Asset("aa", AssetKind.SECURITY, "Alpha", ticker = "AA", ccy = "EUR", group = "g"))
         val txs = mutableMapOf<String, Tx>()
+        // No cash declared on the envelope: the buy carries the capital in (D29).
+        // Declaring a deposit that the buy never spends would leave 10000 of idle
+        // cash alongside the position and halve the measured relative gain.
         listOf(
-            tx("2026-01-01", "pea", null, TxKind.deposit, "0", eur("10000")),
             tx("2026-01-02", "pea", "aa", TxKind.buy, "100", eur("10000")),
         ).forEach { txs[it.id] = it }
         val book = Book(accounts = accounts, assets = assets, txs = txs, config = mapOf("currency" to "EUR"))

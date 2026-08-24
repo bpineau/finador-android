@@ -273,24 +273,24 @@ class PerfTest {
     /**
      * The flow-neutralization integration test on the rich valuation fixture
      * (mirror of value_test.go / series_test.go `valuationBook`). The whole-book
-     * series endpoint must match the Go gross at 2026-06-05 (473890), and the
+     * series endpoint must match the Go gross at 2026-06-05 (479840), and the
      * collected "All" external flows must match TestSeriesExternalFlowsAllScope.
      */
     @Test fun seriesAllScopeFlowsAndEndpointMatchGo() {
         val (book, market) = valuationBook()
         val series = SeriesBuilder(book, market, "EUR").build(d("2026-01-01"), d("2026-06-05"))
-        // Endpoint gross == Valuator.value gross (golden 473890).
-        assertEquals(473890.0, series.points.last().close, 0.01)
-        // Go TestSeriesExternalFlowsAllScope flows:
-        //   [0] 01-05 +12000 (livret cash adoption, D8)
-        //   [1] 01-10 +10000 (pea deposit)
-        //   [2] 01-20 +1100  (cto untracked buy)
-        //   [3] 06-01 +50000 (maison re-base)
+        // Endpoint gross == Valuator.value gross (golden 479840).
+        assertEquals(479840.0, series.points.last().close, 0.01)
+        // Go TestSeriesExternalFlowsAllScope flows: every trade is a flow (D29), valued at
+        // its cash amount here since no quote exists before 03-20.
         val want = listOf(
-            "2026-01-05" to 12000.0,
-            "2026-01-10" to 10000.0,
-            "2026-01-20" to 1100.0,
-            "2026-06-01" to 50000.0,
+            "2026-01-05" to 12000.0, // livret cash adoption, D8
+            "2026-01-10" to 10000.0, // pea deposit
+            "2026-01-15" to 5000.0,  // pea buy
+            "2026-01-20" to 1100.0,  // cto buy
+            "2026-02-15" to 2750.0,  // pea buy
+            "2026-03-15" to -1800.0, // pea sell
+            "2026-06-01" to 50000.0, // maison re-base
         )
         assertEquals(want.size, series.flows.size)
         for (i in want.indices) {
