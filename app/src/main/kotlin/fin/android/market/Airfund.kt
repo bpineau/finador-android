@@ -66,10 +66,22 @@ object AirfundFunds {
         ),
     )
 
-    private val index = ALL.associateBy { it.ticker }
+    // Indexed by BOTH the ticker and the share code, uppercased. The desktop's
+    // "asset add" resolves the ticker through the pofo catalog and can store the
+    // share code (990000124099) as the asset's ticker rather than the ERES_DATADOG
+    // symbol, so a synced ledger names the fund either way; both must match.
+    private val index: Map<String, AirfundFund> = buildMap {
+        for (f in ALL) {
+            put(f.ticker.uppercase(), f)
+            put(f.shareCode.uppercase(), f)
+        }
+    }
 
-    /** The fund an asset ticker names, or null when the ticker is not an FCPE this app knows. */
-    fun byTicker(ticker: String?): AirfundFund? = ticker?.let { index[it.trim().uppercase()] }
+    /**
+     * The fund an asset [key] names (its ticker or its share code), or null when the key is not an
+     * FCPE this app knows.
+     */
+    fun byTicker(key: String?): AirfundFund? = key?.let { index[it.trim().uppercase()] }
 }
 
 /**
