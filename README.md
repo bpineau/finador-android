@@ -11,7 +11,7 @@ interchangeably from desktop and mobile.
 - **Compatibility**: bit-for-bit with `finador/docs/FORMAT.md` (verified by the format test
   vectors and a cross-implementation test against the Go binary).
 - **Storage**: GitHub only (the encrypted `.fin` never leaves the repo in clear text); market
-  quotes fetched on-device (Yahoo → FT → Morningstar) with a local encrypted cache.
+  quotes fetched on-device (Airfund → Yahoo → FT → Morningstar) with a local encrypted cache.
 
 ---
 
