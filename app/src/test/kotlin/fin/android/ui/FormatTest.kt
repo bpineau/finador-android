@@ -1,7 +1,9 @@
 package fin.android.ui
 
+import fin.android.market.FxRate
 import org.junit.Assert.assertEquals
 import org.junit.Test
+import java.time.LocalDate
 
 /**
  * The gains-table cell formatter: grouped thousands, exactly one decimal, a leading minus for
@@ -36,5 +38,20 @@ class FormatTest {
         assertEquals("12.3%", formatGainPercent(0.1234))
         assertEquals("-4.6%", formatGainPercent(-0.0456))
         assertEquals("-", formatGainPercent(null))
+    }
+
+    @Test fun fxRateHasFourDecimalsAndItsDate() {
+        val r = FxRate("USD", "EUR", 0.85431234, LocalDate.parse("2024-01-12"))
+        assertEquals("1 USD = 0.8543 EUR (2024-01-12)", formatFxRate(r))
+    }
+
+    @Test fun fxRateWithoutADateStatesOnlyTheRate() {
+        assertEquals("1 USD = 1.0000 EUR", formatFxRate(FxRate("USD", "EUR", 1.0, null)))
+    }
+
+    @Test fun fxRateGroupsThousands() {
+        // A weak currency against a strong one still reads: 4 decimals, spaces for thousands.
+        assertEquals("1 JPY = 0.0061 EUR", formatFxRate(FxRate("JPY", "EUR", 0.006123, null)))
+        assertEquals("1 EUR = 163.3210 JPY", formatFxRate(FxRate("EUR", "JPY", 163.321, null)))
     }
 }

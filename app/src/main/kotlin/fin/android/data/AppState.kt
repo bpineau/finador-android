@@ -1,6 +1,7 @@
 package fin.android.data
 
 import fin.android.domain.Book
+import fin.android.market.FxRate
 import fin.android.remote.SyncState
 import fin.android.valuation.AssetDetail
 import fin.android.valuation.GainsReport
@@ -29,5 +30,10 @@ sealed interface AppState {
         val refreshing: Boolean,
         /** Per-asset detail pages, precomputed so opening one is instant. Keyed by asset id. */
         val assetDetails: Map<String, AssetDetail> = emptyMap(),
+        /**
+         * The exchange rates the valuation crossed through, one per foreign currency held, sorted
+         * by code. Empty when the whole book is denominated in the reference currency.
+         */
+        val fxRates: List<FxRate> = emptyList(),
     ) : AppState
 }
