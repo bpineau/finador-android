@@ -121,6 +121,25 @@ class ValuatorTest {
     }
 
     /**
+     * A price override prices this one valuation and nothing else - the extended-hours print of
+     * `Quotes.refreshExtended`, shown but never stored (mirrors Go's `WithPriceOverrides`).
+     * CW8 forced to 600 instead of its 560 close: 14 shares held, so gross rises by 14 × 40 = 560,
+     * and the envelope taxes follow the value the holder is actually shown.
+     *   PEA 12×600 + 10000 cash = 17200, base 15950 → 1250 × 0.172 = 215
+     *   CTO 2×600 = 1200, base 1100 → 100 × 0.30 = 30 ; Immo unchanged at 15000
+     */
+    @Test fun aPriceOverridePricesThisValuationOnly() {
+        val (book, market) = valuationBook()
+        val v = Valuator.value(book, market, at = d("2026-06-05"), priceOverrides = mapOf("cw8" to 600.0))
+        assertEquals(480400.0, v.gross, tol)
+        assertEquals(215.0 + 30 + 15000, v.tax, tol)
+
+        // Nothing was persisted: the same call without the override is the untouched valuation.
+        assertEquals(479840.0, Valuator.value(book, market, at = d("2026-06-05")).gross, tol)
+        assertEquals(560.0, market.prices["cw8"]!!.points.last().close, 0.0)
+    }
+
+    /**
      * TestValueAtEarlierDate: at 2026-03-21 the forward-filled close is 540 (Mar 20),
      * the property uses its first statement (400000).
      *   PEA 12×540=6480, declared cash 10000 ; CTO 2×540=1080 ; livret 12000 ; maison 400000

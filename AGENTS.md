@@ -24,7 +24,7 @@ when you change architecture or invariants.
    `*_test.go`. Don't change the math without checking parity; if you must, update the Go reference too.
 3. **All docs / comments / code in English.** (User convention.)
 4. **Keep the suite green.** Run the full `testDebugUnitTest` before claiming done; every test must
-   pass (count them from `app/build/test-results/testDebugUnitTest/*.xml`, 208 today).
+   pass (count them from `app/build/test-results/testDebugUnitTest/*.xml`, 227 today).
 5. **Don't weaken security.** Secrets are encrypted under an Android Keystore key
    (`data/SecretStore.kt`); the repo holds only the *encrypted* `.fin`; never log secrets or write
    them to disk in clear.
@@ -70,7 +70,7 @@ market/valuation` layers are **pure Kotlin (no Android imports)** → fast to un
 | `crypto/` | Argon2, Hkdf, AesGcm, Hashes, Bytes, Ids | KDF, AEAD, base64, Crockford ids | ✅ |
 | `domain/` | Models, Money, MarketData | data model (BigDecimal money, enums, Book) | ✅ |
 | `format/` | Header, Kdf, Wire, Log, Replay, Writer, Merge, Ledger | read/write the `.fin` (AAD-chained records, fold, diff-on-save, union+LWW merge) | ✅ |
-| `market/` | Yahoo, Ft, Morningstar, Airfund, Nowcast, MultiSource, Converter, FxRates, CacheSidecar, Quotes, Source | fetch quotes (JSON + a Boursorama regex), FX via USD, FINCACHE2 cache; `Airfund` = the NAV feed of the employee-savings funds (FCPE) no quote site covers, with a bundled offline baseline; `Nowcast` = the estimated tail those funds need between their last published NAV and now; `FxRates` = the display-only read-back of the rates a valuation crossed at (`AppState.Ready.fxRates`, a caption under the total) | ✅ |
+| `market/` | Yahoo, Ft, Morningstar, Airfund, Nowcast, Session, MultiSource, Converter, FxRates, CacheSidecar, Quotes, Source | fetch quotes (JSON + a Boursorama regex), FX via USD, FINCACHE2 cache; `Airfund` = the NAV feed of the employee-savings funds (FCPE) no quote site covers, with a bundled offline baseline; `Nowcast` = the estimated tail those funds need between their last published NAV and now; `FxRates` = the display-only read-back of the rates a valuation crossed at (`AppState.Ready.fxRates`, a caption under the total); `Session` + `Quotes.refreshExtended` = the extended-hours opt-in (Settings → Display, off by default), parity with the Go `value --extended`: a US pre/post-market print prices the line and the total when it is fresher than the regular one, labelled "pre 08:14" / "post 19:59" and NEVER stored (the same pass stores exactly what the plain one does) | ✅ |
 | `valuation/` | Valuator, Perf, Gains | gross/tax/net, TWR/XIRR/etc., period & per-asset gains, asset detail | ✅ |
 | `remote/` | Backend, GitHubBackend, RemoteConfig, Sync | GitHub Contents API, pull/mutate/push + conflict→merge + offline-dirty | Android-light |
 | `data/` | AppContainer, AppRepository, AppState, SecretStore | manual DI, the single facade, Keystore-encrypted secrets | Android |

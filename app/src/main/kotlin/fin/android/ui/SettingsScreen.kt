@@ -22,6 +22,7 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Scaffold
+import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
@@ -82,6 +83,7 @@ fun SettingsScreen(
 
             SettingsCard("Display") {
                 DisplayCurrencyRow(vm)
+                ExtendedHoursRow(vm)
             }
 
             SettingsCard("Sync") {
@@ -185,6 +187,41 @@ private fun DisplayCurrencyRow(vm: AppViewModel) {
                 }
             }
         }
+    }
+}
+
+/**
+ * The extended-hours opt-in: off by default. On, a US-listed line is valued at its pre/post-market
+ * print when that print is fresher than the regular one - shown labelled next to the line, and
+ * never stored (parity with the Go reference's `value --extended`).
+ */
+@Composable
+private fun ExtendedHoursRow(vm: AppViewModel) {
+    var on by remember { mutableStateOf(vm.extendedHours()) }
+    Row(
+        Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.SpaceBetween,
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Column(Modifier.weight(1f)) {
+            Text(
+                "Extended hours (US pre/post-market)",
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurface,
+            )
+            Text(
+                "Off-hours prints are thin, shown labelled and never stored.",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
+        Switch(
+            checked = on,
+            onCheckedChange = {
+                on = it
+                vm.setExtendedHours(it)
+            },
+        )
     }
 }
 

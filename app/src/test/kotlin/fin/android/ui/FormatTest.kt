@@ -1,9 +1,12 @@
 package fin.android.ui
 
 import fin.android.market.FxRate
+import fin.android.market.Quotes
+import fin.android.market.Session
 import org.junit.Assert.assertEquals
 import org.junit.Test
 import java.time.LocalDate
+import java.util.TimeZone
 
 /**
  * The gains-table cell formatter: grouped thousands, exactly one decimal, a leading minus for
@@ -47,6 +50,36 @@ class FormatTest {
 
     @Test fun fxRateWithoutADateStatesOnlyTheRate() {
         assertEquals("1 USD = 1.0000 EUR", formatFxRate(FxRate("USD", "EUR", 1.0, null)))
+    }
+
+    /**
+     * An off-hours print reads in the DEVICE's zone: the same instant is 19:59 for a holder in New
+     * York and 01:59 the next day for one in Paris. 1788998365 is the Go reference's own
+     * after-hours fixture (2026-09-09 19:59:25 New York).
+     */
+    @Test fun offHoursPrintReadsInTheDeviceZone() {
+        val print = Quotes.OffHoursPrint("DDOG", "USD", 225.7, 1788998365L, Session.POST)
+        val original = TimeZone.getDefault()
+        try {
+            TimeZone.setDefault(TimeZone.getTimeZone("America/New_York"))
+            assertEquals("post 19:59", formatOffHours(print))
+            TimeZone.setDefault(TimeZone.getTimeZone("Europe/Paris"))
+            assertEquals("post 01:59", formatOffHours(print))
+        } finally {
+            TimeZone.setDefault(original)
+        }
+    }
+
+    /** A pre-market print names its own session. 1789041600 = 2026-09-10 08:00 New York. */
+    @Test fun aPreMarketPrintNamesThePreSession() {
+        val print = Quotes.OffHoursPrint("DDOG", "USD", 228.4, 1789041600L, Session.PRE)
+        val original = TimeZone.getDefault()
+        try {
+            TimeZone.setDefault(TimeZone.getTimeZone("America/New_York"))
+            assertEquals("pre 08:00", formatOffHours(print))
+        } finally {
+            TimeZone.setDefault(original)
+        }
     }
 
     @Test fun fxRateGroupsThousands() {
