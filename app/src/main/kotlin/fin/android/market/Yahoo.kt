@@ -50,10 +50,17 @@ class Yahoo(
      * rather than throwing, so a quote outage never breaks a refresh - it only leaves the daily
      * closes in charge.
      *
+     * With [extendedHours], the same answer is also read for the venue's pre-market and after-hours
+     * fields, and the freshest of the three lands in [Quote.offHours] when it is an off-hours one
+     * ([Session.freshest]). The endpoint and the request are unchanged: Yahoo serves those fields
+     * to everyone, so the opt-in costs no extra call - it only decides whether they are read. The
+     * regular print stays in [Quote.price] either way, which is what keeps an off-hours trade out
+     * of every stored series.
+     *
      * The quote API, unlike the chart API, needs a cookie + crumb pair. It is fetched once and
      * renewed once on the 401/403 an expired crumb produces.
      */
-    fun quotes(symbols: List<String>): Map<String, Quote> {
+    fun quotes(symbols: List<String>, extendedHours: Boolean = false): Map<String, Quote> {
         if (symbols.isEmpty()) return emptyMap()
         val out = LinkedHashMap<String, Quote>()
         for (chunk in symbols.distinct().chunked(QUOTE_BATCH_MAX)) {
@@ -67,12 +74,12 @@ class Yahoo(
                 auth = auth() ?: return out
                 quoteBody(chunk, auth).let { (_, retried) -> body = retried }
             }
-            parseQuotes(body ?: continue, out)
+            parseQuotes(body ?: continue, extendedHours, out)
         }
         return out
     }
 
-    private fun parseQuotes(body: String, into: MutableMap<String, Quote>) {
+    private fun parseQuotes(body: String, extendedHours: Boolean, into: MutableMap<String, Quote>) {
         val results = try {
             json.decodeFromString(QuoteResponse.serializer(), body).quoteResponse.result.orEmpty()
         } catch (_: Exception) {
@@ -85,7 +92,15 @@ class Yahoo(
             // some halted and OTC lines.
             val time = r.regularMarketTime ?: continue
             if (price <= 0 || time <= 0) continue
-            into[r.symbol] = Quote(r.symbol, price, time, r.currency)
+            // A venue with no extended session serves no pre/post field at all
+            // (hasPrePostMarketData false), so the nulls below settle it by themselves.
+            val offHours = if (!extendedHours) {
+                null
+            } else {
+                Session.freshest(price, time, r.preMarketPrice, r.preMarketTime, r.postMarketPrice, r.postMarketTime)
+                    .takeIf { it.extended }
+            }
+            into[r.symbol] = Quote(r.symbol, price, time, r.currency, offHours)
         }
     }
 
@@ -216,6 +231,12 @@ private data class QuoteResponse(val quoteResponse: Body) {
         val currency: String? = null,
         val regularMarketPrice: Double? = null,
         val regularMarketTime: Long? = null,
+        // Absent for a venue that runs no extended session (hasPrePostMarketData false), and
+        // absent for the session Yahoo is not in; each print is dated at the instant it was struck.
+        val preMarketPrice: Double? = null,
+        val preMarketTime: Long? = null,
+        val postMarketPrice: Double? = null,
+        val postMarketTime: Long? = null,
     )
 }
 

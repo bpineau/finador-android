@@ -2,6 +2,7 @@ package fin.android.data
 
 import fin.android.domain.Book
 import fin.android.market.FxRate
+import fin.android.market.Quotes
 import fin.android.remote.SyncState
 import fin.android.valuation.AssetDetail
 import fin.android.valuation.GainsReport
@@ -35,5 +36,11 @@ sealed interface AppState {
          * by code. Empty when the whole book is denominated in the reference currency.
          */
         val fxRates: List<FxRate> = emptyList(),
+        /**
+         * The off-hours prints the valuation was priced at, keyed by asset id: empty unless the
+         * extended-hours setting is on AND a venue really served a fresher pre/post-market print.
+         * Shown labelled next to the line and never stored (see `Quotes.refreshExtended`).
+         */
+        val offHours: Map<String, Quotes.OffHoursPrint> = emptyMap(),
     ) : AppState
 }

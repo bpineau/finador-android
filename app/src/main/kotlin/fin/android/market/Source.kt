@@ -19,8 +19,20 @@ data class Ref(val symbol: String?, val isin: String?)
  * A daily series is only ever as fresh as the provider's last bar; a quote is the price right now.
  * The distinction is the whole reason this type exists - without it a session that moves 20% at the
  * open stays invisible until the provider closes the day.
+ *
+ * [price] and [time] are always the REGULAR session's last print, whatever the extended-hours
+ * opt-in asked for: every consumer that stores a point (a price series, an FX series, a nowcast
+ * anchor) reads them and can never persist an off-hours trade by accident. [offHours] carries the
+ * venue's pre-market or after-hours print instead, and only when one exists and is fresher than the
+ * regular one ([Session.freshest]); it is null otherwise, and always null without the opt-in.
  */
-data class Quote(val symbol: String, val price: Double, val time: Long, val currency: String?)
+data class Quote(
+    val symbol: String,
+    val price: Double,
+    val time: Long,
+    val currency: String?,
+    val offHours: Session.Print? = null,
+)
 
 /** Daily market data for one instrument: quotation [currency] (may be null), [closes] and [dividends]. */
 data class DailyData(

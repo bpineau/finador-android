@@ -61,6 +61,11 @@ object Valuator {
      * the asset group root (default); false breaks them down by envelope, each
      * envelope line carrying its positions AND its cash (mirrors Go's
      * `WithLinesByAccount`).
+     *
+     * [priceOverrides] forces the price of given assets (keyed by asset id, in the ASSET'S quote
+     * currency), for this one valuation and nothing else - the extended-hours prints of
+     * `Quotes.refreshExtended`, which are shown but never stored (mirrors Go's
+     * `WithPriceOverrides`). Nothing here is persisted.
      */
     fun value(
         book: Book,
@@ -68,9 +73,10 @@ object Valuator {
         referenceCcy: String? = null,
         at: LocalDate,
         byGroup: Boolean = true,
+        priceOverrides: Map<String, Double> = emptyMap(),
     ): Valuation {
         val ccy = referenceCcy ?: book.config["currency"] ?: "EUR"
-        return Valuer(book, market, at, ccy, byGroup).value()
+        return Valuer(book, market, at, ccy, byGroup, priceOverrides).value()
     }
 }
 
@@ -84,6 +90,7 @@ internal class Valuer(
     private val at: LocalDate,
     private val ccy: String,
     private val byGroup: Boolean,
+    private val priceOverrides: Map<String, Double> = emptyMap(),
 ) {
     private val fx = Converter(market.fx)
     private val prices = market.prices
@@ -277,7 +284,9 @@ internal class Valuer(
      * `at`. Mirrors Go `value.go positionValue`.
      */
     private fun positionValue(h: Holding): Double {
-        val close = prices[h.asset.id]?.at(at)?.first
+        // An override outranks the close: it IS the fresher observation (an off-hours print), and
+        // it is deliberately absent from the stored series.
+        val close = priceOverrides[h.asset.id] ?: prices[h.asset.id]?.at(at)?.first
         if (close != null) {
             return toRef(toF(h.qty) * close, h.asset.ccy, at)
         }

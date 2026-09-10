@@ -32,6 +32,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import fin.android.data.AppState
 import fin.android.market.FxRate
+import fin.android.market.Quotes
 import fin.android.valuation.AssetGain
 import fin.android.valuation.PeriodGain
 import fin.android.valuation.PerfMetrics
@@ -57,7 +58,11 @@ fun PortfolioScreen(vm: AppViewModel, ready: AppState.Ready, onAssetClick: (Stri
         ) {
             item { SyncBanner(ready) }
 
-            item { TotalCard(v.gross, v.tax, v.net, v.referenceCcy, ready.perf) }
+            item { TotalCard(v.gross, v.tax, v.net, v.referenceCcy, ready.offHours.isNotEmpty()) }
+
+            if (ready.offHours.isNotEmpty()) {
+                item { OffHoursNote() }
+            }
 
             if (ready.fxRates.isNotEmpty()) {
                 item { FxRatesNote(ready.fxRates) }
@@ -87,7 +92,7 @@ fun PortfolioScreen(vm: AppViewModel, ready: AppState.Ready, onAssetClick: (Stri
                 item { SectionHeader("Positions") }
                 item {
                     CardList(v.positions) { p ->
-                        PositionRow(p, v.referenceCcy, onAssetClick)
+                        PositionRow(p, v.referenceCcy, ready.offHours[p.assetId], onAssetClick)
                     }
                 }
             }
@@ -366,16 +371,32 @@ private fun FxRatesNote(rates: List<FxRate>) {
     }
 }
 
-/** The hero card: large bold net-worth number + a compact gross / tax / net breakdown. */
+/**
+ * Says once, right where the total is, that off-hours prints are inside these figures. A print
+ * struck outside the regular session is thinner than a close, and the number it feeds is not one.
+ */
 @Composable
-private fun TotalCard(gross: Double, tax: Double, net: Double, ccy: String, perf: PerfMetrics?) {
+private fun OffHoursNote() {
+    Text(
+        "Off-hours prints, not closes.",
+        style = MaterialTheme.typography.bodySmall,
+        color = MaterialTheme.colorScheme.onSurfaceVariant,
+    )
+}
+
+/**
+ * The hero card: large bold net-worth number + a compact gross / tax / net breakdown. [extended]
+ * says the total counts at least one off-hours print, and is the screen's single such mention.
+ */
+@Composable
+private fun TotalCard(gross: Double, tax: Double, net: Double, ccy: String, extended: Boolean) {
     Card(
         modifier = Modifier.fillMaxWidth(),
         colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant),
     ) {
         Column(Modifier.padding(20.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
             Text(
-                "Net worth",
+                if (extended) "Net worth · extended hours" else "Net worth",
                 style = MaterialTheme.typography.labelMedium,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
@@ -460,9 +481,17 @@ private fun LineRow(line: ValuationLine, ccy: String) {
     }
 }
 
-/** Native list row: name + value, a trailing chevron, whole-row ripple (when navigable). */
+/**
+ * Native list row: name + value, a trailing chevron, whole-row ripple (when navigable). [offHours],
+ * when present, is the off-hours print this line is valued at, captioned under the quantity.
+ */
 @Composable
-private fun PositionRow(p: Position, ccy: String, onAssetClick: (String) -> Unit) {
+private fun PositionRow(
+    p: Position,
+    ccy: String,
+    offHours: Quotes.OffHoursPrint?,
+    onAssetClick: (String) -> Unit,
+) {
     // Cash positions (null assetId) have no detail page and are not clickable.
     val clickMod = p.assetId?.let { id -> Modifier.clickable { onAssetClick(id) } } ?: Modifier
     Row(
@@ -479,6 +508,13 @@ private fun PositionRow(p: Position, ccy: String, onAssetClick: (String) -> Unit
             if (p.kind == "security" && p.qty.signum() != 0) {
                 Text(
                     formatQuantity(p.qty),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+            if (offHours != null) {
+                Text(
+                    formatOffHours(offHours),
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
