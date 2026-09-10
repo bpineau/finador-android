@@ -31,6 +31,7 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import fin.android.data.AppState
+import fin.android.market.FxRate
 import fin.android.valuation.AssetGain
 import fin.android.valuation.PeriodGain
 import fin.android.valuation.PerfMetrics
@@ -57,6 +58,10 @@ fun PortfolioScreen(vm: AppViewModel, ready: AppState.Ready, onAssetClick: (Stri
             item { SyncBanner(ready) }
 
             item { TotalCard(v.gross, v.tax, v.net, v.referenceCcy, ready.perf) }
+
+            if (ready.fxRates.isNotEmpty()) {
+                item { FxRatesNote(ready.fxRates) }
+            }
 
             if (v.taxNote != null) {
                 item {
@@ -337,6 +342,23 @@ private fun SyncBanner(ready: AppState.Ready) {
             )
             Text(
                 text,
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
+    }
+}
+
+/**
+ * The rates the total was crossed at, one caption line per foreign currency held: the answer to
+ * "at what exchange rate is this valued?", right under the number it moves.
+ */
+@Composable
+private fun FxRatesNote(rates: List<FxRate>) {
+    Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+        for (r in rates) {
+            Text(
+                formatFxRate(r),
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )

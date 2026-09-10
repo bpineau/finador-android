@@ -24,7 +24,7 @@ when you change architecture or invariants.
    `*_test.go`. Don't change the math without checking parity; if you must, update the Go reference too.
 3. **All docs / comments / code in English.** (User convention.)
 4. **Keep the suite green.** Run the full `testDebugUnitTest` before claiming done; every test must
-   pass (count them from `app/build/test-results/testDebugUnitTest/*.xml`, 197 today).
+   pass (count them from `app/build/test-results/testDebugUnitTest/*.xml`, 208 today).
 5. **Don't weaken security.** Secrets are encrypted under an Android Keystore key
    (`data/SecretStore.kt`); the repo holds only the *encrypted* `.fin`; never log secrets or write
    them to disk in clear.
@@ -70,7 +70,7 @@ market/valuation` layers are **pure Kotlin (no Android imports)** → fast to un
 | `crypto/` | Argon2, Hkdf, AesGcm, Hashes, Bytes, Ids | KDF, AEAD, base64, Crockford ids | ✅ |
 | `domain/` | Models, Money, MarketData | data model (BigDecimal money, enums, Book) | ✅ |
 | `format/` | Header, Kdf, Wire, Log, Replay, Writer, Merge, Ledger | read/write the `.fin` (AAD-chained records, fold, diff-on-save, union+LWW merge) | ✅ |
-| `market/` | Yahoo, Ft, Morningstar, Airfund, Nowcast, MultiSource, Converter, CacheSidecar, Quotes, Source | fetch quotes (JSON + a Boursorama regex), FX via USD, FINCACHE2 cache; `Airfund` = the NAV feed of the employee-savings funds (FCPE) no quote site covers, with a bundled offline baseline; `Nowcast` = the estimated tail those funds need between their last published NAV and now | ✅ |
+| `market/` | Yahoo, Ft, Morningstar, Airfund, Nowcast, MultiSource, Converter, FxRates, CacheSidecar, Quotes, Source | fetch quotes (JSON + a Boursorama regex), FX via USD, FINCACHE2 cache; `Airfund` = the NAV feed of the employee-savings funds (FCPE) no quote site covers, with a bundled offline baseline; `Nowcast` = the estimated tail those funds need between their last published NAV and now; `FxRates` = the display-only read-back of the rates a valuation crossed at (`AppState.Ready.fxRates`, a caption under the total) | ✅ |
 | `valuation/` | Valuator, Perf, Gains | gross/tax/net, TWR/XIRR/etc., period & per-asset gains, asset detail | ✅ |
 | `remote/` | Backend, GitHubBackend, RemoteConfig, Sync | GitHub Contents API, pull/mutate/push + conflict→merge + offline-dirty | Android-light |
 | `data/` | AppContainer, AppRepository, AppState, SecretStore | manual DI, the single facade, Keystore-encrypted secrets | Android |
