@@ -13,6 +13,7 @@ import fin.android.format.Ledger
 import fin.android.market.Airfund
 import fin.android.market.CacheSidecar
 import fin.android.market.Ft
+import fin.android.market.FxRates
 import fin.android.market.Morningstar
 import fin.android.market.MultiSource
 import fin.android.market.Quotes
@@ -265,7 +266,16 @@ class AppRepository(private val container: AppContainer) {
                 .mapNotNull { a -> Gains.assetDetail(l.book, market, ref, today, a.id, valuation.positions)?.let { a.id to it } }
                 .toMap()
         }.getOrDefault(emptyMap())
-        _state.value = AppState.Ready(valuation, perf, gains, l.book, syncState, message, refreshing, assetDetails)
+        // The rates behind the total: read back from the same cached series the valuation crossed.
+        val fxRates = FxRates.held(
+            valuation.positions.map { it.ccy },
+            valuation.referenceCcy,
+            market.fx,
+            today,
+        )
+        _state.value = AppState.Ready(
+            valuation, perf, gains, l.book, syncState, message, refreshing, assetDetails, fxRates,
+        )
     }
 
     /**
