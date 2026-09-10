@@ -1,9 +1,13 @@
 package fin.android.ui
 
 import fin.android.market.FxRate
+import fin.android.market.Quotes
 import java.math.BigDecimal
 import java.text.DecimalFormat
 import java.text.DecimalFormatSymbols
+import java.time.Instant
+import java.time.ZoneId
+import java.time.format.DateTimeFormatter
 import java.util.Locale
 
 private val moneySymbols = DecimalFormatSymbols(Locale.US).apply {
@@ -16,6 +20,7 @@ private val percentFormat = DecimalFormat("#,##0.0#", moneySymbols)
 private val ratioFormat = DecimalFormat("#,##0.00", moneySymbols)
 private val gainCellFormat = DecimalFormat("#,##0.0", moneySymbols)
 private val fxRateFormat = DecimalFormat("#,##0.0000", moneySymbols)
+private val offHoursClock = DateTimeFormatter.ofPattern("HH:mm", Locale.ROOT)
 
 /** Formats a Double as "1 234.56 CCY" (thousands-grouped, two decimals). */
 fun formatMoney(value: Double, ccy: String): String = "${moneyFormat.format(value)} $ccy"
@@ -71,6 +76,16 @@ fun formatGainPercent(fraction: Double?): String =
 fun formatFxRate(r: FxRate): String {
     val head = "1 ${r.base} = ${fxRateFormat.format(r.rate)} ${r.quote}"
     return if (r.asOf == null) head else "$head (${r.asOf})"
+}
+
+/**
+ * Labels an off-hours print the way the line states it: "pre 08:14" / "post 19:59", the session
+ * Yahoo named and the instant it was struck, in the DEVICE's zone (a New York after-hours print
+ * reads at the hour the holder is living, which is the whole point of showing the clock).
+ */
+fun formatOffHours(p: Quotes.OffHoursPrint): String {
+    val at = Instant.ofEpochSecond(p.time).atZone(ZoneId.systemDefault())
+    return "${p.session} ${offHoursClock.format(at)}"
 }
 
 /** Formats a holding quantity: trailing zeros trimmed, with a "units" suffix. E.g. 10.50 → "10.5 units". */

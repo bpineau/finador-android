@@ -160,4 +160,79 @@ class YahooTest {
 
         assertTrue(yahoo().quotes(listOf("HALTED")).isEmpty())
     }
+
+    // --- Extended hours (parity with the Go reference's `value --extended`). ---
+
+    /**
+     * Fixtures copied from the Go reference's session_test.go: the live Yahoo v7 answers captured on
+     * 2026-09-09 at 21:10 New York, stripped to the fields this client reads.
+     */
+    private fun quoteResponse(vararg results: String) =
+        """{"quoteResponse":{"result":[${results.joinToString(",")}],"error":null}}"""
+
+    // DDOG, after hours: the 19:59:25 print is 43 cents above the 16:00 close.
+    private val ddogPost = """{"symbol":"DDOG","currency":"USD","marketState":"POSTPOST",
+        "regularMarketPrice":225.27,"regularMarketTime":1788984001,
+        "postMarketPrice":225.7,"postMarketTime":1788998365}"""
+
+    // DDOG the next morning at 08:00 New York: a pre-market print, with last night's post-market
+    // one still served alongside it.
+    private val ddogPre = """{"symbol":"DDOG","currency":"USD","marketState":"PRE",
+        "regularMarketPrice":225.27,"regularMarketTime":1788984001,
+        "postMarketPrice":225.7,"postMarketTime":1788998365,
+        "preMarketPrice":228.4,"preMarketTime":1789041600}"""
+
+    // DDOG mid-session: the morning's pre-market print is still served, and is now the older one.
+    private val ddogRegular = """{"symbol":"DDOG","currency":"USD","marketState":"REGULAR",
+        "regularMarketPrice":229.1,"regularMarketTime":1789056000,
+        "preMarketPrice":228.4,"preMarketTime":1789041600}"""
+
+    // A weekend, every session shut and no off-hours field left.
+    private val ddogClosed = """{"symbol":"DDOG","currency":"USD","marketState":"CLOSED",
+        "regularMarketPrice":225.27,"regularMarketTime":1788984001}"""
+
+    // IWDA.AS: an Amsterdam line runs no extended session, so Yahoo serves no pre/post field at all
+    // (hasPrePostMarketData false).
+    private val iwdaNone = """{"symbol":"IWDA.AS","currency":"EUR","marketState":"PREPRE",
+        "regularMarketPrice":126.05,"regularMarketTime":1788968108}"""
+
+    private fun serveQuotes(vararg results: String) {
+        server.enqueue(MockResponse().setResponseCode(404).addHeader("Set-Cookie", "A3=ck; Path=/"))
+        server.enqueue(MockResponse().setResponseCode(200).setBody("crumb1"))
+        server.enqueue(MockResponse().setResponseCode(200).setBody(quoteResponse(*results)))
+    }
+
+    // With the opt-in, the after-hours print is reported apart and says which session it came from;
+    // the regular print stays in place, which is what keeps it out of every stored series.
+    @Test fun quotesReportTheAfterHoursPrintUnderTheOptIn() {
+        serveQuotes(ddogPost)
+        val q = yahoo().quotes(listOf("DDOG"), extendedHours = true)["DDOG"]!!
+        assertEquals(225.27, q.price, 0.0)
+        assertEquals(1788984001L, q.time)
+        assertEquals(Session.Print(225.7, 1788998365L, "post"), q.offHours)
+    }
+
+    // The very same answer, without the opt-in: the regular close and nothing else.
+    @Test fun theDefaultPathNeverLooksAtOffHoursFields() {
+        serveQuotes(ddogPost)
+        val q = yahoo().quotes(listOf("DDOG"))["DDOG"]!!
+        assertEquals(225.27, q.price, 0.0)
+        assertNull(q.offHours)
+    }
+
+    // The sessions a US line goes through, same fixtures and same expectations as the Go reference.
+    @Test fun quotesWalkTheSessionsOfAUsLine() {
+        for ((symbol, fixture, want) in listOf(
+            // The pre-market print beats last night's post-market one.
+            Triple("DDOG", ddogPre, Session.Print(228.4, 1789041600L, "pre")),
+            Triple("DDOG", ddogRegular, null), // the regular session ignores the stale pre print
+            Triple("DDOG", ddogClosed, null), // closed falls back to the regular close
+            Triple("IWDA.AS", iwdaNone, null), // a venue without extended hours serves no such field
+        )) {
+            server.shutdown() // one server per case: each needs its own auth dance
+            server = MockWebServer().also { it.start() }
+            serveQuotes(fixture)
+            assertEquals(want, yahoo().quotes(listOf(symbol), extendedHours = true)[symbol]!!.offHours)
+        }
+    }
 }

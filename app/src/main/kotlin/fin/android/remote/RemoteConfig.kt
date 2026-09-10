@@ -24,6 +24,12 @@ data class RemoteConfig(
     val readPullAfter: String = "1h",
     /** Override for the currency every value/gain is shown in; null falls back to the book's. */
     val displayCurrency: String? = null,
+    /**
+     * Opt-in: value US-listed lines at their pre/post-market print when it is fresher than the
+     * regular one (parity with the Go reference's `value --extended`). Off by default; an off-hours
+     * print is shown labelled and never stored.
+     */
+    val extendedHours: Boolean = false,
 ) {
     val isGithub: Boolean get() = source == "github" && github != null
 

@@ -337,4 +337,82 @@ class QuotesTest {
         // The proxy's own live price is recorded too, so the next refresh anchors on it.
         assertEquals(159.0, out.prices[Nowcast.proxyKey("URTH")]!!.points.last().close, 0.0)
     }
+
+    // --- Extended hours: shown, never stored (parity with Go's SpotRefreshExtended). ---
+
+    /** DDOG-shaped answer for AA: a 19:59 after-hours print above the 16:00 close (see YahooTest). */
+    private val postPrintBody = """{"quoteResponse":{"result":[
+      {"symbol":"AA","currency":"USD","regularMarketPrice":225.27,"regularMarketTime":1788984001,
+       "postMarketPrice":225.7,"postMarketTime":1788998365}]}}"""
+
+    private fun refreshBoth(provider: Provider, now: LocalDate = d("2026-09-09")): Pair<MarketData, Quotes.Refresh> {
+        val plain = Quotes.refresh(
+            book(), MarketData(), from = d("2026-01-01"), now = now,
+            multi = MultiSource(listOf(provider)), yahoo = yahoo(),
+        )
+        val extended = Quotes.refreshExtended(
+            book(), MarketData(), from = d("2026-01-01"), now = now,
+            multi = MultiSource(listOf(provider)), yahoo = yahoo(),
+        )
+        return plain to extended
+    }
+
+    @Test fun theOptInReportsTheOffHoursPrint() {
+        quoteBody = postPrintBody
+        val out = Quotes.refreshExtended(
+            book(), MarketData(), from = d("2026-01-01"), now = d("2026-09-09"),
+            multi = MultiSource(listOf(FakeProvider(DailyData(currency = "USD", closes = emptyList())))),
+            yahoo = yahoo(),
+        )
+
+        val print = out.offHours["aa"]!!
+        assertEquals("AA", print.ticker)
+        assertEquals("USD", print.ccy)
+        assertEquals(225.7, print.price, 0.0)
+        assertEquals(1788998365L, print.time)
+        assertEquals(Session.POST, print.session)
+        // And the series holds the regular print, never the off-hours one.
+        assertEquals(listOf(225.27), out.market.prices["aa"]!!.points.map { it.close })
+    }
+
+    // The invariant the whole feature hangs on: the opt-in changes what is SHOWN, never what is
+    // STORED - not the in-memory series, and not the encrypted sidecar the app writes from it.
+    @Test fun theOptInLeavesTheStoredDataAndItsSidecarIdentical() {
+        quoteBody = postPrintBody
+        val (plain, extended) = refreshBoth(
+            FakeProvider(DailyData(currency = "USD", closes = listOf(PricePoint(d("2026-09-09"), 220.0)))),
+        )
+
+        assertEquals(plain, extended.market)
+        // 1788984001 = 2026-09-09 20:00 UTC: the REGULAR print replaced the day's bar in both.
+        assertEquals(225.27, extended.market.prices["aa"]!!.points.last().close, 0.0)
+
+        // Through the real door: same key, same content read back (the nonce is random, the
+        // plaintext is not).
+        val key = ByteArray(32) { it.toByte() }
+        val dir = java.nio.file.Files.createTempDirectory("sidecar").toFile()
+        val a = java.io.File(dir, "plain.cache").also { CacheSidecar.write(it, key, plain) }
+        val b = java.io.File(dir, "extended.cache").also { CacheSidecar.write(it, key, extended.market) }
+        assertEquals(CacheSidecar.read(a, key), CacheSidecar.read(b, key))
+        dir.deleteRecursively()
+    }
+
+    // An employee-savings fund is priced by an estimate read off a proxy's REGULAR print. It is not
+    // a spot target, so it can never be labelled with a session - and the proxy's own off-hours
+    // print must not move the estimate either.
+    @Test fun anEstimatedFundNeverTakesASession() {
+        quoteBody = """{"quoteResponse":{"result":[
+          {"symbol":"URTH","currency":"USD","regularMarketPrice":159.0,"regularMarketTime":1787270400,
+           "postMarketPrice":200.0,"postMarketTime":1787280000},
+          {"symbol":"EURUSD=X","currency":"USD","regularMarketPrice":1.085,"regularMarketTime":1787270400}]}}"""
+        val out = Quotes.refreshExtended(
+            fcpeBook(), MarketData(), from = d("2026-01-01"), now = d("2026-08-21"),
+            multi = MultiSource(listOf(fcpeProvider())), yahoo = yahoo(),
+        )
+
+        assertTrue(out.offHours.isEmpty())
+        val series = out.market.prices["fcpe"]!!
+        assertEquals(79.5, series.points.last().close, 1e-9) // 53 * 159 / 106, the regular print
+        assertEquals(d("2026-08-19"), series.estimatedFrom) // still flagged as the estimate it is
+    }
 }

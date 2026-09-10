@@ -21,6 +21,9 @@ import java.time.LocalDate
  * spot pass then overwrites today's point with the live market price, which is the only thing that
  * moves during a session.
  *
+ * [refreshExtended] adds the extended-hours opt-in: the same passes, plus the off-hours prints of
+ * the US-listed lines, collected for display and stored nowhere.
+ *
  * A held employee-savings fund ([AirfundFunds]) adds a third concern. Its NAV is published two days
  * late, so both passes are followed by a [Nowcast] estimate read off a listed proxy, which the
  * refresh fetches even when the user holds none of it. Estimates are recomputed from scratch every
@@ -28,6 +31,26 @@ import java.time.LocalDate
  * cache sidecar strips them again on the way to disk.
  */
 object Quotes {
+
+    /**
+     * An off-hours print of one asset: display only, never merged into a series and never cached.
+     * [ticker] and [ccy] are the asset's declared ones (the quote passed the currency contract),
+     * [time] the instant the print was struck (epoch seconds) and [session] "pre" or "post".
+     */
+    data class OffHoursPrint(
+        val ticker: String,
+        val ccy: String,
+        val price: Double,
+        val time: Long,
+        val session: String,
+    )
+
+    /**
+     * What an extended-hours refresh observed: the [market] to store, exactly as a plain [refresh]
+     * would have produced it, plus the [offHours] prints to SHOW, keyed by asset id.
+     */
+    data class Refresh(val market: MarketData, val offHours: Map<String, OffHoursPrint>)
+
     fun refresh(
         book: Book,
         existing: MarketData?,
@@ -36,7 +59,44 @@ object Quotes {
         referenceCcy: String? = null,
         multi: MultiSource = MultiSource.default(),
         yahoo: Yahoo = Yahoo(),
-    ): MarketData {
+    ): MarketData = pass(book, existing, from, now, referenceCcy, multi, yahoo, extendedHours = false).market
+
+    /**
+     * [refresh] with the extended-hours opt-in (parity with the Go reference's
+     * `SpotRefreshExtended`, behind finador's `value --extended`): a venue's pre-market or
+     * after-hours print is collected for display when it is newer than the regular session's last
+     * price.
+     *
+     * Such a print is DISPLAYED, NEVER STORED: it is a thinner trade than a close, and its instant
+     * belongs to a session the persisted daily series does not model (an after-hours print in New
+     * York already falls on the next civil day in Paris). It travels in [Refresh.offHours] alone,
+     * and [Refresh.market] is byte-for-byte what the same refresh without the opt-in would have
+     * returned - so no caller, and no cache, can persist it by accident.
+     *
+     * An employee-savings fund ([AirfundFunds]) never takes a session: its price is an estimate read
+     * off a proxy's REGULAR print, and it is not a spot target at all.
+     */
+    fun refreshExtended(
+        book: Book,
+        existing: MarketData?,
+        from: LocalDate,
+        now: LocalDate,
+        referenceCcy: String? = null,
+        multi: MultiSource = MultiSource.default(),
+        yahoo: Yahoo = Yahoo(),
+    ): Refresh = pass(book, existing, from, now, referenceCcy, multi, yahoo, extendedHours = true)
+
+    /** The one implementation behind [refresh] and [refreshExtended]. */
+    private fun pass(
+        book: Book,
+        existing: MarketData?,
+        from: LocalDate,
+        now: LocalDate,
+        referenceCcy: String?,
+        multi: MultiSource,
+        yahoo: Yahoo,
+        extendedHours: Boolean,
+    ): Refresh {
         // The effective display currency must have its FX series fetched too, so a value/gain
         // shown in a non-book currency can be converted. Falls back to the book's, then EUR.
         val refCcy = referenceCcy?.trim()?.uppercase()?.ifBlank { null } ?: book.config["currency"] ?: "EUR"
@@ -105,13 +165,18 @@ object Quotes {
         val fxSymbols = currencies.filter { it != "USD" }.associateBy({ "${it}USD=X" }, { it })
         val quotes = yahoo.quotes(
             spotTargets.values.map { it.first } + proxies.map { it.proxy } + fxSymbols.keys,
+            extendedHours = extendedHours,
         )
+        val offHours = LinkedHashMap<String, OffHoursPrint>()
         for ((assetId, target) in spotTargets) {
             val (ticker, ccy) = target
             val q = quotes[ticker] ?: continue
             // The declared currency is the contract: a quote from a twin listing in another
             // currency is dropped, never spliced into a series denominated in the first one.
             if (q.currency != null && q.currency != ccy) continue
+            // The off-hours print is collected apart and merged nowhere; the regular one below is
+            // the only thing that reaches the series, opt-in or not.
+            q.offHours?.let { offHours[assetId] = OffHoursPrint(ticker, ccy, it.price, it.time, it.session) }
             prices[assetId] = (prices[assetId] ?: PriceSeries())
                 .merge(listOf(PricePoint(dateOf(q.time), q.price))).copy(fetchedAt = now)
         }
@@ -143,7 +208,7 @@ object Quotes {
                 .copy(fetchedAt = now)
         }
 
-        return MarketData(prices, fx, dividends)
+        return Refresh(MarketData(prices, fx, dividends), offHours)
     }
 
     /**

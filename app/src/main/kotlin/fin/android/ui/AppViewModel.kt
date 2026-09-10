@@ -190,6 +190,18 @@ class AppViewModel(private val container: AppContainer) : ViewModel() {
         viewModelScope.launch { repo.setDisplayCurrency(code) }
     }
 
+    /**
+     * Persists the extended-hours opt-in and refreshes quotes, so the prints (or their absence)
+     * are observed right away.
+     */
+    fun setExtendedHours(on: Boolean) {
+        viewModelScope.launch { repo.setExtendedHours(on) }
+    }
+
+    /** The persisted extended-hours opt-in (default off), for the Settings switch. */
+    fun extendedHours(): Boolean =
+        runCatching { container.loadConfig().extendedHours }.getOrDefault(false)
+
     /** The effective display currency (override → book's currency → EUR), for the Settings dropdown. */
     fun displayCurrency(): String =
         runCatching { container.loadConfig().displayCurrency }.getOrNull()

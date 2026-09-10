@@ -52,6 +52,10 @@ class AppRepository(private val container: AppContainer) {
     private var ledger: Ledger? = null
     private var market: MarketData = MarketData()
 
+    // The off-hours prints of the last refresh, keyed by asset id: never stored, never merged into
+    // [market], and re-observed (or cleared) by every refresh. Empty unless the setting is on.
+    private var offHours: Map<String, Quotes.OffHoursPrint> = emptyMap()
+
     // One provider chain for the whole session, not one per refresh: Yahoo's quote API needs a
     // cookie + crumb pair, and rebuilding the provider would re-buy it (two requests) on every
     // press. Only ever touched under [mutex].
@@ -121,13 +125,27 @@ class AppRepository(private val container: AppContainer) {
     private suspend fun refreshQuotesLocked() {
         val l = ledger ?: return
         runCatching {
-            val ref = container.loadConfig().displayCurrency
-            val updated = Quotes.refresh(
-                l.book, market, from = LocalDate.now().minusYears(2), now = LocalDate.now(),
-                referenceCcy = ref, multi = sources, yahoo = yahoo,
-            )
-            market = updated
-            CacheSidecar.write(container.marketCacheFile(l.fileId), l.cacheKey, updated)
+            val cfg = container.loadConfig()
+            val from = LocalDate.now().minusYears(2)
+            // The two modes differ in what they REPORT, never in what they store: the extended pass
+            // returns the very same market data, plus the off-hours prints to show.
+            val refreshed = if (cfg.extendedHours) {
+                Quotes.refreshExtended(
+                    l.book, market, from = from, now = LocalDate.now(),
+                    referenceCcy = cfg.displayCurrency, multi = sources, yahoo = yahoo,
+                )
+            } else {
+                Quotes.Refresh(
+                    Quotes.refresh(
+                        l.book, market, from = from, now = LocalDate.now(),
+                        referenceCcy = cfg.displayCurrency, multi = sources, yahoo = yahoo,
+                    ),
+                    emptyMap(),
+                )
+            }
+            market = refreshed.market
+            offHours = refreshed.offHours
+            CacheSidecar.write(container.marketCacheFile(l.fileId), l.cacheKey, refreshed.market)
         }
         emitReady(currentSyncState(), message = null, refreshing = false)
     }
@@ -139,6 +157,16 @@ class AppRepository(private val container: AppContainer) {
     suspend fun setDisplayCurrency(ccy: String) = exclusive {
         val cfg = container.loadConfig()
         container.saveConfig(cfg.copy(displayCurrency = ccy.trim().uppercase().ifBlank { null }))
+        refreshQuotesLocked() // already holding the lock
+    }
+
+    /**
+     * Persists the extended-hours opt-in, then refreshes quotes (the prints are observed by a pass,
+     * never replayed from a cache) and re-emits.
+     */
+    suspend fun setExtendedHours(on: Boolean) = exclusive {
+        val cfg = container.loadConfig()
+        container.saveConfig(cfg.copy(extendedHours = on))
         refreshQuotesLocked() // already holding the lock
     }
 
@@ -230,6 +258,7 @@ class AppRepository(private val container: AppContainer) {
         passphrase = null
         ledger = null
         market = MarketData()
+        offHours = emptyMap()
         _state.value = AppState.Onboarding
     }
 
@@ -255,7 +284,10 @@ class AppRepository(private val container: AppContainer) {
         val l = ledger ?: return
         val today = LocalDate.now()
         val ref = container.loadConfig().displayCurrency // null → engine falls back to book/EUR
-        val valuation = Valuator.value(l.book, market, referenceCcy = ref, at = today, byGroup = true)
+        val valuation = Valuator.value(
+            l.book, market, referenceCcy = ref, at = today, byGroup = true,
+            priceOverrides = offHours.mapValues { it.value.price },
+        )
         val perf = computePerf(l.book, today, ref)
         // Gains are a pure read over the same engine; never let them crash the UI.
         val gains = runCatching { Gains.report(l.book, market, referenceCcy = ref, today = today) }.getOrNull()
@@ -275,6 +307,7 @@ class AppRepository(private val container: AppContainer) {
         )
         _state.value = AppState.Ready(
             valuation, perf, gains, l.book, syncState, message, refreshing, assetDetails, fxRates,
+            offHours,
         )
     }
 
