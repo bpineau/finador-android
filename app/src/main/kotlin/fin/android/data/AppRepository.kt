@@ -37,14 +37,21 @@ import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 import java.math.BigDecimal
+import java.time.Clock
 import java.time.LocalDate
 
 /**
  * The app's single facade over the engine: resolves onboarding/unlock state, opens the ledger via
  * [Sync], values it, and applies transactions. All blocking work runs on [Dispatchers.IO]; UI
  * observes [state]. The passphrase lives in memory only for the unlocked session.
+ *
+ * [clock] is the one source of "now" every valuation and every quote validity is read against; it
+ * is injectable so a test can place the app inside a given trading session.
  */
-class AppRepository(private val container: AppContainer) {
+class AppRepository(
+    private val container: AppContainer,
+    private val clock: Clock = Clock.systemDefaultZone(),
+) {
     private val _state = MutableStateFlow<AppState>(AppState.Loading)
     val state: StateFlow<AppState> = _state.asStateFlow()
 
@@ -126,18 +133,18 @@ class AppRepository(private val container: AppContainer) {
         val l = ledger ?: return
         runCatching {
             val cfg = container.loadConfig()
-            val from = LocalDate.now().minusYears(2)
+            val from = LocalDate.now(clock).minusYears(2)
             // The two modes differ in what they REPORT, never in what they store: the extended pass
             // returns the very same market data, plus the off-hours prints to show.
             val refreshed = if (cfg.extendedHours) {
                 Quotes.refreshExtended(
-                    l.book, market, from = from, now = LocalDate.now(),
+                    l.book, market, from = from, now = LocalDate.now(clock),
                     referenceCcy = cfg.displayCurrency, multi = sources, yahoo = yahoo,
                 )
             } else {
                 Quotes.Refresh(
                     Quotes.refresh(
-                        l.book, market, from = from, now = LocalDate.now(),
+                        l.book, market, from = from, now = LocalDate.now(clock),
                         referenceCcy = cfg.displayCurrency, multi = sources, yahoo = yahoo,
                     ),
                     emptyMap(),
@@ -177,8 +184,8 @@ class AppRepository(private val container: AppContainer) {
      */
     fun assetDetail(assetId: String): AssetDetail? = ledger?.let {
         Gains.assetDetail(
-            it.book, market, container.loadConfig().displayCurrency, LocalDate.now(), assetId,
-            priceOverrides = offHours.mapValues { p -> p.value.price },
+            it.book, market, container.loadConfig().displayCurrency, LocalDate.now(clock), assetId,
+            priceOverrides = Quotes.current(offHours, clock.instant()).mapValues { p -> p.value.price },
         )
     }
 
@@ -291,12 +298,15 @@ class AppRepository(private val container: AppContainer) {
 
     private fun emitReady(syncState: SyncState, message: String?, refreshing: Boolean) {
         val l = ledger ?: return
-        val today = LocalDate.now()
+        val today = LocalDate.now(clock)
         val ref = container.loadConfig().displayCurrency // null → engine falls back to book/EUR
         // One screen, one price: the off-hours prints still in force drive the valuation AND every
         // figure shown beside it (the gains table's value column, each detail page's price/value).
         // Performance - [computePerf], the day move, the period gains - stays on published closes.
-        val prints = offHours
+        // "Still in force" is the point: a print is observed once and the screen is re-emitted
+        // many times (a sync, an edit, a settings change), so its validity is re-read here, at the
+        // instant it would be shown, and an expired one simply leaves the close in charge.
+        val prints = Quotes.current(offHours, clock.instant())
         val overrides = prints.mapValues { it.value.price }
         val valuation = Valuator.value(
             l.book, market, referenceCcy = ref, at = today, byGroup = true,

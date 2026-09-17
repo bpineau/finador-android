@@ -6,6 +6,7 @@ import fin.android.domain.DividendEvent
 import fin.android.domain.MarketData
 import fin.android.domain.PricePoint
 import fin.android.domain.PriceSeries
+import java.time.Instant
 import java.time.LocalDate
 
 /**
@@ -36,6 +37,8 @@ object Quotes {
      * An off-hours print of one asset: display only, never merged into a series and never cached.
      * [ticker] and [ccy] are the asset's declared ones (the quote passed the currency contract),
      * [time] the instant the print was struck (epoch seconds) and [session] "pre" or "post".
+     * [regularTime] is the instant of the regular print observed in the same pass, which is what
+     * makes [currentAt] able to re-check the freshness the print was accepted on.
      */
     data class OffHoursPrint(
         val ticker: String,
@@ -43,7 +46,21 @@ object Quotes {
         val price: Double,
         val time: Long,
         val session: String,
-    )
+        val regularTime: Long,
+    ) {
+        /** Whether this print still prices a screen at [now] (see [Session.stillCurrent]). */
+        fun currentAt(now: Instant): Boolean =
+            Session.stillCurrent(Session.Print(price, time, session), regularTime, now)
+    }
+
+    /**
+     * The prints of [offHours] that still price a screen at [now]: an observed print has a
+     * validity, and a screen outlives the refresh that took it (see [Session.stillCurrent]). Every
+     * consumer of [Refresh.offHours] must read them through this, and with the clock it displays
+     * with - a valuation carrying a print the venue has moved past is a wrong total with a caption.
+     */
+    fun current(offHours: Map<String, OffHoursPrint>, now: Instant): Map<String, OffHoursPrint> =
+        offHours.filterValues { it.currentAt(now) }
 
     /**
      * What an extended-hours refresh observed: the [market] to store, exactly as a plain [refresh]
@@ -193,7 +210,9 @@ object Quotes {
             if (q.currency != null && q.currency != ccy) continue
             // The off-hours print is collected apart and merged nowhere; the regular one below is
             // the only thing that reaches the series, opt-in or not.
-            q.offHours?.let { offHours[assetId] = OffHoursPrint(ticker, ccy, it.price, it.time, it.session) }
+            q.offHours?.let {
+                offHours[assetId] = OffHoursPrint(ticker, ccy, it.price, it.time, it.session, q.time)
+            }
             prices[assetId] = (prices[assetId] ?: PriceSeries())
                 .merge(listOf(PricePoint(dateOf(q.time), q.price))).copy(fetchedAt = now)
         }

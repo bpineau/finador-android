@@ -58,7 +58,7 @@ class FormatTest {
      * after-hours fixture (2026-09-09 19:59:25 New York).
      */
     @Test fun offHoursPrintReadsInTheDeviceZone() {
-        val print = Quotes.OffHoursPrint("DDOG", "USD", 225.7, 1788998365L, Session.POST)
+        val print = Quotes.OffHoursPrint("DDOG", "USD", 225.7, 1788998365L, Session.POST, regularTime = 1788984001L)
         val original = TimeZone.getDefault()
         try {
             TimeZone.setDefault(TimeZone.getTimeZone("America/New_York"))
@@ -72,7 +72,7 @@ class FormatTest {
 
     /** A pre-market print names its own session. 1789041600 = 2026-09-10 08:00 New York. */
     @Test fun aPreMarketPrintNamesThePreSession() {
-        val print = Quotes.OffHoursPrint("DDOG", "USD", 228.4, 1789041600L, Session.PRE)
+        val print = Quotes.OffHoursPrint("DDOG", "USD", 228.4, 1789041600L, Session.PRE, regularTime = 1788984001L)
         val original = TimeZone.getDefault()
         try {
             TimeZone.setDefault(TimeZone.getTimeZone("America/New_York"))

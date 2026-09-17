@@ -455,6 +455,9 @@ class QuotesTest {
         assertEquals(225.7, print.price, 0.0)
         assertEquals(1788998365L, print.time)
         assertEquals(Session.POST, print.session)
+        // The regular print's instant travels with it: that is what the print's validity, re-read
+        // every time the screen is emitted, is measured against (Session.stillCurrent).
+        assertEquals(1788984001L, print.regularTime)
         // And the series holds the regular print, never the off-hours one.
         assertEquals(listOf(225.27), out.market.prices["aa"]!!.points.map { it.close })
     }
