@@ -24,7 +24,7 @@ when you change architecture or invariants.
    `*_test.go`. Don't change the math without checking parity; if you must, update the Go reference too.
 3. **All docs / comments / code in English.** (User convention.)
 4. **Keep the suite green.** Run the full `testDebugUnitTest` before claiming done; every test must
-   pass (count them from `app/build/test-results/testDebugUnitTest/*.xml`, 227 today).
+   pass (count them from `app/build/test-results/testDebugUnitTest/*.xml`, 229 today).
 5. **Don't weaken security.** Secrets are encrypted under an Android Keystore key
    (`data/SecretStore.kt`); the repo holds only the *encrypted* `.fin`; never log secrets or write
    them to disk in clear.
@@ -122,6 +122,10 @@ that state; per-asset detail pages are **precomputed** into `Ready.assetDetails`
 - **A rejected GitHub token never blocks local data.** `Sync` records it as `SyncState.authError`
   (persistent "re-login" banner in the UI), reads/writes keep working locally (writes stay `dirty`),
   and the next successful fetch/push clears it. Only an unlock with NO local copy surfaces the error.
+- **A `dirty` working copy is never overwritten by a fetch.** It holds records the remote has never
+  seen. `Sync.mutate` merges the fetched remote into it (rather than writing the remote bytes over
+  it) and `pullIfStale` skips the pull entirely while dirty, since that path has no passphrase to
+  merge with. Asserted by `remote/SyncTest`'s two "unpushed local change" tests.
 - **Argon2id is Bouncy Castle** (pure-JVM, so host unit tests run); not `argon2kt`.
 - **Unquoted securities are never worth 0.** Valuation fallback chain (mirrors Go, asserted by
   `valuation/UnquotedTest`): market close → last statement of the (account, asset) pair (a NAV
