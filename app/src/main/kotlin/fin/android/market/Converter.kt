@@ -9,10 +9,16 @@ import java.time.LocalDate
  */
 class Converter(val fx: Map<String, PriceSeries>) {
 
-    /** How many USD one unit of [c] is worth at [d]; null when the rate is missing. */
+    /**
+     * How many USD one unit of [c] is worth at [d]; null when the rate is missing.
+     *
+     * A non-positive close is MISSING, not a rate: an exchange rate is strictly positive, and a
+     * zero served on the quote leg is divided by in [rate], handing every figure that crosses [c]
+     * an Infinity no caller tests for. Same guard as `Nowcast.liveRate`.
+     */
     private fun usdValue(c: String, d: LocalDate): Double? {
         if (c == USD) return 1.0
-        return fx[c]?.at(d)?.first
+        return fx[c]?.at(d)?.first?.takeIf { it > 0 }
     }
 
     /** The multiplier turning an amount in [from] into [to] at date [d]; null when a rate is missing. */
