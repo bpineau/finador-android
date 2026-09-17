@@ -50,6 +50,29 @@ class YahooTest {
         assertEquals(Http.USER_AGENT, req.getHeader("User-Agent"))
     }
 
+    @Test fun dailyReadsTheOpenToCloseFactors() {
+        // The open column next to the close: a day carrying both gives a factor, a day missing the
+        // open (a halted line, a source that serves none) gives nothing.
+        val body = """
+            {"chart":{"result":[{
+              "meta":{"currency":"USD"},
+              "timestamp":[1705276800,1705363200],
+              "indicators":{"quote":[{"close":[450.0, 500.0],"open":[445.5, null]}]}
+            }],"error":null}}
+        """.trimIndent()
+        server.enqueue(MockResponse().setResponseCode(200).setBody(body))
+        val data = yahoo().daily(Ref(symbol = "SPY", isin = null), LocalDate.parse("2024-01-01"))!!
+        assertEquals(1, data.openFactors.size)
+        assertEquals(LocalDate.parse("2024-01-15"), data.openFactors[0].date)
+        assertEquals(0.99, data.openFactors[0].close, 1e-12) // 445.5 / 450
+    }
+
+    @Test fun aPayloadWithoutAnOpenColumnCarriesNoFactor() {
+        server.enqueue(MockResponse().setResponseCode(200).setBody(chartBody))
+        val data = yahoo().daily(Ref(symbol = "SPY", isin = null), LocalDate.parse("2024-01-01"))!!
+        assertTrue(data.openFactors.isEmpty()) // the nowcast then stays anchored on the close
+    }
+
     @Test fun dailyWithoutSymbolIsNull() {
         assertNull(yahoo().daily(Ref(symbol = null, isin = "LU0171310443"), LocalDate.parse("2024-01-01")))
         assertEquals(0, server.requestCount) // no request made

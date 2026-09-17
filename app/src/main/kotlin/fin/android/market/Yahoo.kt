@@ -41,7 +41,12 @@ class Yahoo(
         val dividends = (r.events?.dividends?.values ?: emptyList())
             .map { DividendEvent(dateOf(it.date), it.amount) }
             .sortedBy { it.exDate }
-        return DailyData(currency = r.meta?.currency, closes = closesOf(r), dividends = dividends)
+        return DailyData(
+            currency = r.meta?.currency,
+            closes = closesOf(r),
+            dividends = dividends,
+            openFactors = openFactorsOf(r),
+        )
     }
 
     /**
@@ -170,6 +175,31 @@ class Yahoo(
         return closes
     }
 
+    /**
+     * Each session's open-to-close ratio, read off the `open` column the chart payload already
+     * carries next to the `close` one (see [DailyData.openFactors]). A day missing either print, or
+     * carrying a non-positive one, simply has no factor: the nowcast then stays on the close.
+     *
+     * The ratio is deliberately not a price. One session carries one exchange rate and one
+     * adjustment factor, both of which the division cancels, so the factor needs no currency
+     * contract and no FX plumbing of its own.
+     */
+    private fun openFactorsOf(r: ChartResponse.Result): List<PricePoint> {
+        val q = r.indicators?.quote?.firstOrNull() ?: return emptyList()
+        val opens = q.open ?: return emptyList() // a payload without the column: nothing to read
+        val closes = q.close ?: return emptyList()
+        val timestamps = r.timestamp ?: return emptyList()
+        val factors = mutableListOf<PricePoint>()
+        for (i in timestamps.indices) {
+            if (i >= opens.size || i >= closes.size) break
+            val o = opens[i] ?: continue
+            val c = closes[i] ?: continue
+            if (o <= 0 || c <= 0) continue
+            factors.add(PricePoint(dateOf(timestamps[i]), o / c))
+        }
+        return factors
+    }
+
     private fun chart(symbol: String, from: LocalDate): ChartResponse? {
         val period1 = from.atStartOfDay(ZoneOffset.UTC).toEpochSecond()
         val period2 = Instant.now().epochSecond + 86400
@@ -274,5 +304,10 @@ private data class ChartResponse(val chart: Chart) {
     data class Indicators(val quote: List<Quote>? = null)
 
     @Serializable
-    data class Quote(@SerialName("close") val close: List<Double?>? = null)
+    data class Quote(
+        @SerialName("close") val close: List<Double?>? = null,
+        // Read for the nowcast anchor of a fund struck at its proxy's opening print, as a ratio to
+        // the close of the same session; absent from some sources and some halted lines.
+        @SerialName("open") val open: List<Double?>? = null,
+    )
 }

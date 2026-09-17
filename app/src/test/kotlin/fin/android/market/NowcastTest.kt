@@ -15,6 +15,10 @@ import java.time.ZoneOffset
  * two NAVs at 50 and 51, a proxy closing at 100, 102, 104 and 106 over the same days and the two
  * that follow, a flat FX rate. The estimate must read 52 then 53, be flagged from its first day,
  * and never appear at all when the proxy cannot be read.
+ *
+ * A second fixture, further down, covers the OPEN anchor of a fund struck at its proxy's opening
+ * print: three NAVs, six proxy sessions with their opens and a flat cross, whose estimates are
+ * computed by hand from the reference's formula.
  */
 class NowcastTest {
     private fun d(s: String) = LocalDate.parse(s)
@@ -159,6 +163,116 @@ class NowcastTest {
         assertNull(stripped.estimatedFrom)
         assertNull(stripped.estimateProxy)
         assertEquals(navs, navs.withoutEstimates()) // a published series is returned untouched
+    }
+
+    // --- A fund struck at its proxy's OPENING print (ERES_DATADOG, NavAnchor.OPEN). ---
+
+    private val o1 = d("2026-09-07")
+    private val o2 = d("2026-09-08")
+    private val o3 = d("2026-09-09")
+    private val o4 = d("2026-09-10")
+    private val o5 = d("2026-09-11")
+    private val o6 = d("2026-09-12")
+    private val o7 = d("2026-09-13")
+
+    private val ddog = AirfundFunds.byTicker("ERES_DATADOG")!!
+    private val worldM = AirfundFunds.byTicker("ERESMONDEM")!! // the same fixture, close-anchored
+
+    /** THE PARITY FIXTURE: three published NAVs, the last one on o3. */
+    private val openNavs = PriceSeries(
+        listOf(PricePoint(o1, 120.0), PricePoint(o2, 121.0), PricePoint(o3, 125.0)),
+    )
+
+    private val openDays = listOf(o1, o2, o3, o4, o5, o6)
+    private val openCloses = listOf(100.0, 102.0, 125.0, 130.0, 140.0, 150.0)
+    private val openOpens = listOf(99.0, 101.0, 120.0, 128.0, 138.0, 145.0)
+
+    /** The proxy in USD, closing three days past the last NAV. */
+    private val openProxy = PriceSeries(openDays.mapIndexed { i, day -> PricePoint(day, openCloses[i]) })
+
+    /** Its sessions' open-to-close ratios, exactly as [DailyData.openFactors] carries them. */
+    private val openRatios = PriceSeries(
+        openDays.mapIndexed { i, day -> PricePoint(day, openOpens[i] / openCloses[i]) },
+    )
+
+    /** Flat FX, so what the estimates measure is the proxy's move: one euro buys 1.25 dollar. */
+    private val flatFx = Converter(
+        mapOf("EUR" to PriceSeries((0..8L).map { PricePoint(o1.plusDays(it), 1.25) })),
+    )
+
+    private fun ddogQuoteAt(day: LocalDate, price: Double) =
+        Quote("DDOG", price, day.atStartOfDay(ZoneOffset.UTC).toEpochSecond(), "USD")
+
+    /**
+     * PARITY with the Go reference (pofo c5336ac6, `nowcast_anchor: "open"`), on literals computed
+     * by hand from its formula: estimate = NAV(D) x proxy_now / (proxy_close(D) x open(D)/close(D)),
+     * the denominator being the proxy's OPEN of the day the NAV was struck on.
+     *
+     * Here the last NAV is 125 on o3, where the proxy closed at 125 and opened at 120, so every
+     * estimate divides by 120 and not by 125. The flat cross cancels on both legs.
+     */
+    @Test fun openAnchorParityWithTheGoFormula() {
+        val out = Nowcast.forward(openNavs, openProxy, ddog, flatFx, openRatios)
+        assertEquals(6, out.points.size)
+        assertEquals(135.416666667, out.points[3].close, 1e-9) // 125 x 130/120
+        assertEquals(145.833333333, out.points[4].close, 1e-9) // 125 x 140/120
+        assertEquals(156.25, out.points[5].close, 1e-9) //         125 x 150/120
+        assertEquals(o4, out.estimatedFrom)
+
+        // The live session on o7, the proxy trading at 168: the anchor is still the published NAV
+        // of o3 standing on the o3 OPEN, so 125 x 168/120 = 175.
+        val live = Nowcast.live(openNavs, openProxy, ddog, ddogQuoteAt(o7, 168.0), 1 / 1.25, flatFx, openRatios)
+        assertEquals(175.0, live.points.last().close, 1e-9)
+        assertEquals(o7, live.estimatedFrom)
+    }
+
+    @Test fun aCloseAnchoredFundIgnoresTheOpenFactors() {
+        // The same fixture read the other way: dividing by the o3 CLOSE of 125 leaves the proxy's
+        // own closes, since that close happens to equal the NAV.
+        val out = Nowcast.forward(openNavs, openProxy, worldM, flatFx, openRatios)
+        assertEquals(listOf(130.0, 140.0, 150.0), out.points.drop(3).map { round(it.close) })
+    }
+
+    @Test fun theOpenAnchorFallsBackOnTheCloseWhenNoFactorIsUsable() {
+        val withoutTheNavsDay = PriceSeries(openRatios.points.filter { it.date != o3 })
+        val nonPositive = PriceSeries(openRatios.points.map { if (it.date == o3) PricePoint(o3, 0.0) else it })
+        for (factors in listOf(null, PriceSeries(), withoutTheNavsDay, nonPositive)) {
+            val out = Nowcast.forward(openNavs, openProxy, ddog, flatFx, factors)
+            assertEquals(listOf(130.0, 140.0, 150.0), out.points.drop(3).map { round(it.close) })
+        }
+    }
+
+    @Test fun theOpenAnchorFallsBackOnTheCloseWhenTheProxyDidNotTradeOnTheNavsDay() {
+        // A forward-filled anchor has no opening print of the NAV's own day to move to.
+        val gapped = PriceSeries(openProxy.points.filter { it.date != o3 })
+        assertEquals(
+            Nowcast.forward(openNavs, gapped, ddog, flatFx, null),
+            Nowcast.forward(openNavs, gapped, ddog, flatFx, openRatios),
+        )
+    }
+
+    @Test fun liveKeepsTheCloseOnAnEstimatedAnchorDay() {
+        // The anchor day o6 is an estimate, itself built from the proxy's CLOSE of o6 (150), so the
+        // session divides by that close: 156.25 x 165/150 = 171.875, never by the o6 open of 145.
+        val estimated = Nowcast.forward(openNavs, openProxy, ddog, flatFx, openRatios)
+        val out = Nowcast.live(estimated, openProxy, ddog, ddogQuoteAt(o7, 165.0), 1 / 1.25, flatFx, openRatios)
+        assertEquals(171.875, out.points.last().close, 1e-9)
+        assertEquals(o4, out.estimatedFrom)
+    }
+
+    @Test fun liveAnchorsOnTheOpenWhenTheAnchorDayIsAPublishedNav() {
+        // The fund has caught up to o6, publishing 145 there: the anchor stands on the o6 OPEN
+        // (145, ratio 145/150), so 145 x 168/145 = 168, where the close would give 162.4.
+        val published = openNavs.merge(listOf(PricePoint(o6, 145.0)))
+        val out = Nowcast.live(published, openProxy, ddog, ddogQuoteAt(o7, 168.0), 1 / 1.25, flatFx, openRatios)
+        assertEquals(168.0, out.points.last().close, 1e-9)
+        assertEquals(o7, out.estimatedFrom)
+    }
+
+    @Test fun liveFallsBackOnTheCloseWithoutFactors() {
+        // Same quote as the parity test, no factors: 125 x 168/125 = 168 instead of 175.
+        val out = Nowcast.live(openNavs, openProxy, ddog, ddogQuoteAt(o7, 168.0), 1 / 1.25, flatFx, null)
+        assertEquals(168.0, out.points.last().close, 1e-9)
     }
 
     private fun round(v: Double) = Math.round(v * 1e9) / 1e9
