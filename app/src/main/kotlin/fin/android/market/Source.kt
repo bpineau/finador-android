@@ -34,11 +34,21 @@ data class Quote(
     val offHours: Session.Print? = null,
 )
 
-/** Daily market data for one instrument: quotation [currency] (may be null), [closes] and [dividends]. */
+/**
+ * Daily market data for one instrument: quotation [currency] (may be null), [closes] and
+ * [dividends], plus the [openFactors] a provider can establish.
+ *
+ * [openFactors] is each session's open-to-close RATIO, dated on the session, not a price: only the
+ * nowcast of a fund struck at its proxy's OPENING print reads it ([Nowcast]), the ratio being all
+ * such an anchor needs and the one form that carries no currency and no adjustment of its own. It
+ * is empty for a provider that serves no opening price, it is never merged into a price series and
+ * nothing stores it, so no asset gains a stored field from it.
+ */
 data class DailyData(
     val currency: String?,
     val closes: List<PricePoint>,
     val dividends: List<DividendEvent> = emptyList(),
+    val openFactors: List<PricePoint> = emptyList(),
 )
 
 /**
