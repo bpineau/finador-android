@@ -147,12 +147,21 @@ object Quotes {
         // The nowcast proxies. Fetched whether or not the user holds them, since standing in for a
         // fund's unpublished days is all they are here for; cached under a reserved key.
         val proxies = fundTargets.values.distinctBy { it.proxy }
+        // proxy symbol → its sessions' open-to-close ratios, for the funds struck at the open.
+        // Held for this pass only: an estimate is never cached, and neither is what anchors it.
+        val openFactors = LinkedHashMap<String, PriceSeries>()
         for (fund in proxies) {
             val key = Nowcast.proxyKey(fund.proxy)
-            val daily = multi.daily(Ref(fund.proxy, null), fetchFrom(prices[key], from)) ?: continue
+            // A fund struck at the open needs the proxy's opening print of its last NAV's day, a
+            // couple of business days back, which an incremental window starting at the last cached
+            // close would not reach. Widening it costs no extra call, only a few closes to merge.
+            var start = fetchFrom(prices[key], from)
+            if (fund.navAnchor == NavAnchor.OPEN) start = minOf(start, now.minusDays(ANCHOR_WINDOW_DAYS))
+            val daily = multi.daily(Ref(fund.proxy, null), start) ?: continue
             // Same contract: the proxy's declared currency is what the nowcast converts FROM.
             if (daily.currency != null && daily.currency != fund.proxyCcy) continue
             prices[key] = (prices[key] ?: PriceSeries()).merge(daily.closes).copy(fetchedAt = now)
+            if (daily.openFactors.isNotEmpty()) openFactors[fund.proxy] = PriceSeries(daily.openFactors)
         }
 
         for (ccy in currencies) {
@@ -165,7 +174,8 @@ object Quotes {
         val converter = Converter(fx)
         for ((assetId, fund) in fundTargets) {
             val series = prices[assetId] ?: continue
-            prices[assetId] = Nowcast.forward(series, prices[Nowcast.proxyKey(fund.proxy)], fund, converter)
+            prices[assetId] = Nowcast
+                .forward(series, prices[Nowcast.proxyKey(fund.proxy)], fund, converter, openFactors[fund.proxy])
         }
 
         // One batched call for every live price: securities, nowcast proxies and FX alike.
@@ -211,7 +221,7 @@ object Quotes {
             if (q.currency != null && q.currency != fund.proxyCcy) continue
             val rate = Nowcast.liveRate(quotes, fund.proxyCcy, fund.ccy)
             prices[assetId] = Nowcast
-                .live(series, prices[Nowcast.proxyKey(fund.proxy)], fund, q, rate, liveConverter)
+                .live(series, prices[Nowcast.proxyKey(fund.proxy)], fund, q, rate, liveConverter, openFactors[fund.proxy])
                 .copy(fetchedAt = now)
         }
 
@@ -229,6 +239,13 @@ object Quotes {
         if (first.isAfter(floor)) return floor
         return cached.points.last().date
     }
+
+    /**
+     * How far back a proxy's daily window is widened for a fund struck at the OPEN: enough to hold
+     * the opening print of the last published NAV's day, which lands about two business days late
+     * (a long week-end plus a holiday is the worst case this covers).
+     */
+    private const val ANCHOR_WINDOW_DAYS = 14L
 
     /** The civil day of an epoch-second instant, in UTC - the convention the whole client uses. */
     private fun dateOf(epochSeconds: Long): LocalDate =

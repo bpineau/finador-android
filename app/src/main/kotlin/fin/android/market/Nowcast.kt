@@ -22,6 +22,17 @@ import java.time.ZoneOffset
  *   last point is what keeps a session from being counted twice once the proxy's daily close for
  *   the same day has landed.
  *
+ * THE ANCHOR is that timing made explicit. Both estimates are the last published NAV times the
+ * proxy's move SINCE THE PRINT THAT NAV WAS STRUCK ON, which the fund's record names
+ * ([AirfundFund.navAnchor]): the proxy's close of the NAV's day by default, its OPEN for a fund
+ * whose valuation rules price its holding at the opening of the valuation day. Anchoring such a
+ * fund on the close would carry that session's open-to-close move as an offset for as long as the
+ * NAV is the last one. The open reaches the estimate as a ratio ([DailyData.openFactors]), which is
+ * currency- and adjustment-independent, so nothing here converts it; and it is a best effort: a day
+ * the proxy did not trade, a source with no opening print and a failed fetch all leave the estimate
+ * anchored on the close, never in error. An ESTIMATED day is anchored on the close whatever the
+ * record says, being itself built from that close.
+ *
  * What the estimate deliberately ignores: the fund's own charge (well under a cent over the few
  * days involved) and the proxy's tracking of the fund, which [AirfundFunds] quantifies per fund.
  * A proxy that cannot be read is not an error - the series simply ends at its last published NAV.
@@ -37,7 +48,8 @@ object Nowcast {
 
     /**
      * [series] extended to the proxy's last close, each added day carrying the proxy's return
-     * converted into the fund's currency.
+     * converted into the fund's currency, measured from the print the last NAV was struck on
+     * ([openFactors] supplying the open-to-close ratios an [NavAnchor.OPEN] fund needs).
      *
      * Returns [series] untouched when there is nothing to add: no NAV yet, no proxy series, no
      * proxy close on or before the last NAV to anchor on, or no proxy close after it. [series] must
@@ -48,11 +60,18 @@ object Nowcast {
         proxy: PriceSeries?,
         fund: AirfundFund,
         converter: Converter,
+        openFactors: PriceSeries? = null,
     ): PriceSeries {
         val last = series.points.lastOrNull() ?: return series
         if (proxy == null || proxy.points.isEmpty()) return series
-        val base = proxy.at(last.date)?.let { (close, on) -> convert(close, on, fund, converter) } ?: return series
+        val (anchorClose, anchorOn) = proxy.at(last.date) ?: return series
+        var base = convert(anchorClose, anchorOn, fund, converter) ?: return series
         if (base <= 0) return series
+        // The published NAV was struck on the proxy's open of its own day, so the anchor moves back
+        // there. A forward-filled close (a day the proxy did not trade) has no open of that day.
+        if (fund.navAnchor == NavAnchor.OPEN && anchorOn == last.date) {
+            base *= openFactor(openFactors, last.date)
+        }
         val tail = proxy.points
             .filter { it.date.isAfter(last.date) }
             .mapNotNull { p ->
@@ -80,6 +99,10 @@ object Nowcast {
      * the fact, an estimate of the same day would replace it with a worse number AND label it an
      * estimate, and [PriceSeries.withoutEstimates] would then drop a real NAV on its way to disk.
      * Only the days past the last published one belong to the nowcast.
+     *
+     * The anchor moves to the proxy's OPEN ([openFactors]) only for an [NavAnchor.OPEN] fund whose
+     * anchor day is a PUBLISHED NAV: an estimated day was itself built from the proxy's close of
+     * that day, so it keeps it.
      */
     fun live(
         series: PriceSeries,
@@ -88,6 +111,7 @@ object Nowcast {
         quote: Quote,
         rate: Double?,
         converter: Converter,
+        openFactors: PriceSeries? = null,
     ): PriceSeries {
         if (proxy == null || quote.price <= 0) return series
         val session = Instant.ofEpochSecond(quote.time).atZone(ZoneOffset.UTC).toLocalDate()
@@ -95,8 +119,12 @@ object Nowcast {
         if (lastPublished != null && !session.isAfter(lastPublished)) return series
         val (anchor, on) = series.at(session.minusDays(1)) ?: return series
         if (anchor <= 0) return series
-        val anchorProxy = proxy.at(on)?.let { (close, day) -> convert(close, day, fund, converter) } ?: return series
+        val (proxyClose, proxyOn) = proxy.at(on) ?: return series
+        var anchorProxy = convert(proxyClose, proxyOn, fund, converter) ?: return series
         if (anchorProxy <= 0) return series
+        if (fund.navAnchor == NavAnchor.OPEN && !series.isEstimatedAt(on) && proxyOn == on) {
+            anchorProxy *= openFactor(openFactors, on)
+        }
         val liveRate = rate ?: converter.rate(fund.proxyCcy, fund.ccy, session) ?: return series
         val point = PricePoint(session, anchor * quote.price * liveRate / anchorProxy)
         val merged = series.merge(listOf(point))
@@ -124,6 +152,21 @@ object Nowcast {
         val q = quotes["${ccy}USD=X"] ?: return null
         if (q.currency != null && q.currency != Converter.USD) return null
         return q.price.takeIf { it > 0 }
+    }
+
+    /**
+     * The factor that moves a value standing on the proxy's CLOSE of [day] to the same value
+     * standing on its OPEN of that session, read off [factors] ([DailyData.openFactors]).
+     *
+     * 1.0 - the close, unchanged - whenever no usable factor exists for that EXACT day: no factor
+     * series at all (a fetch failure, a provider serving no opening price), a day the proxy did not
+     * trade, or a non-positive ratio. The estimate then keeps its close anchor rather than failing.
+     */
+    private fun openFactor(factors: PriceSeries?, day: LocalDate): Double {
+        val points = factors?.points ?: return 1.0
+        val i = points.binarySearchBy(day) { it.date }
+        if (i < 0) return 1.0
+        return points[i].close.takeIf { it > 0 } ?: 1.0
     }
 
     /** One proxy close in the fund's currency, at the rate of the close's own day. */
