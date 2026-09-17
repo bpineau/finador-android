@@ -20,6 +20,7 @@ import java.time.LocalDate
  * [proxy] is the nowcast proxy: a listed instrument, quoted in [proxyCcy], whose moves stand in for
  * the fund between its last published NAV and now (see [Nowcast]). It is chosen for TIMING rather
  * than for a perfect fee match: the NAV must be struck against the same session the proxy closes on.
+ * [navAnchor] names which print of that session the NAV is struck on.
  */
 data class AirfundFund(
     val ticker: String,
@@ -28,7 +29,19 @@ data class AirfundFund(
     val proxyCcy: String,
     val ccy: String,
     val name: String,
+    val navAnchor: NavAnchor = NavAnchor.CLOSE,
 )
+
+/**
+ * Which print of its nowcast proxy a fund's NAV of a day is struck on.
+ *
+ * [CLOSE] is the convention of a fund valued after its market has closed, and the default.
+ * [OPEN] belongs to a fund whose valuation rules name the OPENING price of the valuation day: its
+ * nowcast must leave that session's open-to-close move out of the anchor, else the move stays on
+ * the estimate for as long as that NAV is the last one (see [Nowcast], and the Go reference's
+ * `nowcast_anchor` catalog field).
+ */
+enum class NavAnchor { CLOSE, OPEN }
 
 /**
  * The known FCPE share classes and their nowcast proxies. Both entries are measured in the Go
@@ -39,9 +52,11 @@ data class AirfundFund(
  *   correlates 0.875 daily with the fund, where a Xetra or LSE line correlates 0.62 or less
  *   (they close before the US afternoon). Hence a NYSE Arca proxy rather than a European one.
  * - `ERES_DATADOG` is a single-stock fund whose NAV is struck on the NASDAQ OPENING price, not the
- *   close. A close-anchored estimate therefore carries the valuation day's open-to-close move as an
- *   offset until the next NAV lands: typically a percent, more on an earnings day. It also valued
- *   WEEKLY (Fridays) until 2026-07-13, and daily since.
+ *   close, which is why it carries [NavAnchor.OPEN]: the estimate stands on the proxy's opening
+ *   print of the last NAV's day. A close-anchored one would carry that day's open-to-close move as
+ *   an offset until the next NAV lands (typically a percent, more on an earnings day; measured on
+ *   the fund's 264 NAV spans since 2022-04-11, 3.8 % rmse on the close against 2.8 % on the open).
+ *   It also valued WEEKLY (Fridays) until 2026-07-13, and daily since.
  *
  * Both NAVs are published with a lag of about two business days, which is the whole reason the
  * nowcast exists.
@@ -63,6 +78,7 @@ object AirfundFunds {
             proxyCcy = "USD",
             ccy = "EUR",
             name = "Actions Datadog, Part C",
+            navAnchor = NavAnchor.OPEN,
         ),
     )
 
