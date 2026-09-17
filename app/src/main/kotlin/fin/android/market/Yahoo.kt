@@ -162,14 +162,20 @@ class Yahoo(
         return PriceSeries(points)
     }
 
-    /** Pairs the result's timestamps with its close values, skipping holidays (null closes). */
+    /**
+     * Pairs the result's timestamps with its close values, skipping the days that carry no usable
+     * one: a null (a holiday) and a non-positive number alike. A zero close is served on halted and
+     * freshly listed lines, and it is not a price - stored, it would show a held position as worth
+     * nothing, and on an FX series every conversion crossing that currency would divide by it (the
+     * same rule as the live quotes' own `price <= 0` guard, and as [Converter]'s).
+     */
     private fun closesOf(r: ChartResponse.Result): List<PricePoint> {
         val quoteCloses = r.indicators?.quote?.firstOrNull()?.close ?: return emptyList()
         val timestamps = r.timestamp ?: return emptyList()
         val closes = mutableListOf<PricePoint>()
         for (i in timestamps.indices) {
             if (i >= quoteCloses.size) break
-            val c = quoteCloses[i] ?: continue // holiday or missing close
+            val c = quoteCloses[i]?.takeIf { it > 0 } ?: continue // holiday, or no usable close
             closes.add(PricePoint(dateOf(timestamps[i]), c))
         }
         return closes
