@@ -45,7 +45,14 @@ class Sync(
         stateFile.writeText(json.encodeToString(SyncState.serializer(), s))
     }
 
-    /** Pulls into the working copy if online and stale (missing copy, past readPullAfter). */
+    /**
+     * Pulls into the working copy if online and stale (missing copy, past readPullAfter).
+     *
+     * A DIRTY working copy is never pulled over: it carries records the remote has never seen, and
+     * a pull writes the remote bytes verbatim - this path holds no passphrase, so it cannot merge
+     * either side. Reconciling the two is [mutate]'s and [sync]'s job, and both do merge; until one
+     * of them runs, reading a slightly stale unpushed copy is strictly better than losing it.
+     */
     fun pullIfStale() {
         val st = state()
         val sinceLastPull = st.lastPull?.let { Duration.between(Instant.parse(it), now()) }
@@ -54,6 +61,7 @@ class Sync(
         val fresh = workingCopy.exists() && sinceLastPull != null &&
             !sinceLastPull.isNegative && sinceLastPull < readPullAfter
         if (fresh) return
+        if (st.dirty && workingCopy.exists()) return
         try {
             val f = backend.fetch()
             writeCopy(f.data)
@@ -89,10 +97,19 @@ class Sync(
         fn: (Ledger) -> Ledger,
     ): SyncOutcome {
         var st = state()
-        // Pull fresh first so we mutate on top of the latest remote (best-effort when online).
+        // Pull fresh first so we mutate on top of the latest remote (best-effort when online). An
+        // UNPUSHED local copy is merged with the remote rather than replaced by it: overwriting it
+        // would drop every record an offline (or auth-rejected) write left behind, which the dirty
+        // flag exists to protect.
         try {
             val f = backend.fetch()
-            writeCopy(f.data)
+            if (st.dirty && workingCopy.exists()) {
+                val merged = Ledger.open(workingCopy.readBytes(), passphrase)
+                    .merge(Ledger.open(f.data, passphrase), resolve)
+                writeCopy(merged.toBytes())
+            } else {
+                writeCopy(f.data)
+            }
             st = st.copy(sha = f.version, lastPull = now().toString(), authError = null)
             saveState(st)
         } catch (e: RemoteError.Missing) {

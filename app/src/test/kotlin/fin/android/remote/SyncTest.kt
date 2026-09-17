@@ -58,6 +58,8 @@ class SyncTest {
     private fun emptyLedgerBytes() = Ledger.create(pw, t = 1, m = 8).toBytes()
     private fun addDeposit(l: Ledger) =
         l.addTransaction(LocalDate.parse("2026-01-01"), "acc", null, TxKind.deposit, BigDecimal.ZERO, Money(BigDecimal("100"), "EUR"))
+    private fun addWithdraw(l: Ledger) =
+        l.addTransaction(LocalDate.parse("2026-02-01"), "acc", null, TxKind.withdraw, BigDecimal.ZERO, Money(BigDecimal("40"), "EUR"))
 
     @Test
     fun openForReadPullsWhenAbsent() {
@@ -137,6 +139,40 @@ class SyncTest {
         assertNull("healthy auth clears the banner", st.authError)
         assertFalse(st.dirty)
         assertEquals(1, Ledger.open(be.data!!, pw).book.txs.size) // the kept-local change reached the remote
+    }
+
+    // ---- an unpushed (dirty) working copy must survive every fetch ----
+
+    /** Offline write, then an online write: the fetch must not replace the unpushed record. */
+    @Test
+    fun mutateMergesOverAnUnpushedLocalChange() {
+        val base = emptyLedgerBytes()
+        val be = FakeBackend().apply { data = base; version = 1 }
+        wc.writeBytes(base)
+
+        be.offline = true
+        assertTrue(sync(be).mutate(pw, "add 1") { addDeposit(it) }.dirty)
+
+        be.offline = false
+        val out = sync(be).mutate(pw, "add 2") { addWithdraw(it) }
+        assertTrue(out.pushed)
+        assertEquals("both records reached the remote", 2, Ledger.open(be.data!!, pw).book.txs.size)
+        assertEquals(2, Ledger.open(wc.readBytes(), pw).book.txs.size)
+    }
+
+    /** A stale read after an offline write: the pull must not discard the unpushed record. */
+    @Test
+    fun pullKeepsAnUnpushedLocalChange() {
+        val base = emptyLedgerBytes()
+        val be = FakeBackend().apply { data = base; version = 1 }
+        wc.writeBytes(base)
+
+        be.offline = true
+        assertTrue(sync(be).mutate(pw, "add") { addDeposit(it) }.dirty)
+
+        be.offline = false
+        assertEquals(1, sync(be).openForRead(pw).book.txs.size)
+        assertTrue("still unpushed", sync(be).state().dirty)
     }
 
     @Test
