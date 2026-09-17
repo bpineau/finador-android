@@ -141,9 +141,17 @@ class Yahoo(
         }
     }
 
-    /** Quotes `"{ccy}USD=X"` and returns its close series - the value of one unit of [ccy] in USD. */
+    /**
+     * Quotes `"{ccy}USD=X"` and returns its close series - the value of one unit of [ccy] in USD.
+     *
+     * A cross the venue serves in any other currency is refused (null): an FX series holds the USD
+     * value of one unit, so a mis-denominated one would corrupt every conversion crossing it, for
+     * every asset at once. Mirrors the FX guard of the Go reference's `market/refresh.go`.
+     */
     fun fxToUsd(ccy: String, from: LocalDate): PriceSeries? {
         val r = chart("${ccy}USD=X", from)?.chart?.result?.firstOrNull() ?: return null
+        val quoted = r.meta?.currency
+        if (quoted != null && quoted != "USD") return null
         val points = closesOf(r)
         if (points.isEmpty()) return null
         return PriceSeries(points)
