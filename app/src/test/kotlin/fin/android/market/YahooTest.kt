@@ -73,6 +73,39 @@ class YahooTest {
         assertTrue(data.openFactors.isEmpty()) // the nowcast then stays anchored on the close
     }
 
+    /**
+     * A zero (or negative) close is a missing point, exactly like the null one: a provider serves
+     * it on a halted or freshly listed line, and it is not a price. Stored, it would print a 0 in
+     * a total, and on an FX series it would divide every conversion crossing that currency.
+     */
+    @Test fun dailySkipsANonPositiveClose() {
+        val body = """
+            {"chart":{"result":[{
+              "meta":{"currency":"USD"},
+              "timestamp":[1705276800,1705363200],
+              "indicators":{"quote":[{"close":[0.0, 450.0]}]}
+            }],"error":null}}
+        """.trimIndent()
+        server.enqueue(MockResponse().setResponseCode(200).setBody(body))
+        val data = yahoo().daily(Ref(symbol = "SPY", isin = null), LocalDate.parse("2024-01-01"))!!
+        assertEquals(1, data.closes.size)
+        assertEquals(LocalDate.parse("2024-01-16"), data.closes[0].date)
+        assertEquals(450.0, data.closes[0].close, 0.0)
+    }
+
+    @Test fun fxToUsdSkipsANonPositiveClose() {
+        val body = """
+            {"chart":{"result":[{
+              "meta":{"currency":"USD"},
+              "timestamp":[1705276800,1705363200],
+              "indicators":{"quote":[{"close":[-1.0, 1.085]}]}
+            }],"error":null}}
+        """.trimIndent()
+        server.enqueue(MockResponse().setResponseCode(200).setBody(body))
+        val series = yahoo().fxToUsd("EUR", LocalDate.parse("2024-01-01"))!!
+        assertEquals(listOf(1.085), series.points.map { it.close })
+    }
+
     @Test fun dailyWithoutSymbolIsNull() {
         assertNull(yahoo().daily(Ref(symbol = null, isin = "LU0171310443"), LocalDate.parse("2024-01-01")))
         assertEquals(0, server.requestCount) // no request made
