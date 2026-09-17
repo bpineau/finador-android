@@ -70,7 +70,7 @@ market/valuation` layers are **pure Kotlin (no Android imports)** → fast to un
 | `crypto/` | Argon2, Hkdf, AesGcm, Hashes, Bytes, Ids | KDF, AEAD, base64, Crockford ids | ✅ |
 | `domain/` | Models, Money, MarketData | data model (BigDecimal money, enums, Book) | ✅ |
 | `format/` | Header, Kdf, Wire, Log, Replay, Writer, Merge, Ledger | read/write the `.fin` (AAD-chained records, fold, diff-on-save, union+LWW merge) | ✅ |
-| `market/` | Yahoo, Ft, Morningstar, Airfund, Nowcast, Session, MultiSource, Converter, FxRates, CacheSidecar, Quotes, Source | fetch quotes (JSON + a Boursorama regex), FX via USD, FINCACHE2 cache; `Airfund` = the NAV feed of the employee-savings funds (FCPE) no quote site covers, with a bundled offline baseline; `Nowcast` = the estimated tail those funds need between their last published NAV and now; `FxRates` = the display-only read-back of the rates a valuation crossed at (`AppState.Ready.fxRates`, a caption under the total); `Session` + `Quotes.refreshExtended` = the extended-hours opt-in (Settings → Display, off by default), parity with the Go `value --extended`: a US pre/post-market print prices the line and the total when it is fresher than the regular one, labelled "pre 08:14" / "post 19:59" and NEVER stored (the same pass stores exactly what the plain one does) | ✅ |
+| `market/` | Yahoo, Ft, Morningstar, Airfund, Nowcast, Session, MultiSource, Converter, FxRates, CacheSidecar, Quotes, Source | fetch quotes (JSON + a Boursorama regex), FX via USD, FINCACHE2 cache; `Airfund` = the NAV feed of the employee-savings funds (FCPE) no quote site covers, with a bundled offline baseline; `Nowcast` = the estimated tail those funds need between their last published NAV and now, anchored on the print that NAV was struck on (`AirfundFund.navAnchor`: the proxy's close by default, its OPEN for a fund valued at its holding's opening price, as `ERES_DATADOG` is); `FxRates` = the display-only read-back of the rates a valuation crossed at (`AppState.Ready.fxRates`, a caption under the total); `Session` + `Quotes.refreshExtended` = the extended-hours opt-in (Settings → Display, off by default), parity with the Go `value --extended`: a US pre/post-market print prices the line and the total when it is fresher than the regular one, labelled "pre 08:14" / "post 19:59" and NEVER stored (the same pass stores exactly what the plain one does) | ✅ |
 | `valuation/` | Valuator, Perf, Gains | gross/tax/net, TWR/XIRR/etc., period & per-asset gains, asset detail | ✅ |
 | `remote/` | Backend, GitHubBackend, RemoteConfig, Sync | GitHub Contents API, pull/mutate/push + conflict→merge + offline-dirty | Android-light |
 | `data/` | AppContainer, AppRepository, AppState, SecretStore | manual DI, the single facade, Keystore-encrypted secrets | Android |
@@ -90,9 +90,10 @@ that state; per-asset detail pages are **precomputed** into `Ready.assetDetails`
   the parity test.
 - **A quote source / parsing** → `market/{Yahoo,Ft,Morningstar,Airfund}.kt`; fixtures in the market tests.
 - **Another employee-savings fund (FCPE)** → one entry in `market/Airfund.kt`'s `AirfundFunds.ALL`
-  (share code + nowcast proxy) plus its NAV baseline in
-  `app/src/main/resources/fin/android/market/<TICKER>-NAV.csv`, copied from the Go reference's
-  `refdata/`. The ledger asset just carries the ticker; nothing else changes.
+  (share code + nowcast proxy, plus `navAnchor = NavAnchor.OPEN` when the fund's valuation rules
+  name its holding's OPENING price, mirroring the Go catalog's `nowcast_anchor`) plus its NAV
+  baseline in `app/src/main/resources/fin/android/market/<TICKER>-NAV.csv`, copied from the Go
+  reference's `refdata/`. The ledger asset just carries the ticker; nothing else changes.
 - **Sync behaviour** (conflict, offline, pull cadence) → `remote/Sync.kt`.
 - **A screen / styling** → `ui/<Screen>.kt`; colors/typography in `ui/Theme.kt`
   (accent = terracotta `#C2613C`; gain/loss via `gainLossColor(...)`); number formatting in `ui/Format.kt`.
@@ -111,6 +112,13 @@ that state; per-asset detail pages are **precomputed** into `Ready.assetDetails`
   field). Anything showing an estimated price must SAY it is one, as `AssetDetailScreen` does.
   The proxies are fetched even when the user holds none of them, cached under `proxy:<SYMBOL>` in
   `MarketData.prices` (no ledger id can collide: those are Crockford base32).
+- **A nowcast anchors on the print the NAV was struck on**, not always on a close. A fund carrying
+  `NavAnchor.OPEN` (`ERES_DATADOG`, valued at the NASDAQ opening price) divides by the proxy's OPEN
+  of the last NAV's day, which reaches the estimate as the session's open-to-close RATIO
+  (`DailyData.openFactors`, read off the Yahoo chart payload's `open` column, held for one pass and
+  stored nowhere, so no asset gains a cached field). Every failure mode falls back on the close and
+  none is an error: no `open` column, a day the proxy did not trade, a failed fetch. An ESTIMATED
+  anchor day keeps the close it was built from, and a nowcast still never overwrites a published NAV.
 - **The market cache is NOT synced** (per-device, regenerable). A freshly synced device has the
   ledger but no prices until `refreshQuotes` runs → period gains read ~0 until quotes load, and
   statement-valued assets (property, cash) have no market "performance" by design.
