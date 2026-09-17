@@ -125,6 +125,11 @@ object Quotes {
                 asset.ticker?.let { spotTargets[asset.id] = it to asset.ccy }
             }
             val daily = multi.daily(Ref(asset.ticker, asset.isin), fetchFrom(prices[asset.id], from)) ?: continue
+            // The declared currency is the contract here exactly as it is on the spot pass below: a
+            // series served in another currency (Yahoo's GBp pence metadata, an FT twin listing)
+            // would be merged into a series the valuation reads as the declared one, and persisted.
+            // Skipping leaves `fetchedAt` unstamped, so a later run tries again (mirrors Go).
+            if (daily.currency != null && daily.currency != asset.ccy) continue
             prices[asset.id] = (prices[asset.id] ?: PriceSeries()).merge(daily.closes).copy(fetchedAt = now)
             if (daily.dividends.isNotEmpty()) {
                 // Upsert by ex-date (mirror Go's mergeDividends): an incremental fetch returns only a
@@ -145,6 +150,8 @@ object Quotes {
         for (fund in proxies) {
             val key = Nowcast.proxyKey(fund.proxy)
             val daily = multi.daily(Ref(fund.proxy, null), fetchFrom(prices[key], from)) ?: continue
+            // Same contract: the proxy's declared currency is what the nowcast converts FROM.
+            if (daily.currency != null && daily.currency != fund.proxyCcy) continue
             prices[key] = (prices[key] ?: PriceSeries()).merge(daily.closes).copy(fetchedAt = now)
         }
 
