@@ -128,6 +128,50 @@ class QuotesTest {
         assertFalse("USD needs no series (it is the pivot)", out.fx.containsKey("USD"))
     }
 
+    /**
+     * The declared currency is the contract on the DAILY pass too, not only on the spot one: a
+     * provider answering in another currency (Yahoo's GBp pence metadata, an FT twin listing) would
+     * otherwise have its whole close series merged into a series the valuation reads as the declared
+     * currency - a position wrong by the cross, and persisted. Mirrors the guard of the Go
+     * reference's `internal/market/refresh.go`.
+     */
+    @Test fun offCurrencyDailySeriesIsIgnored() {
+        val provider = FakeProvider(
+            DailyData(
+                currency = "GBp", // "AA" is declared in USD
+                closes = listOf(PricePoint(d("2026-06-02"), 12345.0)),
+                dividends = listOf(DividendEvent(d("2026-05-01"), 2.0)),
+            ),
+        )
+        val out = Quotes.refresh(
+            book(), null, from = d("2026-01-01"), now = d("2026-06-03"),
+            multi = MultiSource(listOf(provider)), yahoo = yahoo(),
+        )
+        assertNull("off-currency closes must not reach the cache", out.prices["aa"])
+        assertNull("nor its dividends", out.dividends["aa"])
+        // The rejected currency must not drag an FX series along either.
+        assertFalse(out.fx.containsKey("GBp"))
+    }
+
+    /** A cached series survives an off-currency answer untouched: the refresh simply adds nothing. */
+    @Test fun offCurrencyDailySeriesLeavesTheCachedOneIntact() {
+        val provider = FakeProvider(
+            DailyData(currency = "GBp", closes = listOf(PricePoint(d("2026-06-02"), 12345.0))),
+        )
+        val existing = MarketData(
+            prices = mapOf(
+                "aa" to PriceSeries(listOf(PricePoint(d("2026-06-01"), 100.0)), fetchedAt = d("2026-06-01")),
+            ),
+        )
+        val out = Quotes.refresh(
+            book(), existing, from = d("2026-01-01"), now = d("2026-06-03"),
+            multi = MultiSource(listOf(provider)), yahoo = yahoo(),
+        )
+        assertEquals(listOf(100.0), out.prices["aa"]!!.points.map { it.close })
+        // fetchedAt stays unstamped, so a later run tries again (as the Go reference does).
+        assertEquals(d("2026-06-01"), out.prices["aa"]!!.fetchedAt)
+    }
+
     @Test fun refreshedDividendOverwritesSameExDate() {
         val provider = FakeProvider(
             DailyData(

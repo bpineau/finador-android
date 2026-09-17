@@ -72,6 +72,19 @@ class YahooTest {
         assertTrue(req.path!!.startsWith("/v8/finance/chart/EURUSD%3DX?") || req.path!!.startsWith("/v8/finance/chart/EURUSD=X?"))
     }
 
+    /** An FX series holds the USD value of one unit: a cross served in anything else is refused. */
+    @Test fun fxToUsdRejectsANonUsdCross() {
+        val fxBody = """
+            {"chart":{"result":[{
+              "meta":{"currency":"GBP"},
+              "timestamp":[1705276800],
+              "indicators":{"quote":[{"close":[0.855]}]}
+            }],"error":null}}
+        """.trimIndent()
+        server.enqueue(MockResponse().setResponseCode(200).setBody(fxBody))
+        assertNull(yahoo().fxToUsd("EUR", LocalDate.parse("2024-01-01")))
+    }
+
     @Test fun retriesOnceOn500() {
         server.enqueue(MockResponse().setResponseCode(503))
         server.enqueue(MockResponse().setResponseCode(200).setBody(chartBody))
