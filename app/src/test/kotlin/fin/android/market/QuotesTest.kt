@@ -331,6 +331,46 @@ class QuotesTest {
         assertEquals("URTH", series.estimateProxy)
     }
 
+    @Test fun aFundStruckAtTheOpenIsEstimatedFromTheProxysOpen() {
+        // The single-stock FCPE carries NavAnchor.OPEN, so its tail divides by the proxy's OPEN of
+        // the last NAV's day (101), not by that day's close (102) - the Go reference's own literals.
+        val book = Book(
+            accounts = mapOf("pee" to Account("pee", "PEE", "EUR", TaxRule.None)),
+            assets = mapOf(
+                "ddog" to Asset("ddog", AssetKind.SECURITY, "Datadog C", ticker = "ERES_DATADOG", ccy = "EUR"),
+            ),
+        )
+        val days = listOf(d("2026-08-17"), d("2026-08-18"), d("2026-08-19"), d("2026-08-20"))
+        val closes = listOf(100.0, 102.0, 104.0, 106.0)
+        val opens = listOf(99.0, 101.0, 103.0, 105.0)
+        val provider = BySymbolProvider(
+            mapOf(
+                "ERES_DATADOG" to DailyData(
+                    currency = "EUR",
+                    closes = listOf(PricePoint(days[0], 50.0), PricePoint(days[1], 51.0)),
+                ),
+                "DDOG" to DailyData(
+                    currency = "USD",
+                    closes = days.mapIndexed { i, day -> PricePoint(day, closes[i]) },
+                    openFactors = days.mapIndexed { i, day -> PricePoint(day, opens[i] / closes[i]) },
+                ),
+            ),
+        )
+
+        val out = Quotes.refresh(
+            book, MarketData(), from = d("2026-01-01"), now = d("2026-08-20"),
+            multi = MultiSource(listOf(provider)), yahoo = yahoo(),
+        )
+
+        val series = out.prices["ddog"]!!
+        assertEquals(51 * 104 / 101.0, series.points[2].close, 1e-9)
+        assertEquals(51 * 106 / 101.0, series.points[3].close, 1e-9)
+        assertEquals(d("2026-08-19"), series.estimatedFrom)
+        // The factors anchor the estimate and are stored nowhere: the proxy's cached series holds
+        // its closes alone.
+        assertEquals(closes, out.prices[Nowcast.proxyKey("DDOG")]!!.points.map { it.close })
+    }
+
     @Test fun theEstimatedTailIsRecomputedNotCompounded() {
         val first = Quotes.refresh(
             fcpeBook(), MarketData(), from = d("2026-01-01"), now = d("2026-08-20"),
