@@ -170,8 +170,17 @@ class AppRepository(private val container: AppContainer) {
         refreshQuotesLocked() // already holding the lock
     }
 
-    fun assetDetail(assetId: String): AssetDetail? =
-        ledger?.let { Gains.assetDetail(it.book, market, container.loadConfig().displayCurrency, LocalDate.now(), assetId) }
+    /**
+     * One asset's detail, computed on demand (the fallback behind [AppState.Ready.assetDetails]).
+     * It stands on the same off-hours prints as the last emitted valuation, so the page a holder
+     * opens never contradicts the row they tapped.
+     */
+    fun assetDetail(assetId: String): AssetDetail? = ledger?.let {
+        Gains.assetDetail(
+            it.book, market, container.loadConfig().displayCurrency, LocalDate.now(), assetId,
+            priceOverrides = offHours.mapValues { p -> p.value.price },
+        )
+    }
 
     suspend fun addTransaction(
         date: LocalDate, accountId: String, assetId: String?, kind: TxKind,
@@ -284,18 +293,28 @@ class AppRepository(private val container: AppContainer) {
         val l = ledger ?: return
         val today = LocalDate.now()
         val ref = container.loadConfig().displayCurrency // null → engine falls back to book/EUR
+        // One screen, one price: the off-hours prints still in force drive the valuation AND every
+        // figure shown beside it (the gains table's value column, each detail page's price/value).
+        // Performance - [computePerf], the day move, the period gains - stays on published closes.
+        val prints = offHours
+        val overrides = prints.mapValues { it.value.price }
         val valuation = Valuator.value(
             l.book, market, referenceCcy = ref, at = today, byGroup = true,
-            priceOverrides = offHours.mapValues { it.value.price },
+            priceOverrides = overrides,
         )
         val perf = computePerf(l.book, today, ref)
         // Gains are a pure read over the same engine; never let them crash the UI.
-        val gains = runCatching { Gains.report(l.book, market, referenceCcy = ref, today = today) }.getOrNull()
+        val gains = runCatching {
+            Gains.report(l.book, market, referenceCcy = ref, today = today, priceOverrides = overrides)
+        }.getOrNull()
         // Precompute every held-security detail now (reusing the valuation's positions, so no extra
         // book folds) - opening an asset's page is then an instant map lookup, not a computation.
         val assetDetails = runCatching {
             l.book.assets.values
-                .mapNotNull { a -> Gains.assetDetail(l.book, market, ref, today, a.id, valuation.positions)?.let { a.id to it } }
+                .mapNotNull { a ->
+                    Gains.assetDetail(l.book, market, ref, today, a.id, valuation.positions, overrides)
+                        ?.let { a.id to it }
+                }
                 .toMap()
         }.getOrDefault(emptyMap())
         // The rates behind the total: read back from the same cached series the valuation crossed.
@@ -307,7 +326,7 @@ class AppRepository(private val container: AppContainer) {
         )
         _state.value = AppState.Ready(
             valuation, perf, gains, l.book, syncState, message, refreshing, assetDetails, fxRates,
-            offHours,
+            prints,
         )
     }
 
