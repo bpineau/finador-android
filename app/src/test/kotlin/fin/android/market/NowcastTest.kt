@@ -114,6 +114,15 @@ class NowcastTest {
         assertEquals(d3, out.estimatedFrom)
     }
 
+    @Test fun liveNeverOverwritesAPublishedNav() {
+        // The fund has caught up and published d3 itself: a real NAV outranks an estimate of the
+        // same day, which would both replace it and then be stripped on the way to the cache.
+        val published = navs.merge(listOf(PricePoint(d3, 52.5)))
+        val out = Nowcast.live(published, proxy, fund, quoteAt(d3, 204.0), rate = 1 / 1.10, converter)
+        assertEquals(published, out)
+        assertNull(out.estimatedFrom)
+    }
+
     @Test fun liveWithoutAnythingToAnchorOnLeavesTheSeriesAlone() {
         assertEquals(navs, Nowcast.live(navs, null, fund, quoteAt(d3, 204.0), 1 / 1.10, converter))
         assertEquals(navs, Nowcast.live(navs, proxy, fund, quoteAt(d3, 0.0), 1 / 1.10, converter))
