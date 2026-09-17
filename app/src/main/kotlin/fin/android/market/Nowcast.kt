@@ -75,6 +75,11 @@ object Nowcast {
      * The anchor is the fund's last daily value strictly BEFORE the quote's session, and the proxy
      * close that value stands on: same pair of dates on both sides, so the ratio measures the
      * session and nothing else. Returns [series] untouched when either side is missing.
+     *
+     * A session the fund has ALREADY PUBLISHED a NAV for is never estimated: the published value is
+     * the fact, an estimate of the same day would replace it with a worse number AND label it an
+     * estimate, and [PriceSeries.withoutEstimates] would then drop a real NAV on its way to disk.
+     * Only the days past the last published one belong to the nowcast.
      */
     fun live(
         series: PriceSeries,
@@ -86,6 +91,8 @@ object Nowcast {
     ): PriceSeries {
         if (proxy == null || quote.price <= 0) return series
         val session = Instant.ofEpochSecond(quote.time).atZone(ZoneOffset.UTC).toLocalDate()
+        val lastPublished = series.withoutEstimates().points.lastOrNull()?.date
+        if (lastPublished != null && !session.isAfter(lastPublished)) return series
         val (anchor, on) = series.at(session.minusDays(1)) ?: return series
         if (anchor <= 0) return series
         val anchorProxy = proxy.at(on)?.let { (close, day) -> convert(close, day, fund, converter) } ?: return series
