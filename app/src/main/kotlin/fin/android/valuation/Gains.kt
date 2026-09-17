@@ -127,12 +127,20 @@ object Gains {
      * carrying its current gross value (ref ccy, before tax) and its 1-day move,
      * sorted by value descending. The portfolio period figures neutralize external
      * flows (deposits/withdraws are not gains).
+     *
+     * [priceOverrides] forces the price of given assets (keyed by asset id, in the ASSET'S quote
+     * currency), exactly as [Valuator.value] takes it: the off-hours prints a valuation is showing.
+     * Every figure shown next to that valuation must derive from the same price, so the table's
+     * value column takes them. The day move and the period gains do NOT: they are close-to-close
+     * performance, and an off-hours print measures the evening's thin book, not the portfolio's
+     * history (mirrors the Go reference's D36, where no override ever reaches `perf` or `chart`).
      */
     fun report(
         book: Book,
         market: MarketData,
         referenceCcy: String? = null,
         today: LocalDate,
+        priceOverrides: Map<String, Double> = emptyMap(),
     ): GainsReport {
         val ccy = referenceCcy ?: book.config["currency"] ?: "EUR"
 
@@ -141,7 +149,7 @@ object Gains {
         val periods = windows(anchor).map { (label, then) ->
             periodGain(book, market, ccy, label, then, anchor)
         }
-        val assets = assetGains(book, market, ccy, today)
+        val assets = assetGains(book, market, ccy, today, priceOverrides)
         return GainsReport(referenceCcy = ccy, periods = periods, assets = assets)
     }
 
@@ -186,8 +194,9 @@ object Gains {
         market: MarketData,
         ccy: String,
         today: LocalDate,
+        priceOverrides: Map<String, Double>,
     ): List<AssetGain> {
-        val positions = Valuator.value(book, market, referenceCcy = ccy, at = today)
+        val positions = Valuator.value(book, market, referenceCcy = ccy, at = today, priceOverrides = priceOverrides)
             .positions.filter { it.kind == "security" && it.qty.signum() > 0 }
 
         val converter = Converter(market.fx)
@@ -232,6 +241,11 @@ object Gains {
      * Per period: relative = priceRef(today)/priceRef(then) − 1 (null if either endpoint price/FX
      * is missing); absolute = qtyNow × (priceRef(today) − priceRef(then)). priceRef(d) is the asset's
      * native close at d × FX(assetCcy→ref, d).
+     *
+     * [priceOverrides] is [report]'s, with the same rule: the headline price and value (and the
+     * unrealized gain they carry) stand on the overridden price, the period table and the price
+     * history stay on published closes. [allPositions], when passed, must come from a valuation
+     * built with the SAME overrides, or the page would mix two prices.
      */
     fun assetDetail(
         book: Book,
@@ -240,13 +254,15 @@ object Gains {
         today: LocalDate,
         assetId: String,
         allPositions: List<Position>? = null,
+        priceOverrides: Map<String, Double> = emptyMap(),
     ): AssetDetail? {
         val ccy = referenceCcy ?: book.config["currency"] ?: "EUR"
         val asset = book.assets[assetId] ?: return null
 
         // Callers that already have today's valuation (e.g. precomputing every asset detail) pass its
         // positions to avoid re-folding the book once per asset.
-        val valuationPositions = allPositions ?: Valuator.value(book, market, referenceCcy = ccy, at = today).positions
+        val valuationPositions = allPositions
+            ?: Valuator.value(book, market, referenceCcy = ccy, at = today, priceOverrides = priceOverrides).positions
         val converter = Converter(market.fx)
 
         // Applicable tax envelope(s) and the dated declared values (statements) - for any kind.
@@ -261,7 +277,10 @@ object Gains {
         return if (asset.kind == AssetKind.PROPERTY) {
             propertyDetail(asset, ccy, converter, valuationPositions, taxRule, stmts)
         } else {
-            securityDetail(asset, ccy, converter, market, today, valuationPositions, taxRule, stmts)
+            securityDetail(
+                asset, ccy, converter, market, today, valuationPositions, taxRule, stmts,
+                priceOverrides[asset.id],
+            )
         }
     }
 
@@ -297,7 +316,14 @@ object Gains {
         )
     }
 
-    /** Security detail: live price/value at `today`, period math anchored on the last settled close. */
+    /**
+     * Security detail: live price/value at `today`, period math anchored on the last settled close.
+     *
+     * [override], when set, is the price this asset's valuation was built on (an off-hours print):
+     * it replaces the published close in the headline price, the value and the unrealized gain, and
+     * nowhere else. It is an observed trade, so it also settles [AssetDetail.priceEstimated] to
+     * false - the nowcast of a fund is never overridden, but a price shown must describe itself.
+     */
     private fun securityDetail(
         asset: Asset,
         ccy: String,
@@ -307,6 +333,7 @@ object Gains {
         valuationPositions: List<Position>,
         taxRule: String?,
         stmts: List<Tx>,
+        override: Double? = null,
     ): AssetDetail? {
         val positions = valuationPositions.filter { it.kind == "security" && it.assetId == asset.id }
         val qtyNow = positions.fold(BigDecimal.ZERO) { acc, p -> acc + p.qty }
@@ -314,8 +341,12 @@ object Gains {
         val qty = qtyNow.toDouble()
         val series = market.prices[asset.id]
         val priceAt = series?.at(today)
-        val priceNow = priceAt?.first
-        val valueRefToday = priceRef(market, converter, asset.id, asset.ccy, ccy, today)
+        val priceNow = override ?: priceAt?.first
+        val valueRefToday = if (override != null) {
+            converter.rate(asset.ccy, ccy, today)?.let { override * it }
+        } else {
+            priceRef(market, converter, asset.id, asset.ccy, ccy, today)
+        }
         // Unpriced security (no quote or missing FX): fall back to the engine's valuation
         // (statement / cost basis) instead of showing a held position as worth 0.
         val value = if (valueRefToday != null) qty * valueRefToday else positions.sumOf { it.gross }
@@ -340,8 +371,8 @@ object Gains {
         return AssetDetail(
             assetId = asset.id, name = asset.name, ticker = asset.ticker, isin = asset.isin,
             assetCcy = asset.ccy, referenceCcy = ccy, qty = qtyNow, price = priceNow, value = value,
-            priceEstimated = priceAt != null && series.isEstimatedAt(priceAt.second),
-            priceProxy = series?.estimateProxy,
+            priceEstimated = override == null && priceAt != null && series.isEstimatedAt(priceAt.second),
+            priceProxy = if (override == null) series?.estimateProxy else null,
             accounts = positions.map { it.accountName }.distinct(),
             periods = periods, priceHistory = priceHistory,
             costBasis = costBasis,
