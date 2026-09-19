@@ -11,13 +11,32 @@ ADB := $(ANDROID_HOME)/platform-tools/adb
 EMULATOR := $(ANDROID_HOME)/emulator/emulator
 
 RELEASE_APK := app/build/outputs/apk/release/app-release.apk
-APKSIGNER = $$(ls -d "$(ANDROID_HOME)"/build-tools/* | sort -V | tail -1)/apksigner
+APKSIGNER = $$(ls -d "$(ANDROID_HOME)"/build-tools/* 2>/dev/null | sort -V | tail -1)/apksigner
 # The app version is read from the build file (single source of truth); lazy so it is
 # evaluated when a target runs, after any bump commit.
 VERSION = $(shell sed -n 's/.*versionName = "\(.*\)".*/\1/p' app/build.gradle.kts)
 
-.PHONY: help test test-class build install run reinstall release verify-signature smoke-release \
-	gh-release lint crossimpl emulator emulator-kill clean
+# ---------------------------------------------------------------------------
+# Release signing - the key NEVER enters this repo
+#
+# FINADOR_STORE_FILE / FINADOR_STORE_PASSWORD / FINADOR_KEY_ALIAS /
+# FINADOR_KEY_PASSWORD are read by app/build.gradle.kts from
+# ~/.gradle/gradle.properties (never committed) or from the environment. The
+# keystore itself lives outside the working tree (~/finador-release.jks by
+# convention). Nothing about it is committed, printed or uploaded.
+#
+# Without them the release build falls back to DEBUG signing. That is fine for a
+# local build and a disaster under a release name: a debug-signed APK is signed
+# with a key everyone has, and it cannot upgrade an installed app. So the
+# publishing targets refuse it - unless DEBUG_APK=1 asks for one deliberately,
+# and the asset is then named "-debug" so nobody mistakes it.
+# ---------------------------------------------------------------------------
+DIST := app/build/dist
+ASSET = $(DIST)/finador-android-v$(VERSION)$(if $(DEBUG_APK),-debug,).apk
+
+.PHONY: help test test-class build install run reinstall release release-apk verify-signature \
+	check-signing smoke-release gh-release gh-release-dry-run lint crossimpl emulator \
+	emulator-kill clean
 
 help: ## List available targets
 	@grep -E '^[a-z-]+:.*##' $(MAKEFILE_LIST) | awk -F':.*## ' '{printf "  %-18s %s\n", $$1, $$2}'
@@ -48,8 +67,59 @@ release: ## Build the R8-minified release APK (real key when configured, else de
 	$(GRADLE) assembleRelease
 	@ls -lh $(RELEASE_APK) | awk '{print "APK: '"$(RELEASE_APK)"' (" $$5 ")"}'
 
+check-signing: ## Say whether a real release keystore is configured on this machine (no secret printed)
+	@if [ -n "$$FINADOR_STORE_FILE" ]; then \
+	  echo "release keystore: configured (environment)"; \
+	elif grep -qE '^[[:space:]]*FINADOR_STORE_FILE[[:space:]]*=' "$$HOME/.gradle/gradle.properties" 2>/dev/null; then \
+	  echo "release keystore: configured (~/.gradle/gradle.properties)"; \
+	elif [ -n "$(DEBUG_APK)" ]; then \
+	  echo "release keystore: absent - DEBUG_APK=1, so a debug-signed APK is what you asked for"; \
+	else \
+	  echo "ERROR: no release keystore configured, so the release build would be DEBUG-signed."; \
+	  echo "A debug-signed APK is signed with a key everyone has and cannot upgrade an installed app."; \
+	  echo; \
+	  echo "One-time setup - create a key OUTSIDE the repo:"; \
+	  echo "  keytool -genkeypair -v -keystore \$$HOME/finador-release.jks -alias finador \\"; \
+	  echo "      -keyalg RSA -keysize 4096 -validity 10000"; \
+	  echo "  chmod 600 \$$HOME/finador-release.jks"; \
+	  echo; \
+	  echo "Then declare it in ~/.gradle/gradle.properties (never in this repo):"; \
+	  echo "  FINADOR_STORE_FILE=\$$HOME/finador-release.jks"; \
+	  echo "  FINADOR_STORE_PASSWORD=..."; \
+	  echo "  FINADOR_KEY_ALIAS=finador"; \
+	  echo "  FINADOR_KEY_PASSWORD=..."; \
+	  echo "  chmod 600 ~/.gradle/gradle.properties"; \
+	  echo; \
+	  echo "The same four names are read from the environment when the file has none (CI secrets)."; \
+	  echo "To publish a debug-signed APK ON PURPOSE, re-run with DEBUG_APK=1: the asset is then"; \
+	  echo "named finador-android-v<version>-debug.apk."; \
+	  exit 1; \
+	fi
+
 verify-signature: ## Print the release APK's signing certs (CN=Android Debug means: do NOT publish)
 	$(APKSIGNER) verify --print-certs $(RELEASE_APK)
+
+release-apk: check-signing release ## Build, signature-verify and stage the installable APK as app/build/dist/finador-android-v<version>.apk
+	@test -n "$(VERSION)" || { echo "ERROR: cannot read versionName from app/build.gradle.kts"; exit 1; }
+	@test -x "$(APKSIGNER)" || { \
+	  echo "ERROR: apksigner not found under $(ANDROID_HOME)/build-tools - cannot verify the APK's"; \
+	  echo "signature, and an unverified APK is not something to publish. Install the build-tools:"; \
+	  echo "  sdkmanager 'build-tools;36.0.0'"; \
+	  exit 1; \
+	}
+	$(APKSIGNER) verify --verbose --print-certs $(RELEASE_APK)
+	@if $(APKSIGNER) verify --print-certs $(RELEASE_APK) | grep -q "CN=Android Debug"; then \
+	  if [ -z "$(DEBUG_APK)" ]; then \
+	    echo "ERROR: the built APK is DEBUG-signed - refusing to name it a release."; \
+	    $(MAKE) --no-print-directory check-signing DEBUG_APK=; exit 1; \
+	  fi; \
+	  echo "note: debug-signed, as DEBUG_APK=1 requested"; \
+	elif [ -n "$(DEBUG_APK)" ]; then \
+	  echo "ERROR: DEBUG_APK=1 but the APK is signed with the REAL key - drop the flag."; exit 1; \
+	fi
+	@mkdir -p $(DIST)
+	@cp $(RELEASE_APK) "$(ASSET)"
+	@ls -lh "$(ASSET)" | awk '{print "asset: '"$(ASSET)"' (" $$5 ")"}'
 
 smoke-release: ## Install the release APK on the emulator (WIPES app state), launch, check for crashes
 	-$(ADB) uninstall fin.android
@@ -64,22 +134,40 @@ smoke-release: ## Install the release APK on the emulator (WIPES app state), lau
 	  echo "SMOKE OK (inspect the screen: /tmp/finador-release-smoke.png)"; \
 	fi
 
-gh-release: ## End-to-end release of v<versionName>: tests, signed APK, tag+push, GitHub release with the APK. Bump versionName/versionCode + commit first. NOTES=file.md for hand-written notes (default: GitHub-generated).
-	@test -z "$$(git status --porcelain)" || { echo "ERROR: working tree not clean - commit the version bump first"; exit 1; }
-	@test -n "$(VERSION)" || { echo "ERROR: cannot read versionName from app/build.gradle.kts"; exit 1; }
-	@! git rev-parse -q --verify "refs/tags/v$(VERSION)" >/dev/null \
-	  || { echo "ERROR: tag v$(VERSION) already exists - bump versionName/versionCode and commit first"; exit 1; }
-	$(MAKE) test
-	$(MAKE) release
-	@if $(APKSIGNER) verify --print-certs $(RELEASE_APK) | grep -q "CN=Android Debug"; then \
-	  echo "ERROR: APK is debug-signed - set FINADOR_STORE_FILE & co. in ~/.gradle/gradle.properties"; exit 1; \
+gh-release: ## End-to-end release of v<versionName>: tests, cross-impl gate, signed APK, tag+push, GitHub release with the APK attached. Bump versionName/versionCode + commit first. NOTES=file.md for hand-written notes; DEBUG_APK=1 to attach a debug-signed APK on purpose.
+	$(MAKE) gh-release-dry-run
+	@if git rev-parse -q --verify "refs/tags/v$(VERSION)" >/dev/null; then \
+	  echo "tag v$(VERSION) already exists at HEAD: re-running, nothing to tag"; \
+	else \
+	  git tag -a "v$(VERSION)" -m "v$(VERSION)"; \
 	fi
-	git tag -a "v$(VERSION)" -m "v$(VERSION)"
 	git push origin master "v$(VERSION)"
-	cp $(RELEASE_APK) "/tmp/finador-android-v$(VERSION).apk"
-	gh release create "v$(VERSION)" "/tmp/finador-android-v$(VERSION).apk" \
-	  --title "v$(VERSION)" $(if $(NOTES),--notes-file "$(NOTES)",--generate-notes)
+	@if gh release view "v$(VERSION)" >/dev/null 2>&1; then \
+	  echo "release v$(VERSION) exists: replacing its asset"; \
+	  gh release upload "v$(VERSION)" "$(ASSET)" --clobber; \
+	else \
+	  gh release create "v$(VERSION)" "$(ASSET)" \
+	    --title "v$(VERSION)" $(if $(NOTES),--notes-file "$(NOTES)",--generate-notes); \
+	fi
 	@echo "released: https://github.com/bpineau/finador-android/releases/tag/v$(VERSION)"
+
+gh-release-dry-run: ## Everything gh-release does EXCEPT the tag, the push and the GitHub release: gates, APK, signature check, and what would be uploaded
+	@test -n "$(VERSION)" || { echo "ERROR: cannot read versionName from app/build.gradle.kts"; exit 1; }
+	@test -z "$$(git status --porcelain)" || { echo "ERROR: working tree not clean - commit the version bump first"; exit 1; }
+	@if git rev-parse -q --verify "refs/tags/v$(VERSION)" >/dev/null; then \
+	  test "$$(git rev-parse "v$(VERSION)^{commit}")" = "$$(git rev-parse HEAD)" \
+	    || { echo "ERROR: tag v$(VERSION) exists and points elsewhere - bump versionName/versionCode and commit first"; exit 1; }; \
+	fi
+	$(MAKE) test
+	$(MAKE) crossimpl
+	$(MAKE) release-apk
+	@echo
+	@echo "DRY RUN - nothing was tagged, pushed or published."
+	@echo "  tag:      v$(VERSION) at $$(git rev-parse --short HEAD)"
+	@echo "  asset:    $(ASSET)"
+	@echo "  sha256:   $$(shasum -a 256 "$(ASSET)" | cut -d' ' -f1)"
+	@echo "  upload:   gh release $$(gh release view "v$(VERSION)" >/dev/null 2>&1 && echo 'upload --clobber' || echo create) v$(VERSION) $(ASSET)"
+	@echo "  notes:    $(if $(NOTES),--notes-file $(NOTES),--generate-notes)"
 
 lint: ## Android Lint; report in app/build/reports/lint-results-debug.txt
 	$(GRADLE) lintDebug

@@ -19,19 +19,27 @@ android {
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
 
-    // Real release signing, configured entirely outside the repo: the keystore path and passwords
-    // come from ~/.gradle/gradle.properties (FINADOR_STORE_FILE / FINADOR_STORE_PASSWORD /
-    // FINADOR_KEY_ALIAS / FINADOR_KEY_PASSWORD), which is never committed. When absent (other
-    // contributors / CI) the values are null and the release build falls back to debug signing,
-    // so the repo still builds for everyone without exposing any secret.
-    val releaseStoreFile = (findProperty("FINADOR_STORE_FILE") as String?)?.takeIf { it.isNotBlank() }
+    // Real release signing, configured entirely outside the repo. The keystore path and its
+    // passwords come from FINADOR_STORE_FILE / FINADOR_STORE_PASSWORD / FINADOR_KEY_ALIAS /
+    // FINADOR_KEY_PASSWORD, read from ~/.gradle/gradle.properties (never committed) or, failing
+    // that, from the environment - so a CI runner can inject them as secrets without writing a
+    // file anywhere. Nothing about the key may ever live in the repo: not the keystore, not a
+    // password, not a path inside the working tree.
+    //
+    // When they are absent (other contributors, a plain CI build) the release build falls back
+    // to debug signing, so the repo still builds for everyone. That fallback is a convenience
+    // for local builds only: `make gh-release` refuses to publish a debug-signed APK.
+    fun signingSecret(name: String): String? =
+        ((findProperty(name) as String?) ?: System.getenv(name))?.takeIf { it.isNotBlank() }
+
+    val releaseStoreFile = signingSecret("FINADOR_STORE_FILE")
     signingConfigs {
         if (releaseStoreFile != null) {
             create("release") {
                 storeFile = file(releaseStoreFile)
-                storePassword = findProperty("FINADOR_STORE_PASSWORD") as String?
-                keyAlias = findProperty("FINADOR_KEY_ALIAS") as String?
-                keyPassword = findProperty("FINADOR_KEY_PASSWORD") as String?
+                storePassword = signingSecret("FINADOR_STORE_PASSWORD")
+                keyAlias = signingSecret("FINADOR_KEY_ALIAS")
+                keyPassword = signingSecret("FINADOR_KEY_PASSWORD")
             }
         }
     }
