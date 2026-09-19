@@ -28,6 +28,11 @@ when you change architecture or invariants.
 5. **Don't weaken security.** Secrets are encrypted under an Android Keystore key
    (`data/SecretStore.kt`); the repo holds only the *encrypted* `.fin`; never log secrets or write
    them to disk in clear.
+6. **This repo is public: fixtures are fictitious.** Tests, sample data and docs name invented
+   accounts (PEA Zephyr, CTO Meridia, AV Borealis, PEE Halcyon) and the house tickers
+   (CW8.PA, GTWR) - never a real bank or broker the author holds an account at, never a real
+   holding or amount. Public tickers and ISINs are fine as market-data vectors. The committed
+   `app/src/test/resources/sample.ledger` is the Go reference's file, copied byte-for-byte.
 
 ## Build / test / run (env is required)
 
