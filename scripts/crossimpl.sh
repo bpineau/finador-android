@@ -39,8 +39,8 @@ run_fin "$SPW" "$OUT/android-mutated.fin" tx list
 
 echo "### 4. Go creates go-created.fin (init + account + cash deposit)"
 run_fin "$GPW" "$OUT/go-created.fin" init
-run_fin "$GPW" "$OUT/go-created.fin" account add "Mon CTO" --tax gains:30%
-run_fin "$GPW" "$OUT/go-created.fin" cash deposit "Mon CTO" 1234 2026-01-05
+run_fin "$GPW" "$OUT/go-created.fin" account add "CTO Meridia" --tax gains:31.4%
+run_fin "$GPW" "$OUT/go-created.fin" cash deposit "CTO Meridia" 1234 2026-01-05
 
 echo "### 5. Android reads the Go-created file"
 "$AROOT/gradlew" --project-dir "$AROOT" testDebugUnitTest \

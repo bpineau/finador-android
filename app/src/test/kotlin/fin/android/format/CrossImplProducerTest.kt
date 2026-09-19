@@ -25,7 +25,7 @@ class CrossImplProducerTest {
         val sample = javaClass.getResourceAsStream("/sample.ledger")!!.use { it.readBytes() }
         val mutated = Ledger.open(sample, pw).addTransaction(
             date = LocalDate.parse("2026-06-12"),
-            account = "06fc2cjx2bvtjjxmtmcj2wg", // PEA Zephyr
+            account = "06fjrvs8x4n9bf1545k5e3r", // PEA Zephyr
             asset = null,
             kind = TxKind.deposit,
             qty = BigDecimal.ZERO,

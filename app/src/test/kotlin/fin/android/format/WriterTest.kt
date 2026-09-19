@@ -10,9 +10,9 @@ import java.time.LocalDate
 
 class WriterTest {
     private val pw = "finador-format-spec-v3"
-    private val peaId = "06fc2cjx2bvtjjxmtmcj2wg"
-    private val cw8Id = "06fc2cjxndn8wez8qqhh0a0"
-    private val buyId = "06fc2cjy7j4ncgb2p6mg0a0"
+    private val peaId = "06fjrvs8x4n9bf1545k5e3r"
+    private val cw8Id = "06fjrvs9ha04wzbwzfj344g"
+    private val buyId = "06fjrvsa3t56betpvvqc1b0"
 
     private fun sample(): ByteArray =
         javaClass.getResourceAsStream("/sample.ledger")!!.use { it.readBytes() }
