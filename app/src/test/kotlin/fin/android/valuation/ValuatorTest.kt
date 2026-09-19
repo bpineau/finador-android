@@ -324,7 +324,7 @@ class ValuatorTest {
     /**
      * Opens the committed sample ledger and values it with a CW8 close of 500 EUR (all-EUR,
      * so no FX). Sample contents (see SampleLedgerTest):
-     *   PEA BforBank (gains:17.2%): deposit 10000, buy 20 CW8 @ 9000.
+     *   PEA Zephyr (gains:17.2%): deposit 10000, buy 20 CW8 @ 9000.
      *   Livret (none): cash statement 15000.
      *   "Appart Lyon" property: no statement → excluded (no value).
      *
@@ -339,7 +339,7 @@ class ValuatorTest {
      */
     @Test fun sampleLedgerValuation() {
         val ledger = Ledger.open(sampleBytes(), "finador-format-spec-v3")
-        val cw8Id = "06fc2cjxndn8wez8qqhh0a0"
+        val cw8Id = "06fjrvs9ha04wzbwzfj344g"
         val market = MarketData(
             prices = mapOf(cw8Id to PriceSeries(listOf(PricePoint(d("2024-12-31"), 500.0)))),
         )

@@ -20,9 +20,9 @@ class LedgerAccountTest {
 
     @Test
     fun addRoundTrips() {
-        val l = Ledger.create(pw).putAccount(acct("a1", "PEA BforBank", TaxRule.Gains(BigDecimal("0.172")), listOf("pea")))
+        val l = Ledger.create(pw).putAccount(acct("a1", "PEA Zephyr", TaxRule.Gains(BigDecimal("0.172")), listOf("pea")))
         val a = Ledger.open(l.toBytes(), pw).book.accounts.getValue("a1")
-        assertEquals("PEA BforBank", a.name)
+        assertEquals("PEA Zephyr", a.name)
         assertEquals("EUR", a.ccy)
         assertEquals("gains:17.2%", a.tax.toWire())
         assertEquals(listOf("pea"), a.aliases)
@@ -50,7 +50,7 @@ class LedgerAccountTest {
     @Test
     fun rejectsReferenceCollision() {
         // a2's name "pea" collides case-insensitively with a1's alias "pea".
-        val l = Ledger.create(pw).putAccount(acct("a1", "PEA BforBank", aliases = listOf("pea")))
+        val l = Ledger.create(pw).putAccount(acct("a1", "PEA Zephyr", aliases = listOf("pea")))
         assertTrue(runCatching { l.putAccount(acct("a2", "pea")) }.exceptionOrNull() is IllegalArgumentException)
     }
 
