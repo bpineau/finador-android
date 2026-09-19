@@ -101,8 +101,9 @@ class AppViewModel(private val container: AppContainer) : ViewModel() {
         _onboardError.value = e.message ?: e.javaClass.simpleName
     }
 
+    /** Refreshes the quotes; a warning the pass raised (a restated history) reaches the snackbar. */
     fun refreshQuotes() {
-        viewModelScope.launch { repo.refreshQuotes() }
+        viewModelScope.launch { notify(repo.refreshQuotes().firstOrNull()) }
     }
 
     fun syncNow() {
