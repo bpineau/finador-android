@@ -8,6 +8,7 @@ import fin.android.domain.PricePoint
 import fin.android.domain.PriceSeries
 import java.time.Instant
 import java.time.LocalDate
+import kotlin.math.abs
 
 /**
  * Orchestrates a market refresh for a [Book]: fetches a daily series for each security (by ticker
@@ -63,10 +64,16 @@ object Quotes {
         offHours.filterValues { it.currentAt(now) }
 
     /**
-     * What an extended-hours refresh observed: the [market] to store, exactly as a plain [refresh]
-     * would have produced it, plus the [offHours] prints to SHOW, keyed by asset id.
+     * What a refresh observed: the [market] to store (exactly what a plain [refresh] produces),
+     * the [offHours] prints to SHOW, keyed by asset id, and the [warnings] to surface - a source
+     * that restated its history is the one event a holder must act on, since a split moves the
+     * position too and only a ledger record can fix that.
      */
-    data class Refresh(val market: MarketData, val offHours: Map<String, OffHoursPrint>)
+    data class Refresh(
+        val market: MarketData,
+        val offHours: Map<String, OffHoursPrint>,
+        val warnings: List<String> = emptyList(),
+    )
 
     fun refresh(
         book: Book,
@@ -76,7 +83,7 @@ object Quotes {
         referenceCcy: String? = null,
         multi: MultiSource = MultiSource.default(),
         yahoo: Yahoo = Yahoo(),
-    ): MarketData = pass(book, existing, from, now, referenceCcy, multi, yahoo, extendedHours = false).market
+    ): MarketData = refreshDetailed(book, existing, from, now, referenceCcy, multi, yahoo, extendedHours = false).market
 
     /**
      * [refresh] with the extended-hours opt-in (parity with the Go reference's
@@ -101,18 +108,22 @@ object Quotes {
         referenceCcy: String? = null,
         multi: MultiSource = MultiSource.default(),
         yahoo: Yahoo = Yahoo(),
-    ): Refresh = pass(book, existing, from, now, referenceCcy, multi, yahoo, extendedHours = true)
+    ): Refresh = refreshDetailed(book, existing, from, now, referenceCcy, multi, yahoo, extendedHours = true)
 
-    /** The one implementation behind [refresh] and [refreshExtended]. */
-    private fun pass(
+    /**
+     * The one implementation behind [refresh] and [refreshExtended], with the extended-hours
+     * opt-in as a parameter and the whole [Refresh] as its answer. What the app itself calls: it
+     * must store the market, show the prints AND surface the warnings, whichever mode it is in.
+     */
+    fun refreshDetailed(
         book: Book,
         existing: MarketData?,
         from: LocalDate,
         now: LocalDate,
-        referenceCcy: String?,
-        multi: MultiSource,
-        yahoo: Yahoo,
-        extendedHours: Boolean,
+        referenceCcy: String? = null,
+        multi: MultiSource = MultiSource.default(),
+        yahoo: Yahoo = Yahoo(),
+        extendedHours: Boolean = false,
     ): Refresh {
         // The effective display currency must have its FX series fetched too, so a value/gain
         // shown in a non-book currency can be converted. Falls back to the book's, then EUR.
@@ -123,6 +134,7 @@ object Quotes {
         val fx = LinkedHashMap(existing?.fx ?: emptyMap())
         val dividends = LinkedHashMap(existing?.dividends ?: emptyMap())
         val currencies = linkedSetOf<String>()
+        val warnings = mutableListOf<String>()
 
         // asset id → (declared ticker, declared currency), the spot pass's targets.
         val spotTargets = LinkedHashMap<String, Pair<String, String>>()
@@ -141,13 +153,33 @@ object Quotes {
             } else {
                 asset.ticker?.let { spotTargets[asset.id] = it to asset.ccy }
             }
-            val daily = multi.daily(Ref(asset.ticker, asset.isin), fetchFrom(prices[asset.id], from)) ?: continue
+            var daily = multi.daily(Ref(asset.ticker, asset.isin), fetchFrom(prices[asset.id], from)) ?: continue
             // The declared currency is the contract here exactly as it is on the spot pass below: a
             // series served in another currency (Yahoo's GBp pence metadata, an FT twin listing)
             // would be merged into a series the valuation reads as the declared one, and persisted.
             // Skipping leaves `fetchedAt` unstamped, so a later run tries again (mirrors Go).
             if (daily.currency != null && daily.currency != asset.ccy) continue
-            prices[asset.id] = (prices[asset.id] ?: PriceSeries()).merge(daily.closes).copy(fetchedAt = now)
+            // A source that RESTATES its history - a share split, a currency redenomination, a
+            // class merge - answers the overlap day with a different close. The fetch above is
+            // incremental (it starts at the last cached point), so merging such an answer would
+            // leave the old scale in front of the new one: a permanent cliff the valuation, the
+            // chart and the TWR all read as a session that never happened (after a 4:1 split,
+            // -75%). Rebuild the whole series from the source instead (Go D40).
+            var cached = prices[asset.id]
+            if (restated(cached, daily.closes)) {
+                val label = asset.ticker ?: asset.isin ?: asset.name
+                val full = multi.daily(Ref(asset.ticker, asset.isin), from)
+                if (full == null || (full.currency != null && full.currency != asset.ccy)) {
+                    warnings += "$label: the source restated its history (split or redenomination) " +
+                        "and the deep re-fetch failed: quotes ignored"
+                    continue
+                }
+                warnings += "$label: history restated by the source (split or redenomination) - " +
+                    "series rebuilt from $from; check the ledger quantities"
+                cached = null
+                daily = full
+            }
+            prices[asset.id] = (cached ?: PriceSeries()).merge(daily.closes).copy(fetchedAt = now)
             if (daily.dividends.isNotEmpty()) {
                 // Upsert by ex-date (mirror Go's mergeDividends): an incremental fetch returns only a
                 // recent window, so overwriting would drop previously-cached historical dividends.
@@ -244,7 +276,36 @@ object Quotes {
                 .copy(fetchedAt = now)
         }
 
-        return Refresh(MarketData(prices, fx, dividends), offHours)
+        return Refresh(MarketData(prices, fx, dividends), offHours, warnings)
+    }
+
+    /**
+     * How far a re-served close may sit from the cached one before the history counts as restated:
+     * 2 %, far above a provider correcting a close to the cent and far below the smallest share
+     * split (3:2, -33 %). A false positive costs one deep download and identical data, which is why
+     * the threshold is low.
+     */
+    private const val RESTATED_TOLERANCE = 0.02
+
+    /**
+     * Whether [incoming] contradicts the [cached] series on a date both cover - the signature of a
+     * source that re-scaled its history. It compares the FIRST shared date: an incremental fetch
+     * starts at the last cached point, so that date is the junction the merge would glue.
+     *
+     * [cached] is read after [PriceSeries.withoutEstimates] has run over the whole cache, so a
+     * nowcast tail - an estimate of a day the fund had not published yet - is never here to be
+     * mistaken for a restatement: only published closes are compared.
+     */
+    private fun restated(cached: PriceSeries?, incoming: List<PricePoint>): Boolean {
+        if (cached == null || cached.points.isEmpty()) return false
+        for (p in incoming) {
+            val i = cached.points.binarySearchBy(p.date) { it.date }
+            if (i < 0) continue
+            val was = cached.points[i].close
+            if (was <= 0 || p.close <= 0) return false
+            return abs(p.close - was) > RESTATED_TOLERANCE * was
+        }
+        return false
     }
 
     /**
