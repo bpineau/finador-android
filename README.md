@@ -77,10 +77,9 @@ work too if you prefer, with those variables exported.)
 
 - **First run** is slow (downloads Gradle + dependencies). Subsequent runs are fast.
 - The **debug build** is for everyday work. An optimized **release build** (R8: faster, ~3× smaller)
-  also exists: `./gradlew installRelease`. It is signed with a real release key when the maintainer's
-  `FINADOR_STORE_FILE`/`FINADOR_STORE_PASSWORD`/`FINADOR_KEY_ALIAS`/`FINADOR_KEY_PASSWORD` are set in
-  `~/.gradle/gradle.properties` (never committed); without them it falls back to debug signing so the
-  repo still builds for everyone.
+  also exists: `./gradlew installRelease`, or `make release`. It is signed with a real release key
+  when the maintainer's four signing properties are set (see §6); without them it falls back to
+  debug signing so the repo still builds for everyone.
 
 ---
 
@@ -138,7 +137,52 @@ compared to a tall screen like the S21).
 
 ---
 
-## 6. Layout & docs
+## 6. Release (maintainer)
+
+The release key never enters this repo. It lives in a keystore outside the working tree, and its
+four coordinates are read from `~/.gradle/gradle.properties` (never committed) or, failing that,
+from the environment - so a CI runner can inject them as secrets.
+
+**One-time setup:**
+
+```sh
+keytool -genkeypair -v -keystore "$HOME/finador-release.jks" -alias finador \
+    -keyalg RSA -keysize 4096 -validity 10000      # asks for the passwords
+chmod 600 "$HOME/finador-release.jks"
+
+cat >> ~/.gradle/gradle.properties <<'EOF'
+FINADOR_STORE_FILE=/Users/<you>/finador-release.jks
+FINADOR_STORE_PASSWORD=<store password>
+FINADOR_KEY_ALIAS=finador
+FINADOR_KEY_PASSWORD=<key password>
+EOF
+chmod 600 ~/.gradle/gradle.properties
+```
+
+The same four names work as environment variables (`export FINADOR_STORE_FILE=...`) when the
+properties file has none. Back the keystore up: losing it means never being able to upgrade an
+installed app again.
+
+**Releasing:**
+
+```sh
+make check-signing        # is a real key configured here? (prints no secret)
+# bump versionName + versionCode in app/build.gradle.kts, commit
+make gh-release-dry-run   # gates + APK + signature, tags and publishes NOTHING
+make gh-release           # the real thing: tag, push, GitHub release with the APK attached
+make gh-release NOTES=notes.md   # hand-written notes instead of GitHub-generated ones
+```
+
+`gh-release` runs `make test` and `make crossimpl`, builds the R8 release APK, **verifies its
+signature with `apksigner`**, stages it as `app/build/dist/finador-android-v<version>.apk` and
+attaches it to the GitHub release. It **refuses** to publish a debug-signed APK - that key is
+public and cannot upgrade an installed app; `DEBUG_APK=1` publishes one on purpose, named
+`finador-android-v<version>-debug.apk`. Re-running is safe: an existing tag at `HEAD` is reused and
+an existing release has its asset replaced (`gh release upload --clobber`).
+
+---
+
+## 7. Layout & docs
 
 ```
 app/src/main/kotlin/fin/android/

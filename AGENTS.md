@@ -162,10 +162,21 @@ that state; per-asset detail pages are **precomputed** into `Ready.assetDetails`
   icon? Copy its `materialPath { ... }` body from the 1.7.8 sources into `FinIcons` (set
   `autoMirror = true` for direction-carrying icons); don't re-add the dependency.
 - **Build types**: `debug` = dev (slow, debuggable). `release` = R8-minified, non-debuggable, ~6 MB,
-  validated end-to-end. It's signed with the **real release key** when `FINADOR_STORE_FILE` & co. are
-  set in `~/.gradle/gradle.properties` (never committed), and **falls back to debug signing** when
-  they're absent (contributors / CI) - see `app/build.gradle.kts` `signingConfigs` and the out-of-repo
-  notes file. The key/passwords live only in `~/.gradle/gradle.properties` + `~/finador-release.jks`.
+  validated end-to-end. It's signed with the **real release key** when `FINADOR_STORE_FILE`,
+  `FINADOR_STORE_PASSWORD`, `FINADOR_KEY_ALIAS` and `FINADOR_KEY_PASSWORD` are set - in
+  `~/.gradle/gradle.properties` (never committed) or, failing that, in the **environment**, so a CI
+  runner can inject them as secrets. It **falls back to debug signing** when they're absent
+  (contributors / CI) - see `app/build.gradle.kts` `signingConfigs`. The key and its passwords live
+  ONLY outside this repo (`~/finador-release.jks` + `~/.gradle/gradle.properties`); nothing about
+  them is ever committed, printed or uploaded.
+- **Releasing**: `make gh-release` runs the gates (`test`, `crossimpl`), builds the release APK,
+  **verifies its signature with `apksigner`**, tags, pushes and creates the GitHub release **with the
+  APK attached** as `finador-android-v<version>.apk`. It REFUSES to publish a debug-signed APK: that
+  key is public and cannot upgrade an installed app. `DEBUG_APK=1` publishes one deliberately, named
+  `-debug`. The target is re-runnable (an existing release gets `gh release upload --clobber`, an
+  existing tag at HEAD is reused). Two cheap probes before releasing: `make check-signing` (is a real
+  key configured here? prints no secret) and `make gh-release-dry-run` (everything except the tag,
+  the push and the release).
 - The single native lib is Compose's `libandroidx.graphics.path.so`; "Unable to strip" is a benign warning.
 
 ## Verifying a change cheaply
