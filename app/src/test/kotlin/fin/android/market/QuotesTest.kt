@@ -502,4 +502,124 @@ class QuotesTest {
         assertEquals(79.5, series.points.last().close, 1e-9) // 53 * 159 / 106, the regular print
         assertEquals(d("2026-08-19"), series.estimatedFrom) // still flagged as the estimate it is
     }
+
+    // ---- a source that restates its history (Go D40) ----
+
+    /**
+     * Answers any window with the slice of [deep] it covers - what a source does AFTER a split: it
+     * re-serves its whole history at the new scale, the overlap day included.
+     */
+    private class RestatingProvider(private val deep: List<PricePoint>) : Provider {
+        override val name = "restating"
+        val from = mutableListOf<LocalDate>()
+        override fun daily(ref: Ref, from: LocalDate): DailyData? {
+            this.from += from
+            return DailyData("USD", deep.filter { !it.date.isBefore(from) })
+        }
+    }
+
+    /**
+     * A share split (or any redenomination) makes the source restate its whole history. The daily
+     * fetch is incremental, so merging the answer glued the old scale in front of the new one: a
+     * permanent cliff that every valuation and every TWR read as a session that never happened.
+     * The overlap day is the canary: when it comes back at another price, the series is dropped and
+     * rebuilt from the floor. Mirrors the Go reference's TestRefreshRebuildsRestatedHistory.
+     */
+    @Test fun restatedHistoryIsRebuiltFromTheFloor() {
+        // 4:1 split: every close the source serves is now split-adjusted, the cached overlap day
+        // 05-19 included (408 comes back as 102).
+        val deep = listOf(
+            PricePoint(d("2026-05-15"), 100.0), PricePoint(d("2026-05-18"), 101.0),
+            PricePoint(d("2026-05-19"), 102.0), PricePoint(d("2026-05-20"), 103.0),
+        )
+        val provider = RestatingProvider(deep)
+        val existing = MarketData(
+            prices = mapOf(
+                "aa" to PriceSeries(
+                    listOf(
+                        PricePoint(d("2026-05-15"), 400.0), PricePoint(d("2026-05-18"), 404.0),
+                        PricePoint(d("2026-05-19"), 408.0),
+                    ),
+                    fetchedAt = d("2026-05-19"),
+                ),
+            ),
+        )
+        val out = Quotes.refreshDetailed(
+            book(), existing, from = d("2026-05-15"), now = d("2026-05-20"),
+            multi = MultiSource(listOf(provider)), yahoo = yahoo(),
+        )
+
+        val series = out.market.prices["aa"]!!
+        assertEquals(deep, series.points) // rebuilt, not merged
+        val before = series.at(d("2026-05-18"))!!.first
+        val after = series.at(d("2026-05-20"))!!.first
+        assertTrue("cliff left in the series: $before then $after", after / before > 0.9)
+        assertTrue("the restatement must be named: ${out.warnings}", out.warnings.any { "restated" in it })
+        // The incremental window first, then the deep one it was rebuilt from.
+        assertEquals(listOf(d("2026-05-19"), d("2026-05-15")), provider.from)
+    }
+
+    /**
+     * The canary must not fire on an ordinary incremental refresh: the overlap day comes back at
+     * the same close (a cent of drift is a provider correcting itself, not a split), the cached
+     * history is kept and no second download happens. Mirrors the Go reference's
+     * TestRefreshKeepsHistoryWhenOverlapAgrees.
+     */
+    @Test fun anAgreeingOverlapDayKeepsTheCachedHistory() {
+        val provider = FakeProvider(
+            DailyData(
+                currency = "USD",
+                closes = listOf(
+                    PricePoint(d("2026-05-19"), 408.02), // a cent of drift, not a split
+                    PricePoint(d("2026-05-20"), 411.0),
+                ),
+            ),
+        )
+        val existing = MarketData(
+            prices = mapOf(
+                "aa" to PriceSeries(
+                    listOf(PricePoint(d("2026-05-18"), 404.0), PricePoint(d("2026-05-19"), 408.0)),
+                    fetchedAt = d("2026-05-19"),
+                ),
+            ),
+        )
+        val out = Quotes.refreshDetailed(
+            book(), existing, from = d("2026-05-18"), now = d("2026-05-20"),
+            multi = MultiSource(listOf(provider)), yahoo = yahoo(),
+        )
+
+        assertEquals(listOf(404.0, 408.02, 411.0), out.market.prices["aa"]!!.points.map { it.close })
+        assertTrue("no restatement here: ${out.warnings}", out.warnings.isEmpty())
+        assertEquals(1, provider.from.size) // no deep re-fetch
+    }
+
+    /**
+     * A nowcast tail is not a restatement. The estimate of a day the instrument had not published
+     * yet can sit far from the close that eventually lands, and it must never make the canary throw
+     * the history away: the whole cache is stripped of its estimates before anything is compared
+     * (the same door every persisting consumer walks through), so only published closes are.
+     */
+    @Test fun anEstimatedTailIsNotARestatement() {
+        val provider = FakeProvider(
+            DailyData(currency = "USD", closes = listOf(PricePoint(d("2026-06-02"), 100.5))),
+        )
+        val existing = MarketData(
+            prices = mapOf(
+                "aa" to PriceSeries(
+                    listOf(PricePoint(d("2026-06-01"), 100.0), PricePoint(d("2026-06-02"), 130.0)),
+                    fetchedAt = d("2026-06-02"),
+                    estimatedFrom = d("2026-06-02"),
+                    estimateProxy = "URTH",
+                ),
+            ),
+        )
+        val out = Quotes.refreshDetailed(
+            book(), existing, from = d("2026-06-01"), now = d("2026-06-03"),
+            multi = MultiSource(listOf(provider)), yahoo = yahoo(),
+        )
+
+        assertTrue("an estimate is not a restatement: ${out.warnings}", out.warnings.isEmpty())
+        assertEquals(listOf(100.0, 100.5), out.market.prices["aa"]!!.points.map { it.close })
+        assertEquals(listOf(d("2026-06-01")), provider.from) // resumed at the last PUBLISHED close
+    }
 }

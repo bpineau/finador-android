@@ -126,35 +126,29 @@ class AppRepository(
         }
     }
 
-    suspend fun refreshQuotes() = exclusive { refreshQuotesLocked() }
+    /** Refreshes the quotes; returns what the pass wants the holder told (see [Quotes.Refresh]). */
+    suspend fun refreshQuotes(): List<String> = exclusive { refreshQuotesLocked() }
 
     /** Quote refresh without taking the lock - call only from an already-locked method. */
-    private suspend fun refreshQuotesLocked() {
-        val l = ledger ?: return
-        runCatching {
+    private suspend fun refreshQuotesLocked(): List<String> {
+        val l = ledger ?: return emptyList()
+        val warnings = runCatching {
             val cfg = container.loadConfig()
             val from = LocalDate.now(clock).minusYears(2)
             // The two modes differ in what they REPORT, never in what they store: the extended pass
             // returns the very same market data, plus the off-hours prints to show.
-            val refreshed = if (cfg.extendedHours) {
-                Quotes.refreshExtended(
-                    l.book, market, from = from, now = LocalDate.now(clock),
-                    referenceCcy = cfg.displayCurrency, multi = sources, yahoo = yahoo,
-                )
-            } else {
-                Quotes.Refresh(
-                    Quotes.refresh(
-                        l.book, market, from = from, now = LocalDate.now(clock),
-                        referenceCcy = cfg.displayCurrency, multi = sources, yahoo = yahoo,
-                    ),
-                    emptyMap(),
-                )
-            }
+            val refreshed = Quotes.refreshDetailed(
+                l.book, market, from = from, now = LocalDate.now(clock),
+                referenceCcy = cfg.displayCurrency, multi = sources, yahoo = yahoo,
+                extendedHours = cfg.extendedHours,
+            )
             market = refreshed.market
             offHours = refreshed.offHours
             CacheSidecar.write(container.marketCacheFile(l.fileId), l.cacheKey, refreshed.market)
-        }
-        emitReady(currentSyncState(), message = null, refreshing = false)
+            refreshed.warnings
+        }.getOrDefault(emptyList())
+        emitReady(currentSyncState(), message = warnings.firstOrNull(), refreshing = false)
+        return warnings
     }
 
     /**
