@@ -20,8 +20,8 @@ class CrossImplConsumerTest {
         val ledger = Ledger.open(File(path!!).readBytes(), pw)
         assertEquals(1, ledger.book.accounts.size)
         val acc = ledger.book.accounts.values.first()
-        assertEquals("Mon CTO", acc.name)
-        assertEquals("gains:30%", acc.tax.toWire())
+        assertEquals("CTO Meridia", acc.name)
+        assertEquals("gains:31.4%", acc.tax.toWire())
         assertEquals(1, ledger.book.txs.size)
         assertEquals(0, ledger.book.txs.values.first().amount.amount.compareTo(BigDecimal("1234")))
     }

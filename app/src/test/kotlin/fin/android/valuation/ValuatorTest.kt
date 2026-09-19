@@ -339,7 +339,7 @@ class ValuatorTest {
      */
     @Test fun sampleLedgerValuation() {
         val ledger = Ledger.open(sampleBytes(), "finador-format-spec-v3")
-        val cw8Id = "06fc2cjxndn8wez8qqhh0a0"
+        val cw8Id = "06fjrvs9ha04wzbwzfj344g"
         val market = MarketData(
             prices = mapOf(cw8Id to PriceSeries(listOf(PricePoint(d("2024-12-31"), 500.0)))),
         )
