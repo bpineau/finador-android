@@ -24,7 +24,7 @@ when you change architecture or invariants.
    `*_test.go`. Don't change the math without checking parity; if you must, update the Go reference too.
 3. **All docs / comments / code in English.** (User convention.)
 4. **Keep the suite green.** Run the full `testDebugUnitTest` before claiming done; every test must
-   pass (count them from `app/build/test-results/testDebugUnitTest/*.xml`, 257 today).
+   pass (count them from `app/build/test-results/testDebugUnitTest/*.xml`, 263 today).
 5. **Don't weaken security.** Secrets are encrypted under an Android Keystore key
    (`data/SecretStore.kt`); the repo holds only the *encrypted* `.fin`; never log secrets or write
    them to disk in clear.
@@ -124,6 +124,14 @@ that state; per-asset detail pages are **precomputed** into `Ready.assetDetails`
   stored nowhere, so no asset gains a cached field). Every failure mode falls back on the close and
   none is an error: no `open` column, a day the proxy did not trade, a failed fetch. An ESTIMATED
   anchor day keeps the close it was built from, and a nowcast still never overwrites a published NAV.
+- **A source that restates its history makes the series be rebuilt.** The daily fetch is
+  incremental (`Quotes.fetchFrom` resumes at the last cached close), but a share split, a currency
+  redenomination or a class merge rewrites the whole served history, so merging would glue the old
+  scale in front of the new one and leave a permanent cliff the valuation, the chart and the TWR
+  read as a session that never happened. The overlap day is the canary: more than 2 % away from the
+  cached close and the series is dropped and refetched from the floor, with a warning (`Refresh.warnings`
+  → snackbar) asking for the ledger quantities to be checked, since a split moves the position too.
+  Mirrors Go D40; estimates are stripped before the comparison, so a nowcast tail never triggers it.
 - **The market cache is NOT synced** (per-device, regenerable). A freshly synced device has the
   ledger but no prices until `refreshQuotes` runs → period gains read ~0 until quotes load, and
   statement-valued assets (property, cash) have no market "performance" by design.
@@ -175,7 +183,10 @@ that state; per-asset detail pages are **precomputed** into `Ready.assetDetails`
 
 - **Holdings replay is implemented twice** - `valuation/Valuator.kt` (full fold) and
   `valuation/Perf.kt`'s `SeriesBuilder` (day-walk). Extracting the shared per-tx transition logic
-  would remove drift risk, but it touches parity-tested numbers - do it under the full suite.
+  would remove drift risk, but it touches parity-tested numbers - do it under the full suite. Until
+  then `valuation/EndpointFuzzTest` is the net: 20000 random ledgers, several records on the same
+  few days, and the last point of the series must equal the valuation (Go D39/D41 were both found
+  by its Go twin, `internal/portfolio/endpoint_fuzz_test.go`).
 - **`Gains.periodGain` rebuilds a full series per window** (8 windows). Building one series over the
   widest window and slicing (as Go's `report.go` does) is a pure speedup - verify TWR-per-window parity.
 - **The SDK 37 wave is deliberately deferred** (user decision, July 2026): compileSdk/targetSdk

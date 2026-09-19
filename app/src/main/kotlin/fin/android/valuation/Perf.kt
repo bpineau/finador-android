@@ -6,6 +6,7 @@
 // Money is a Double here (matching Go's float64); quantities stay BigDecimal.
 package fin.android.valuation
 
+import fin.android.domain.Asset
 import fin.android.domain.AssetKind
 import fin.android.domain.Book
 import fin.android.domain.MarketData
@@ -324,12 +325,14 @@ internal class SeriesBuilder(
         var ti = 0
         var d = from
         while (!d.isAfter(to)) {
-            // Apply every transaction up to and including day d. Transactions
-            // strictly after `from` are collected as flows.
+            // Apply every transaction up to and including day d, one calendar day at a time
+            // (applyDay owns the order inside a day). Transactions strictly after `from` are
+            // collected as flows.
             while (ti < txs.size && !d.isBefore(txs[ti].date)) {
-                val collect = from.isBefore(txs[ti].date)
-                w.applyTx(txs[ti], collect, flows)
-                ti++
+                val start = ti
+                val day = txs[ti].date
+                while (ti < txs.size && txs[ti].date == day) ti++
+                w.applyDay(txs.subList(start, ti), from.isBefore(day), flows)
             }
             w.applyDividends(d, from.isBefore(d), flows)
             points += PricePoint(d, w.valueAt(d))
@@ -349,9 +352,23 @@ internal class SeriesBuilder(
     private val manualDividendAssets: Set<String?> =
         book.txs.values.filter { it.kind == TxKind.dividend && it.asset != null }.map { it.asset }.toHashSet()
 
-    private inner class PairState(val accId: String, val assetId: String) {
+    private inner class PairState(val accId: String, val asset: Asset) {
+        /**
+         * The SIGNED running quantity, exactly [Valuer]'s `holdings` reading: every sell subtracts,
+         * and only the value read out is clamped at zero. A sell recorded before the buy that covers
+         * it (an intraday round trip typed in that order) must net out, not be dropped - dropping it
+         * valued the position at the buy alone (Go D41).
+         */
         var qty = 0.0
-        var basis = 0.0 // average cost in ref ccy, flows converted at their date
+
+        /**
+         * The average cost in ref ccy (flows converted at their date) and the quantity it backs - a
+         * separate counter, because an average cost cannot go negative: a sell beyond what the basis
+         * knows leaves it alone. Same split as `Valuer.positionBasis`.
+         */
+        var basis = 0.0
+        var basisQty = 0.0
+
         var stmt: Money? = null // last seen statement (property/unpriced security)
         var stmtQty = 0.0 // quantity held when [stmt] was taken (per-share scaling of the NAV observation)
     }
@@ -372,8 +389,9 @@ internal class SeriesBuilder(
         private fun pair(accId: String, assetId: String): PairState? {
             val k = accId to assetId
             pairs[k]?.let { return it }
-            if (book.accounts[accId] == null || book.assets[assetId] == null) return null
-            val p = PairState(accId, assetId)
+            if (book.accounts[accId] == null) return null
+            val asset = book.assets[assetId] ?: return null // orphaned reference: skip
+            val p = PairState(accId, asset)
             pairs[k] = p
             return p
         }
@@ -382,27 +400,58 @@ internal class SeriesBuilder(
             if (collect && amount != 0.0) flows += Flow(d, amount)
         }
 
+        /**
+         * Applies the records of ONE calendar day: first everything that moves a position or a
+         * balance, then that day's statements.
+         *
+         * A statement declares a TOTAL at its date - the pair's whole value, the account's whole
+         * cash - so it must read the day's trades and flows rather than be overwritten by them.
+         * [Valuer] reads it exactly that way (the per-share scaling divides by the quantity at the
+         * statement's DATE, and the cash anchor supersedes every flow dated on or before it), and
+         * the two engines must agree pointwise. Ordering the day this way is what makes them
+         * agree: replaying in plain (date, id) order - and ids are ENTRY order, not event order -
+         * made a deposit typed after a same-day cash statement count twice, and a buy typed after
+         * a same-day security statement scale that statement by the whole position (Go D39). The
+         * rule is per day: a statement of the 5th never supersedes a deposit of the 10th.
+         */
+        fun applyDay(day: List<Tx>, collect: Boolean, flows: MutableList<Flow>) {
+            for (t in day) if (t.kind != TxKind.statement) applyTx(t, collect, flows)
+            for (t in day) if (t.kind == TxKind.statement) applyTx(t, collect, flows)
+        }
+
         fun applyTx(t: Tx, collect: Boolean, flows: MutableList<Flow>) {
             val acc = accounts[t.account] ?: return
             val accCcy = book.accounts[t.account]?.ccy ?: return
 
             when (t.kind) {
                 TxKind.buy, TxKind.sell -> {
-                    val assetId = t.asset ?: return
-                    val asset = book.assets[assetId] ?: return
-                    val p = pair(t.account, assetId) ?: return
-                    val disp = toRef(t.amount.amount.toDouble(), t.amount.ccy, t.date)
                     val sign = if (t.kind == TxKind.sell) -1.0 else 1.0
-                    val qtyBefore = p.qty
+                    val disp = toRef(t.amount.amount.toDouble(), t.amount.ccy, t.date)
+                    val p = t.asset?.let { pair(t.account, it) }
+                    if (p == null) {
+                        // No asset to price: a trade whose asset cell is empty (a CSV import can
+                        // write one) or whose asset was deleted. It still moved capital across the
+                        // envelope, and `Valuer.accountBasis` counts it, so it crosses the scope
+                        // boundary here too - scoped like the envelope's own money, exactly like a
+                        // fee that names no asset (Go D41).
+                        addFlow(flows, t.date, sign * disp, collect)
+                        return
+                    }
+                    val asset = p.asset
+                    val qtyBefore = maxOf(0.0, p.qty) // a sell moves no more market value than was held
 
                     if (asset.kind != AssetKind.PROPERTY) {
                         if (t.kind == TxKind.buy) {
                             p.basis += disp
+                            p.basisQty += t.qty.toDouble()
                             p.qty += t.qty.toDouble()
-                        } else if (p.qty > 0) {
-                            val sold = minOf(t.qty.toDouble(), p.qty)
-                            p.basis -= p.basis * sold / p.qty
-                            p.qty -= sold
+                        } else {
+                            p.qty -= t.qty.toDouble()
+                            if (p.basisQty > 0) {
+                                val sold = minOf(t.qty.toDouble(), p.basisQty)
+                                p.basis -= p.basis * sold / p.basisQty
+                                p.basisQty -= sold
+                            }
                         }
                     }
 
@@ -411,7 +460,7 @@ internal class SeriesBuilder(
                     // back to the cash amount when no price is known that day.
                     var flowVal = disp
                     if (asset.kind != AssetKind.PROPERTY) {
-                        val close = prices[assetId]?.at(t.date)?.first
+                        val close = prices[asset.id]?.at(t.date)?.first
                         if (close != null) {
                             var qtyTx = t.qty.toDouble()
                             if (t.kind == TxKind.sell) qtyTx = minOf(qtyTx, qtyBefore)
@@ -443,8 +492,10 @@ internal class SeriesBuilder(
                 TxKind.fee -> {
                     // A cost is capital that enters the envelope and buys nothing: the
                     // positive flow with no value against it reads as a loss of the fee,
-                    // with or without declared cash (D29). Same pair guard as dividends.
-                    pair(t.account, t.asset ?: return) ?: return
+                    // with or without declared cash (D29). A fee naming no asset (custody,
+                    // account charge) belongs to the envelope itself and weighs on it just the
+                    // same; in the whole-book scope the two readings coincide.
+                    t.asset?.let { pair(t.account, it) }
                     addFlow(flows, t.date, toRef(t.amount.amount.toDouble(), t.amount.ccy, t.date), collect)
                 }
 
@@ -462,11 +513,14 @@ internal class SeriesBuilder(
                         acc.cash = newBalance
                         return
                     }
-                    val asset = book.assets[t.asset] ?: return
                     val p = pair(t.account, t.asset) ?: return
+                    val asset = p.asset
                     val isFirstStmt = p.stmt == null
                     val prevHeld = if (isFirstStmt) 0.0 else toRef(p.stmt!!.amount.toDouble(), p.stmt!!.ccy, t.date)
                     p.stmt = t.amount
+                    // The END-OF-DAY quantity: applyDay has already replayed the day's trades, so
+                    // this is the quantity the statement's total is spread over, exactly as
+                    // `Valuer.positionValue` reads it (the quantity at the statement's date).
                     p.stmtQty = p.qty
                     val newDisp = toRef(t.amount.amount.toDouble(), t.amount.ccy, t.date)
                     // A statement re-declares a value: the gap since the previously-held
@@ -482,7 +536,7 @@ internal class SeriesBuilder(
                         asset.kind == AssetKind.PROPERTY ->
                             addFlow(flows, t.date, newDisp - prevHeld, collect)
                         isFirstStmt -> {
-                            val hasPx = prices[t.asset]?.at(t.date) != null
+                            val hasPx = prices[asset.id]?.at(t.date) != null
                             if (!hasPx && p.qty > 0 && p.basis == 0.0) addFlow(flows, t.date, newDisp, collect)
                         }
                     }
@@ -496,13 +550,12 @@ internal class SeriesBuilder(
          */
         fun applyDividends(d: LocalDate, collect: Boolean, flows: MutableList<Flow>) {
             for (p in pairs.values) {
-                if (p.qty <= 0 || p.assetId in manualDividendAssets) continue
-                val asset = book.assets[p.assetId] ?: continue
-                val withholding = asset.withholding ?: 0.0
-                for (ev in dividends[p.assetId] ?: emptyList()) {
+                if (p.qty <= 0 || p.asset.id in manualDividendAssets) continue
+                val withholding = p.asset.withholding ?: 0.0
+                for (ev in dividends[p.asset.id] ?: emptyList()) {
                     if (ev.exDate != d) continue
                     val net = p.qty * ev.amount * (1 - withholding)
-                    addFlow(flows, d, -toRef(net, asset.ccy, d), collect)
+                    addFlow(flows, d, -toRef(net, p.asset.ccy, d), collect)
                 }
             }
         }
@@ -512,14 +565,14 @@ internal class SeriesBuilder(
             var gross = 0.0
             // Security / property positions.
             for (p in pairs.values) {
-                val asset = book.assets[p.assetId] ?: continue
+                val asset = p.asset
                 var v = 0.0
                 if (asset.kind == AssetKind.PROPERTY) {
                     p.stmt?.let { v = toRef(it.amount.toDouble(), it.ccy, d) }
                 } else if (p.qty > 0) {
                     // Same fallback chain as Valuator.positionValue: market close → last
                     // statement (a NAV observation, scaled per share) → cost basis.
-                    val close = prices[p.assetId]?.at(d)?.first
+                    val close = prices[p.asset.id]?.at(d)?.first
                     v = when {
                         close != null -> convert(p.qty * close, asset.ccy, ccy, d)
                         p.stmt != null -> {
