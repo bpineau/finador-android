@@ -341,17 +341,20 @@ class PerfTest {
     }
 
     /**
-     * Mirrors the Go walker's pair() guard: a fee whose (account, asset) pair does
-     * not resolve - no asset at all, or an orphaned reference left behind by an
-     * asset-del - is skipped entirely, so the phone and the laptop keep emitting
-     * the same flows for the same ledger.
+     * A fee whose (account, asset) pair does not resolve - a custody or account charge naming no
+     * asset, or an orphaned reference left behind by an asset-del - belongs to the ENVELOPE: it is
+     * capital that entered and bought nothing, and it weighs on the whole account (Go `series.go`
+     * `case domain.Fee`, f86f4f1). In the whole-book scope it reads exactly like a fee on a held
+     * asset, so all three cross the boundary.
      */
-    @Test fun feeWithoutAssetPairEmitsNoFlow() {
+    @Test fun feeWithoutAssetPairWeighsOnTheEnvelope() {
         val (book, flows) = flowsWithOrphans(TxKind.fee)
-        assertEquals(2, flows.size)
+        assertEquals(4, flows.size)
         assertEquals(1000.0, flows[0].amount, 0.01) // the buy
-        assertEquals(20.0, flows[1].amount, 0.01) // the well-formed fee, and nothing else
-        assertEquals(3, book.txs.values.count { it.kind == TxKind.fee }) // the two orphans exist
+        assertEquals(20.0, flows[1].amount, 0.01) // on the held asset
+        assertEquals(20.0, flows[2].amount, 0.01) // naming no asset
+        assertEquals(20.0, flows[3].amount, 0.01) // naming an asset deleted since
+        assertEquals(3, book.txs.values.count { it.kind == TxKind.fee })
     }
 
     /** Same pair() guard for manual dividends: no resolvable asset, no flow. */
@@ -377,6 +380,132 @@ class PerfTest {
         val book = Book(accounts = accounts, assets = assets, txs = txs, config = mapOf("currency" to "EUR"))
         val series = SeriesBuilder(book, MarketData(), "EUR").build(d("2026-01-01"), d("2026-01-10"))
         return book to series.flows
+    }
+
+    // ---- same-day ordering and quantity replay (Go D39, D41) ----
+
+    /**
+     * The invariant [Valuator] and [SeriesBuilder] share: the last point of a series is what the
+     * valuation reports at that date. The named tests below pin the conventions; `EndpointFuzzTest`
+     * pins the agreement itself over randomized ledgers.
+     */
+    private fun endpointEquality(book: Book, market: MarketData, from: LocalDate, at: LocalDate) {
+        val want = Valuator.value(book, market, referenceCcy = "EUR", at = at).gross
+        val got = SeriesBuilder(book, market, "EUR").build(from, at).points.last().close
+        assertEquals("Valuator and series disagree on the endpoint", want, got, 0.01)
+    }
+
+    /**
+     * Go TestSameDayCashStatementSupersedesDeposit (D39): a deposit typed AFTER a same-day cash
+     * statement is already inside the declared balance - the statement declares the account's whole
+     * cash at that date. Replaying in plain (date, id) order counted it twice: 12500 in the series
+     * against the valuation's 12000. Side benefit of the fix: the flows add up to the declared
+     * balance again (500 deposited plus an 11500 adoption), where 500 of contribution used to read
+     * as performance.
+     */
+    @Test fun sameDayCashStatementSupersedesDeposit() {
+        nextSeq = 0
+        val accounts = mapOf("livret" to Account("livret", "Livret", "EUR", TaxRule.None))
+        val txs = listOf(
+            tx("2026-01-05", "livret", null, TxKind.statement, amount = eur("12000")),
+            tx("2026-01-05", "livret", null, TxKind.deposit, amount = eur("500")),
+        ).associateBy { it.id }
+        val book = Book(accounts = accounts, txs = txs, config = mapOf("currency" to "EUR"))
+        val from = d("2026-01-01")
+        val at = d("2026-01-10")
+        val series = SeriesBuilder(book, MarketData(), "EUR").build(from, at)
+        assertEquals(12000.0, series.points.last().close, 0.01)
+        assertEquals(12000.0, series.flows.sumOf { it.amount }, 0.01)
+        endpointEquality(book, MarketData(), from, at)
+    }
+
+    /**
+     * Go TestSameDayBuyIsInsideTheStatement (D39): a security statement declares the pair's TOTAL
+     * value at its date, so a buy typed the same day is inside it. Scaling the statement per share
+     * against the pre-buy quantity doubled the position - 2200 against the valuation's 1100.
+     */
+    @Test fun sameDayBuyIsInsideTheStatement() {
+        nextSeq = 0
+        val accounts = mapOf("pee" to Account("pee", "PEE", "EUR", TaxRule.None))
+        val assets = mapOf("fcpe" to Asset("fcpe", AssetKind.SECURITY, "FCPE", ccy = "EUR", group = "g"))
+        val txs = listOf(
+            tx("2026-01-10", "pee", "fcpe", TxKind.buy, "10", eur("1000")),
+            tx("2026-02-01", "pee", "fcpe", TxKind.statement, amount = eur("1100")),
+            tx("2026-02-01", "pee", "fcpe", TxKind.buy, "10", eur("1100")),
+        ).associateBy { it.id }
+        val book = Book(accounts = accounts, assets = assets, txs = txs, config = mapOf("currency" to "EUR"))
+        val from = d("2026-01-01")
+        val at = d("2026-03-01")
+        val series = SeriesBuilder(book, MarketData(), "EUR").build(from, at)
+        assertEquals(1100.0, series.points.last().close, 0.01)
+        endpointEquality(book, MarketData(), from, at)
+    }
+
+    /**
+     * Go TestStatementOrderingIsPerDayOnly (D39): the rule is per DAY. A statement of the 5th still
+     * anchors the deposit of the 10th, which lands on top of the declared balance.
+     */
+    @Test fun statementOrderingIsPerDayOnly() {
+        nextSeq = 0
+        val accounts = mapOf("livret" to Account("livret", "Livret", "EUR", TaxRule.None))
+        val txs = listOf(
+            tx("2026-01-05", "livret", null, TxKind.statement, amount = eur("12000")),
+            tx("2026-01-10", "livret", null, TxKind.deposit, amount = eur("500")),
+        ).associateBy { it.id }
+        val book = Book(accounts = accounts, txs = txs, config = mapOf("currency" to "EUR"))
+        // A window opening after both records must still replay them in order.
+        val from = d("2026-02-01")
+        val at = d("2026-02-10")
+        val series = SeriesBuilder(book, MarketData(), "EUR").build(from, at)
+        assertEquals(12500.0, series.points.last().close, 0.01)
+        endpointEquality(book, MarketData(), from, at)
+    }
+
+    /**
+     * Go TestSellBeforeItsCoveringBuyNetsOut (D41): an intraday round trip typed sell-first (the
+     * sell carries the lower id, because it was entered first) must net out. The walker clamped the
+     * position at every sell, so the sell vanished and the buy alone was valued: 9 shares where the
+     * holdings replay - and therefore the valuation - reads 1.
+     */
+    @Test fun sellBeforeItsCoveringBuyNetsOut() {
+        nextSeq = 0
+        val accounts = mapOf("cto" to Account("cto", "CTO", "EUR", TaxRule.None))
+        val assets = mapOf("x" to Asset("x", AssetKind.SECURITY, "X", ccy = "EUR", group = "g"))
+        val txs = listOf(
+            tx("2026-02-03", "cto", "x", TxKind.sell, "8", eur("192")),
+            tx("2026-02-03", "cto", "x", TxKind.buy, "9", eur("216")),
+        ).associateBy { it.id }
+        val book = Book(accounts = accounts, assets = assets, txs = txs, config = mapOf("currency" to "EUR"))
+        val market = MarketData(prices = mapOf("x" to PriceSeries(listOf(PricePoint(d("2026-02-02"), 24.0)))))
+        val from = d("2026-02-01")
+        val at = d("2026-02-10")
+        val series = SeriesBuilder(book, market, "EUR").build(from, at)
+        assertEquals(24.0, series.points.last().close, 0.01) // one share left, not nine
+        endpointEquality(book, market, from, at)
+    }
+
+    /**
+     * Go TestTradeWithNoAssetStillFeedsTheEnvelopeBasis (D41): a trade whose asset cell is empty (a
+     * CSV import can write one) or whose asset was deleted still moved capital across the envelope.
+     * The walker dropped it while `Valuer.accountBasis` counts it. Android's series is gross-only,
+     * so what it can pin is the flow: the Go reference also pins the envelope tax the two engines
+     * used to split.
+     */
+    @Test fun tradeWithNoAssetStillCrossesTheEnvelope() {
+        nextSeq = 0
+        val accounts = mapOf("cto" to Account("cto", "CTO", "EUR", TaxRule.Gains(BigDecimal("0.314"))))
+        val txs = listOf(
+            tx("2026-02-01", "cto", null, TxKind.deposit, amount = eur("700")),
+            tx("2026-02-03", "cto", null, TxKind.sell, "8", eur("500")),
+        ).associateBy { it.id }
+        val book = Book(accounts = accounts, txs = txs, config = mapOf("currency" to "EUR"))
+        val from = d("2026-01-01")
+        val at = d("2026-02-10")
+        val series = SeriesBuilder(book, MarketData(), "EUR").build(from, at)
+        assertEquals(2, series.flows.size)
+        assertEquals(700.0, series.flows[0].amount, 0.01) // the deposit
+        assertEquals(-500.0, series.flows[1].amount, 0.01) // the trade naming no asset
+        endpointEquality(book, MarketData(), from, at)
     }
 
     /**
