@@ -454,7 +454,7 @@ primitives (`Surface` + `Row` + `Text` + `IconButton`; `OutlinedTextField` + a p
 **Why the remaining ten are tolerated.** An experimental API that changes breaks the **compile**,
 loudly, at a bump the maintainer chose to make, and `make build` is a gate. It cannot make the
 app stop working on a user's phone after an OS update, which is the failure this project is
-actually afraid of. If Material3 ever does break them, the fallback is written above and is
+designed to avoid. If Material3 ever does break them, the fallback is written above and is
 maybe 60 lines.
 
 ---
