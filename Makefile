@@ -1,14 +1,39 @@
 # Developer entry points for finador-android. Every target exports the JDK/SDK locations the
 # Gradle wrapper needs, so `make test` works from a fresh shell with no profile sourced.
 # Override on the command line if your paths differ: `make test ANDROID_HOME=/opt/sdk`.
+#
+# Nothing installed yet? `make setup` (macOS) does it, and `make doctor` says what is missing.
 
-JAVA_HOME ?= /Library/Java/JavaVirtualMachines/temurin-21.jdk/Contents/Home
-ANDROID_HOME ?= /opt/homebrew/share/android-commandlinetools
+# Read from the build files, so this file cannot ask for a version the build does not want.
+JDK := $(shell sed -n 's/.*JavaLanguageVersion.of(\([0-9]*\)).*/\1/p' app/build.gradle.kts)
+COMPILE_SDK := $(shell sed -n 's/.*compileSdk = \([0-9]*\).*/\1/p' app/build.gradle.kts)
+
+# The JDK: whatever the shell exports, else the Homebrew/Temurin location, else ask macOS.
+# (`?=` is lazy, so the /usr/libexec call only happens when JAVA_HOME is unset AND the path below
+# does not exist.)
+TEMURIN := /Library/Java/JavaVirtualMachines/temurin-$(JDK).jdk/Contents/Home
+ifneq ($(wildcard $(TEMURIN)),)
+JAVA_HOME ?= $(TEMURIN)
+else
+JAVA_HOME ?= $(shell /usr/libexec/java_home -v $(JDK) 2>/dev/null)
+endif
+
+# The SDK: ANDROID_HOME, else the deprecated-but-common ANDROID_SDK_ROOT, else the first standard
+# location that exists (Homebrew on Apple Silicon, on Intel, Android Studio's macOS and Linux
+# defaults), else the Homebrew path so the error message names something actionable.
+ANDROID_HOME ?= $(or $(ANDROID_SDK_ROOT),$(firstword $(wildcard \
+	/opt/homebrew/share/android-commandlinetools \
+	/usr/local/share/android-commandlinetools \
+	$(HOME)/Library/Android/sdk \
+	$(HOME)/Android/Sdk)),/opt/homebrew/share/android-commandlinetools)
+
 export JAVA_HOME ANDROID_HOME
 
 GRADLE := ./gradlew --console=plain
 ADB := $(ANDROID_HOME)/platform-tools/adb
 EMULATOR := $(ANDROID_HOME)/emulator/emulator
+# The AVD the emulator targets boot; `make setup-emulator` creates test$(COMPILE_SDK).
+AVD ?= test$(COMPILE_SDK)
 
 RELEASE_APK := app/build/outputs/apk/release/app-release.apk
 APKSIGNER = $$(ls -d "$(ANDROID_HOME)"/build-tools/* 2>/dev/null | sort -V | tail -1)/apksigner
@@ -34,26 +59,43 @@ VERSION = $(shell sed -n 's/.*versionName = "\(.*\)".*/\1/p' app/build.gradle.kt
 DIST := app/build/dist
 ASSET = $(DIST)/finador-android-v$(VERSION)$(if $(DEBUG_APK),-debug,).apk
 
-.PHONY: help test test-class build install run reinstall release release-apk verify-signature \
-	check-signing smoke-release gh-release gh-release-dry-run lint probe crossimpl emulator \
-	emulator-kill clean
+.PHONY: help doctor setup setup-emulator preflight test test-class build install run reinstall \
+	release release-apk verify-signature check-signing smoke-release gh-release \
+	gh-release-dry-run lint probe crossimpl emulator emulator-kill clean
 
 help: ## List available targets
 	@grep -E '^[a-z-]+:.*##' $(MAKEFILE_LIST) | awk -F':.*## ' '{printf "  %-18s %s\n", $$1, $$2}'
 
-test: ## Run the full unit-test suite (host JVM, no device) - the main dev loop
+doctor: ## Check this machine against what the build needs; print OK/MISSING and the fix. Changes nothing.
+	@scripts/doctor.sh
+
+setup: ## Install whatever `make doctor` reports missing (macOS/Homebrew; says what to do elsewhere). Idempotent, never touches a signing key.
+	@scripts/setup.sh
+
+setup-emulator: ## Same, plus the emulator, a system image for the build's compileSdk and the AVD the emulator targets boot (~1.5 GB)
+	@scripts/setup.sh --emulator
+
+# Two file tests, no subprocess beyond one shell: enough to turn "Gradle exploded in 400 lines"
+# into "run make doctor". Anything subtler belongs in `make doctor`, which is opt-in.
+preflight:
+	@test -x "$(JAVA_HOME)/bin/java" || { \
+	  echo "ERROR: no JDK $(JDK) at '$(JAVA_HOME)' - run 'make doctor' (or 'make setup')"; exit 1; }
+	@test -d "$(ANDROID_HOME)/cmdline-tools" -o -d "$(ANDROID_HOME)/platforms" || { \
+	  echo "ERROR: no Android SDK at '$(ANDROID_HOME)' - run 'make doctor' (or 'make setup')"; exit 1; }
+
+test: preflight ## Run the full unit-test suite (host JVM, no device) - the main dev loop
 	$(GRADLE) testDebugUnitTest
 	@cat app/build/test-results/testDebugUnitTest/*.xml \
 	  | grep -ho '\(tests\|failures\|errors\)="[0-9]*"' | tr -dc '0-9tfe="\n' \
 	  | awk -F'"' '/^t/ {t+=$$2} /^f/ {f+=$$2} /^e/ {e+=$$2} END {printf "summary: %d tests, %d failures, %d errors\n", t, f, e}'
 
-test-class: ## Run one test class, e.g. `make test-class T=GainsTest`
+test-class: preflight ## Run one test class, e.g. `make test-class T=GainsTest`
 	$(GRADLE) testDebugUnitTest --tests "*$(T)*" --rerun-tasks
 
-build: ## Compile the debug APK (catches Compose/Android compile errors)
+build: preflight ## Compile the debug APK (catches Compose/Android compile errors)
 	$(GRADLE) assembleDebug
 
-install: ## Build and install the debug APK on the connected device/emulator
+install: preflight ## Build and install the debug APK on the connected device/emulator
 	$(GRADLE) installDebug
 
 run: install ## Install, then (re)launch the app
@@ -63,7 +105,7 @@ reinstall: ## Uninstall then install the debug APK (fixes the signature mismatch
 	-$(ADB) uninstall fin.android
 	$(GRADLE) installDebug
 
-release: ## Build the R8-minified release APK (real key when configured, else debug-signed)
+release: preflight ## Build the R8-minified release APK (real key when configured, else debug-signed)
 	$(GRADLE) assembleRelease
 	@ls -lh $(RELEASE_APK) | awk '{print "APK: '"$(RELEASE_APK)"' (" $$5 ")"}'
 
@@ -104,7 +146,7 @@ release-apk: check-signing release ## Build, signature-verify and stage the inst
 	@test -x "$(APKSIGNER)" || { \
 	  echo "ERROR: apksigner not found under $(ANDROID_HOME)/build-tools - cannot verify the APK's"; \
 	  echo "signature, and an unverified APK is not something to publish. Install the build-tools:"; \
-	  echo "  sdkmanager 'build-tools;36.0.0'"; \
+	  echo "  make setup"; \
 	  exit 1; \
 	}
 	$(APKSIGNER) verify --verbose --print-certs $(RELEASE_APK)
@@ -169,19 +211,21 @@ gh-release-dry-run: ## Everything gh-release does EXCEPT the tag, the push and t
 	@echo "  upload:   gh release $$(gh release view "v$(VERSION)" >/dev/null 2>&1 && echo 'upload --clobber' || echo create) v$(VERSION) $(ASSET)"
 	@echo "  notes:    $(if $(NOTES),--notes-file $(NOTES),--generate-notes)"
 
-probe: ## Hit the REAL market-data providers over the network and print what came back (not part of `make test`)
+probe: preflight ## Hit the REAL market-data providers over the network and print what came back (not part of `make test`)
 	$(GRADLE) testDebugUnitTest --tests "*LiveProviderProbe*" --rerun-tasks -Dprobe=1 -i \
 	  | grep -E "^probe |FAILED|live providers"
 
-lint: ## Android Lint; report in app/build/reports/lint-results-debug.txt
+lint: preflight ## Android Lint; report in app/build/reports/lint-results-debug.txt
 	$(GRADLE) lintDebug
 
-crossimpl: ## Cross-implementation gate against the Go reference (builds /tmp/finador first)
+crossimpl: preflight ## Cross-implementation gate against the Go reference (builds /tmp/finador first)
 	cd ../finador && go build -trimpath -o /tmp/finador ./cmd/finador
 	scripts/crossimpl.sh
 
-emulator: ## Boot the headless test emulator (AVD "test") and wait until it is ready
-	$(EMULATOR) -avd test -no-window -no-audio -no-boot-anim >/dev/null 2>&1 &
+emulator: ## Boot the headless test emulator and wait until it is ready (override the AVD with AVD=name)
+	@test -d "$(HOME)/.android/avd/$(AVD).avd" || { \
+	  echo "ERROR: no AVD named '$(AVD)' - run 'make setup-emulator' (or pass AVD=<name>)"; exit 1; }
+	$(EMULATOR) -avd $(AVD) -no-window -no-audio -no-boot-anim >/dev/null 2>&1 &
 	$(ADB) wait-for-device
 	until [ "$$($(ADB) shell getprop sys.boot_completed 2>/dev/null | tr -d '\r')" = "1" ]; do sleep 2; done
 	@echo "emulator ready"
