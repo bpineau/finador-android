@@ -14,10 +14,10 @@ when you change architecture or invariants.
 
 ## Golden rules (do not break)
 
-0. **This app is maintained by Go developers, not Android specialists.** Every choice is weighed
+0. **Write code that survives Android upgrades with little or no maintenance.** Every choice is weighed
    first on: forward compatibility with future Android versions and future phones; low maintenance;
    the fewest possible third-party libraries; no deprecated API or library; and a dev environment
-   any newcomer recreates on a fresh laptop with one obvious command (`make setup`, checked by
+   anyone (or any coding agent) recreates on a fresh laptop with one obvious command (`make setup`, checked by
    `make doctor`). A feature that costs yearly upkeep must earn it. When a dependency and a hundred
    lines of platform code do the same job, the platform wins - that is how okhttp left
    (`docs/maintainability.md` §6) and how `EncryptedSharedPreferences` and `material-icons-extended`
