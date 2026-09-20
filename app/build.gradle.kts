@@ -8,7 +8,7 @@ plugins {
 
 android {
     namespace = "fin.android"
-    compileSdk = 36
+    compileSdk = 37
 
     defaultConfig {
         applicationId = "fin.android"
