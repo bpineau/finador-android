@@ -25,7 +25,7 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
@@ -225,7 +225,7 @@ private fun Sparkline(d: AssetDetail) {
     if (all.size < 2) return // defensive: nothing meaningful to draw
     val lineColor = MaterialTheme.colorScheme.primary
 
-    var rangeOrdinal by rememberSaveable { mutableStateOf(ChartRange.M6.ordinal) }
+    var rangeOrdinal by rememberSaveable { mutableIntStateOf(ChartRange.M6.ordinal) }
     val range = ChartRange.entries[rangeOrdinal]
     val anchor = all.last().date
     val pts = remember(rangeOrdinal, all) {

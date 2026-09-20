@@ -84,6 +84,10 @@ dependencies {
     implementation(libs.compose.ui)
     implementation(libs.compose.material3)
     implementation(libs.activity.compose)
+    // Declared, not inherited: ui/Theme.kt (WindowCompat), ui/UnlockScreen.kt
+    // (ContextCompat.getMainExecutor) and data/SecretStore.kt (SharedPreferences.edit) all use it,
+    // and it would otherwise arrive only as a transitive of Compose.
+    implementation(libs.androidx.core.ktx)
     implementation(libs.androidx.navigation.compose)
     implementation(libs.androidx.lifecycle.viewmodel.compose)
     implementation(libs.androidx.lifecycle.runtime.compose)
