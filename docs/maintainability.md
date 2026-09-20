@@ -200,9 +200,22 @@ option.
    dependency) exposing the same `start`/`shutdown`/`url`/`enqueue`/`takeRequest`/`dispatcher`
    shape MockWebServer had. Same requests asserted, same paths, same bodies, same headers, same
    retry-on-429 and 401-crumb-renewal scenarios.
-2. A live probe (`app/src/test/kotlin/.../market/LiveProviderProbe.kt`, opt-in, see §8) fetched
-   real series from Yahoo, FT, Morningstar and Airfund on the old stack and on the new one and
-   compared the results. Same closes, same currencies, same dividend events.
+2. A live probe (`app/src/test/kotlin/fin/android/market/LiveProviderProbe.kt`, new, opt-in,
+   run with `make probe`, never part of `make test`) fetched real series from the providers on
+   the old stack and then on the new one. Result, stated exactly:
+   - **FT** (`LU0171310443`): identical, 42 closes 2026-07-22..2026-09-17, last 127.17 EUR.
+   - **Airfund** (both FCPE share classes): identical, 631 and 311 NAVs, same last values
+     (70.68 and 206.8 on 2026-09-16). This is the POST-with-a-JSON-body path.
+   - **Morningstar**: failed on BOTH runs, and `curl` cannot reach `tools.morningstar.fr` from
+     this machine either. A provider outage, not a regression; it is the last link of the
+     fallback chain and the app degrades to the others.
+   - **Yahoo**: verified GREEN on the old stack (daily, FX, and the cookie+crumb quote call, all
+     plausible). It could NOT be re-verified on the new stack within the session: repeating the
+     probe tripped Yahoo's per-IP rate limit and every request - including plain `curl` with the
+     same User-Agent - answered `429 Too Many Requests` for the rest of the session. **Re-run
+     `make probe` from a fresh IP before the next release and check the four Yahoo lines.**
+     The hermetic `YahooTest`/`QuotesTest` do cover the same paths against the fake server,
+     including the 429 retry and the 401-crumb-renewal.
 
 **What a reader should still know.** Two differences exist and are handled in `market/Http.kt`:
 a `HttpURLConnection` throws `IOException` on a 4xx/5xx instead of returning the body, so the code
@@ -348,3 +361,144 @@ Said plainly, because the gap is real:
   `gradle/libs.versions.toml`, never use a dynamic version, and move deliberately once a year.
 - **Unofficial market endpoints will break.** Nothing about Android can prevent that. They are
   isolated behind `market/Source.kt` so a failing provider degrades instead of crashing.
+
+---
+
+## 11. The churn record: which libraries actually cost work
+
+The question behind this section is "which of these are habitual breakers?". It is answered with
+facts, not impressions: upstream release notes, and this repository's own git history (102
+commits, `git log -p -- gradle/libs.versions.toml app/build.gradle.kts`).
+
+| Dependency | Bumps in this repo | Bumps that forced a code change | Upstream break record |
+|---|---|---|---|
+| **okhttp** | 2 (4.12.0 -> 5.4.0, then 5.4.0 -> 5.5.0) | **2 of 2** | 4.0.0 (2019-06) = whole-library Kotlin rewrite with an official upgrade guide. 5.0.0 (2025-07) = artifacts split into JVM and Android variants, AND MockWebServer moved to a new coordinate *and* package (`mockwebserver3`), the old one labelled **"Obsolete"** in Square's own table - which is the artifact this repo was using. Every release pins a new Okio and a new kotlin-stdlib. 5.3.0's notes record a ZSTD-KMP fix "that caused APKs to fail 16 KB ELF alignment checks". 5.5.0 requires compileSdk 37 (its ECH support is Android-17-only). Project moved to the Commonhaus Foundation and changed its signing key in 5.5.0. |
+| **AGP** | 4 (8.13.2 -> 9.3.0 -> 9.3.3 -> 9.4.1) | 1 of 4 | AGP 9 ships built-in Kotlin support and *rejects* the `org.jetbrains.kotlin.android` plugin: both build files had to drop it. AGP 10 will make the new Variant API mandatory. Majors break by design; this is the price of the platform. |
+| **Kotlin** | 3 (2.2.20 -> 2.4.10 -> 2.4.20) | 1 of 3 | 2.4's sharper nullability analysis turned redundant `!!` into warnings in three files. Warnings, not errors, and the project treats warnings as bugs. |
+| **Compose BOM** | 2 | 0 | No source change in this repo. But 2026.09.00 refused to build below compileSdk 37, and the BOM has dropped an artifact before (see material-icons-extended below). Its APIs are partly `@ExperimentalMaterial3Api` (§12). |
+| **navigation-compose** | 1 (2.9.8 -> 2.10.1) | 0 | Blocked once by the compileSdk-37 gate. API stable since 2021. Navigation 3 exists as a separate, opt-in artifact. |
+| **lifecycle** | 2 (2.9.4 -> 2.10.0 -> 2.11.0) | 0 | 2.11.0 hard-requires compileSdk 37; that is the whole of its record here. |
+| **kotlinx-serialization** | 1 (1.9.0 -> 1.11.0) | 0 | Nothing. |
+| **kotlinx-coroutines** | 1 (1.10.2 -> 1.11.0) | 0 | Nothing. |
+| **Bouncy Castle** | 2 (1.84 -> 1.85 -> 1.86) | **0 of 2** | Nothing, twice, with `make crossimpl` green against the Go reference each time. Quarterly cadence, pure Java, no `.so`. The best-behaved dependency in the project. |
+| **androidx.biometric** | 0 | 0 | Has not moved since the app was written, or since 2021. Frozen, not broken (§4). |
+| **JUnit 4** | 0 | 0 | API-frozen for a decade. For a test runner that is the desired property. |
+| **activity-compose** | 1 | 0 | Nothing. |
+
+**Two libraries in this repo have already died**, and both were Google's own, which is the reason
+"first-party" is a KEEP argument but not a guarantee:
+
+- `androidx.security:security-crypto` (`EncryptedSharedPreferences`) was **deprecated by Google**.
+  Commit `dd1281d` replaced it with ~100 lines of hand-written Android Keystore AES-GCM in
+  `data/SecretStore.kt`; `1e07ec0` deleted the migration shim and the dependency.
+- `androidx.compose.material:material-icons-extended` was **frozen upstream at 1.7.8 and dropped
+  out of the Compose BOM**. Commit `1a0a791` inlined the eleven icons the app actually draws into
+  `ui/FinIcons.kt` and deleted the library.
+
+So the owner's impression is correct and now documented: **okhttp is the one dependency this
+project has a bad record with** (two bumps, two incidents, and the artifact it used is marked
+obsolete by its own maintainers), which is why §6 removed it rather than bumping it again.
+Bouncy Castle, by the same measure, is the one that has never cost anything.
+
+---
+
+## 12. Experimental and opt-in APIs
+
+An `@OptIn` on an experimental API is a promise the library has NOT made. It is worth listing
+because such an API can change or vanish in a *minor* release.
+
+Inventory (`grep -rn "@OptIn\|Experimental" app/src`), after this pass:
+
+- **10 `@OptIn(ExperimentalMaterial3Api::class)`** sites, in 9 files under `ui/`. They cover
+  exactly two APIs:
+  - `TopAppBar` (`ui/OverviewScreen.kt`'s `FinTopBar` plus the seven screens that place their own
+    top bar);
+  - `ExposedDropdownMenuBox` / `ExposedDropdownMenuDefaults` / `ExposedDropdownMenuAnchorType`
+    (`ui/DropdownField.kt`).
+- **Nothing else.** No experimental coroutines API, no experimental serialization API, no
+  `@RequiresOptIn` of our own, and no compiler-wide `optIn(...)` in the build file - each opt-in is
+  annotated at the function that needs it, which is what keeps this list short and auditable.
+
+**Is there a stable replacement?** No, and this was tested rather than assumed: removing every
+`@OptIn` and recompiling against Compose BOM 2026.09.00 (material3 1.4.0) produced 13 errors, all
+of the form "This material API is experimental". Material3 has kept `TopAppBar` and the exposed
+dropdown experimental since 1.0. The only alternatives are to hand-build both out of stable
+primitives (`Surface` + `Row` + `Text` + `IconButton`; `OutlinedTextField` + a plain
+`DropdownMenu`) - which the project has already done once, for a different reason: `AppRoot.kt`'s
+`CompactBottomBar` is hand-built because Material3's `NavigationBar` clips icons below 80dp.
+
+**Two of the twelve opt-ins were redundant** (`PortfolioScreen` and `GainsScreen` only *call*
+`FinTopBar`, which carries its own opt-in) and were removed in this pass.
+
+**Why the remaining ten are tolerated.** An experimental API that changes breaks the **compile**,
+loudly, at a bump the maintainer chose to make, and `make build` is a gate. It cannot make the
+app stop working on a user's phone after an OS update, which is the failure this project is
+actually afraid of. If Material3 ever does break them, the fallback is written above and is
+maybe 60 lines.
+
+---
+
+## 13. Status and next steps
+
+This section is the resume point. It says what has been done and verified, and what has not.
+
+### Done, all four gates green (`make test` 305 tests / `make build` / `make lint` "No issues
+### found" / `make crossimpl` OK), committed and pushed to master
+
+| Step | Commit | What |
+|---|---|---|
+| Deprecation sweep (part) | `4d68175` | Removed `android:statusBarColor` / `android:navigationBarColor` (deprecated in API 35, no-ops for a targetSdk-35+ app); `mutableStateOf(Int)` -> `mutableIntStateOf`; declared `androidx.core` explicitly. |
+| SDK wave 1/5 | `cfa200b` | Gradle wrapper **9.5.0 -> 9.7.1**, plus `distributionSha256Sum` (new). |
+| SDK wave 2/5 | `464d112` | **AGP 9.3.3 -> 9.4.1** (needs Gradle >= 9.6, supports API 37). |
+| SDK wave 3/5 | `ae43e55` | **compileSdk 36 -> 37**. |
+| SDK wave 4/5 | `f1347ab` | Compose BOM **2026.06.01 -> 2026.09.00**, navigation-compose **2.9.8 -> 2.10.1**, lifecycle **2.10.0 -> 2.11.0**, androidx.core **1.18.0 -> 1.19.0**. Kotlin (2.4.20) and Bouncy Castle (1.86) were already current. |
+| SDK wave 5/5 | `65f1e42` | **targetSdk 36 -> 37**. Both Android 17 behaviour-change lists audited row by row (§8): **no code change was required**. `lintDebug` went to "No issues found" - not one version notice left. |
+| okhttp removal | `f5c7e69` | `net/Http.kt` over `HttpURLConnection`; `net/FakeHttpServer.kt` over `com.sun.net.httpserver` replaces MockWebServer; okhttp + okio gone from the APK; two redundant `@OptIn`s and a dead `kotlin-android` plugin alias removed; `make probe` added. |
+| R8 | `33ef5af` | Dropped the blanket Bouncy Castle keep rule and the dead Tink rules: **release APK 4.21 MB -> 2.12 MB**, 9245 -> 3498 classes. |
+
+Also verified by hand, beyond the gates:
+
+- The **API 37 platform IS installable** on this machine (`platforms;android-37.0`,
+  `build-tools;37.0.0`, `system-images;android-37.0;google_apis;arm64-v8a`), so the wave went all
+  the way; nothing was stopped short.
+- The **R8-minified release APK runs on an Android 17 (API 37) emulator**: installed, launched,
+  onboarding form renders edge-to-edge, no `AndroidRuntime` error.
+- **16 KB page size**: `zipalign -c -P 16 -v 4` passes for all four ABIs of the one native library
+  (Compose's, shipped by AndroidX).
+- The live provider probe: see §6 for exactly what was and was not re-verified. **Yahoo still owes
+  a green `make probe` run from a non-rate-limited IP.**
+
+### Not done, for a later session
+
+1. **`make setup` and `make doctor`** (brief part 3). Nothing of this exists yet. The requirements
+   were established while working and are: Homebrew; `temurin@21`; `android-commandlinetools`;
+   `JAVA_HOME` + `ANDROID_HOME`; accepted SDK licences (`sdkmanager --licenses`); the packages
+   `platform-tools`, `platforms;android-37.0`, `build-tools;37.0.0`, `emulator`,
+   `system-images;android-37.0;google_apis;arm64-v8a`; an AVD; and, for a release only, the
+   keystore outside the repo. `make doctor` should be read-only and print OK/MISSING plus the
+   exact fix command; `make setup` idempotent; every other target should fail early with "run
+   make doctor".
+2. **Reproducible build** (brief part 2d), partly done. The wrapper now carries its
+   `distributionSha256Sum` and every version in `gradle/libs.versions.toml` is exact (no `+`, no
+   dynamic range) - verified. Still open: pin the JDK through a Gradle **toolchain** block so the
+   build does not depend on the laptop's default JDK (weigh the foojay resolver plugin against
+   the "fewest plugins" rule - it is a third-party plugin and probably fails that test, in which
+   case pin the toolchain without auto-provisioning and let `make doctor` install the JDK);
+   review `gradle.properties` (`org.gradle.jvmargs`, `parallel`, `caching` - all still
+   justified); and turn the **configuration cache** on if it is green (Gradle prints the
+   suggestion on every build today).
+3. **README and AGENTS.md rewrite for a Go developer landing cold** (brief part 4). Not started.
+   Numbers that MUST be updated wherever they appear: compileSdk/targetSdk **36 -> 37**, Gradle
+   **9.5.0 -> 9.7.1**, AGP **9.3.0 -> 9.4.1**, test count **304 -> 305** (the extra one is the
+   opt-in `LiveProviderProbe`, which is skipped unless `-Dprobe=1`), and the emulator AVD (a
+   `test37` AVD on API 37 now exists beside the old API 36 `test`). AGENTS.md's "Known deferred
+   work" section still says the SDK 37 wave is deferred - **that entry is now obsolete and must
+   be deleted**. AGENTS.md also needs the owner's priorities as its first golden rule, phrased
+   impersonally ("this app is maintained by Go developers, not Android specialists"), and a
+   "when Android moves" yearly checklist. The architecture map needs a row for the new `net/`
+   package.
+4. **The `market/` and `remote/` doc comments** were left as they were; `net/Http.kt` and
+   `net/FakeHttpServer.kt` are documented, but AGENTS.md's table does not mention them yet.
+5. **Not attempted, deliberately**: raising `minSdk` to drop `androidx.biometric` (§4, a product
+   decision); hand-building the top bar and the exposed dropdown to drop the last ten `@OptIn`s
+   (§12, no functional gain); replacing navigation-compose (§3, refused with reasons).
