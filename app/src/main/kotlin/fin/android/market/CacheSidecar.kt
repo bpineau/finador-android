@@ -6,6 +6,7 @@ import fin.android.domain.DividendEvent
 import fin.android.domain.MarketData
 import fin.android.domain.PricePoint
 import fin.android.domain.PriceSeries
+import fin.android.storage.AtomicFile
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
@@ -68,8 +69,9 @@ object CacheSidecar {
         GZIPOutputStream(gz).use { it.write(jsonBytes) }
         val nonce = ByteArray(AesGcm.NONCE_LEN).also { java.security.SecureRandom().nextBytes(it) }
         val sealed = AesGcm.seal(keyCache, nonce, gz.toByteArray(), MAGIC_BYTES)
-        file.parentFile?.mkdirs()
-        file.writeBytes(MAGIC_BYTES + nonce + sealed)
+        // Atomically: a process killed mid-write would otherwise leave a short file, and the whole
+        // cached history (years of closes, per asset) would be re-downloaded on a phone.
+        AtomicFile.write(file, MAGIC_BYTES + nonce + sealed)
     }
 }
 

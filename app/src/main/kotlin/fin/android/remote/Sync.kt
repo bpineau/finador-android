@@ -2,6 +2,7 @@ package fin.android.remote
 
 import fin.android.format.Conflict
 import fin.android.format.Ledger
+import fin.android.storage.AtomicFile
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
 import java.io.File
@@ -37,13 +38,27 @@ class Sync(
     private val readPullAfter: Duration,
     private val now: () -> Instant = { Instant.now() },
 ) {
-    fun state(): SyncState =
-        if (stateFile.exists()) json.decodeFromString(SyncState.serializer(), stateFile.readText()) else SyncState()
-
-    private fun saveState(s: SyncState) {
-        stateFile.parentFile?.mkdirs()
-        stateFile.writeText(json.encodeToString(SyncState.serializer(), s))
+    /**
+     * The persisted state, or a CONSERVATIVE default when it cannot be read.
+     *
+     * An unreadable state file used to throw out of here, and every path in this class starts by
+     * calling it: one short write (a process killed mid-`writeText`, which is why [saveState] is
+     * atomic now) made the unlock itself fail, for ever, since nothing rewrites the file until a
+     * sync runs. Absent, the file simply means "nothing synced yet"; UNREADABLE, it must mean
+     * DIRTY: the flag it lost is the one that stops a pull from overwriting records the remote has
+     * never seen, and a needless merge costs one push where a needless pull costs the data.
+     */
+    fun state(): SyncState {
+        if (!stateFile.exists()) return SyncState()
+        return try {
+            json.decodeFromString(SyncState.serializer(), stateFile.readText())
+        } catch (_: Exception) {
+            SyncState(dirty = true)
+        }
     }
+
+    private fun saveState(s: SyncState) =
+        AtomicFile.writeText(stateFile, json.encodeToString(SyncState.serializer(), s))
 
     /**
      * Pulls into the working copy if online and stale (missing copy, past readPullAfter).
@@ -79,11 +94,33 @@ class Sync(
         }
     }
 
-    /** Opens the ledger for reading, pulling first if stale. */
+    /**
+     * Opens the ledger for reading, pulling first if stale.
+     *
+     * A working copy that does not open falls back to the `.bak` [writeCopy] keeps. The copy is
+     * written on every pull, mutate and sync, so a build older than the atomic write could leave a
+     * truncated one behind, and the dirty guard then forbids healing it by pulling. When the backup
+     * opens, it is promoted and the state marked DIRTY: whatever it holds may already be on the
+     * remote or may not, and a merge - union plus last-writer-wins - is the one reconciliation that
+     * cannot drop either side. A wrong passphrase fails on both files and surfaces as itself.
+     */
     fun openForRead(passphrase: String): Ledger {
         pullIfStale()
         require(workingCopy.exists()) { "no local copy and remote unavailable" }
-        return Ledger.open(workingCopy.readBytes(), passphrase)
+        return try {
+            Ledger.open(workingCopy.readBytes(), passphrase)
+        } catch (e: Exception) {
+            val bak = AtomicFile.backupOf(workingCopy)
+            if (!bak.exists()) throw e
+            val recovered = try {
+                Ledger.open(bak.readBytes(), passphrase)
+            } catch (_: Exception) {
+                throw e // the backup is no better: report the working copy's own failure
+            }
+            AtomicFile.write(workingCopy, bak.readBytes())
+            saveState(state().copy(dirty = true))
+            recovered
+        }
     }
 
     /**
@@ -212,10 +249,13 @@ class Sync(
         }
     }
 
-    private fun writeCopy(data: ByteArray) {
-        workingCopy.parentFile?.mkdirs()
-        workingCopy.writeBytes(data)
-    }
+    /**
+     * Replaces the working copy, atomically and keeping the previous contents under `.bak` (the Go
+     * reference does exactly this, `internal/store/store.go`). A half-written ledger authenticates
+     * as nothing, and [openForRead] refuses to pull over a dirty copy, so the truncation a plain
+     * write risks would be unrecoverable from inside the app.
+     */
+    private fun writeCopy(data: ByteArray) = AtomicFile.write(workingCopy, data, backup = true)
 
     companion object {
         private const val MAX_PUSH_TRIES = 3
