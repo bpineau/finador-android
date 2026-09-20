@@ -163,8 +163,8 @@ class YahooTest {
         assertEquals(2, server.requestCount) // the try and its one retry, and not a third
     }
 
-    // The other live failure the probe found the same day: a host that never answers at all
-    // (tools.morningstar.fr, whose CNAME target has lost its address record). The transport
+    // The other live failure the probe has found: a host that never answers at all, as
+    // tools.morningstar.fr did once its CNAME target lost its address record. The transport
     // failure must read like "no data", not like a crash: every provider is behind MultiSource,
     // which falls through to the next one.
     @Test fun dailyIsNullWhenTheHostNeverAnswers() {

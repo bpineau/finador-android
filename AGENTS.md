@@ -147,7 +147,8 @@ itself, so every target works from a bare shell. Run from the repo root.
 | `make build` | the debug APK; catches Compose/Android errors `make test` cannot | ~1 min |
 | `make lint` | must print `No issues found`; report in `app/build/reports/lint-results-debug.txt` | ~1 min |
 | `make crossimpl` | byte-compat gate vs the Go reference (builds finador first, needs `../finador`) | ~1 min |
-| `make probe` | hits the REAL quote providers over the network; opt-in, never part of `make test` | seconds |
+| `make probe` | hits the REAL quote providers from the HOST JVM; opt-in, never part of `make test` | seconds |
+| `make probe-device` | the same probe on a booted emulator or a phone; **the one live check a release owes** | ~1 min |
 | `make help` | every other target (install, run, release, emulator up/down, clean) | instant |
 
 `make test` compiles the whole `main` source set as well as the tests, so it catches engine AND UI
@@ -160,8 +161,10 @@ why the Makefile prints the summary line itself.
 1. Engine / format / valuation / market change: `make test-class T=<Area>` first, then full
    `make test`. For anything under `crypto/` or `format/`, also `make crossimpl`.
 2. UI change: `make build`, plus an emulator smoke if a screen's behaviour changed.
-3. Suspecting the live internet rather than the code: `make probe` prints a reachability line per
-   provider host (HTTP status, or the transport failure) before it tries to parse anything.
+3. Suspecting the live internet rather than the code: `make probe` prints a `tls` block (what the
+   platform offers, what this app offers, and the status each gets) and a reachability line per
+   provider host before it tries to parse anything. A host-JVM probe cannot speak for a phone,
+   though: run `make probe-device` before believing a red one (§7, "Every provider answers 429").
 4. Never claim a result you did not run.
 
 **Emulator.** `make setup-emulator` creates the AVD named after `compileSdk` (`test37` today);
@@ -192,10 +195,10 @@ makes them testable on the host JVM in a second.
 | `crypto/` | Argon2, Hkdf, AesGcm, Hashes, Bytes, Ids | KDF, AEAD, base64, Crockford ids | yes |
 | `domain/` | Models, Money, MarketData | data model (BigDecimal money, enums, Book) | yes |
 | `format/` | Header, Kdf, Wire, Log, Replay, Writer, Merge, Ledger | read/write the `.fin` (AAD-chained records, fold, diff-on-save, union + LWW merge) | yes |
-| `market/` | Yahoo, Ft, Morningstar, Airfund, Nowcast, Session, Units, VenueDay, MultiSource, Converter, FxRates, CacheSidecar, Quotes, Source | fetch quotes (JSON plus one Boursorama regex), FX via USD, FINCACHE2 cache. See the sub-table below | yes |
+| `market/` | Yahoo, Ft, Morningstar, Airfund, Nowcast, Session, Units, VenueDay, MultiSource, Converter, FxRates, CacheSidecar, Quotes, Source | fetch quotes (JSON everywhere), FX via USD, FINCACHE2 cache. See the sub-table below | yes |
 | `valuation/` | Valuator, Perf, Gains | gross/tax/net, TWR/XIRR, period and per-asset gains, asset detail | yes |
 | `storage/` | AtomicFile | the one way a file is replaced: tmp + fsync + rename (+ `.bak`) | yes |
-| `net/` | Http (+ `FakeHttpServer` in tests) | the whole HTTP stack: `url`/`escape`, `send` (headers, JSON body, timeouts, ONE retry on 429/5xx/no answer), `Response`. Platform `HttpURLConnection` only | yes |
+| `net/` | Http, Tls (+ `FakeHttpServer` in tests) | the whole HTTP stack: `url`/`escape`, `send` (headers, JSON body, timeouts, ONE retry on 429/5xx/no answer), `Response`. Platform `HttpURLConnection` only; `Tls` narrows the offered cipher suites so a provider's anti-bot edge does not read the handshake as a robot's | yes |
 | `remote/` | Backend, GitHubBackend, RemoteConfig, Sync | GitHub Contents API, pull/mutate/push, conflict -> merge, offline-dirty | Android-light |
 | `data/` | AppContainer, AppRepository, AppState, SecretStore | manual DI, the single facade, Keystore-encrypted secrets | Android |
 | `ui/` | AppRoot, AppViewModel, *Screen, Theme, Format, FinIcons | Compose screens, MVVM, theme, inlined icons | Android |
@@ -222,6 +225,12 @@ one price, and NEVER `Perf` or the period/history figures (Go decisions D36/D38:
 `AppState.Ready(valuation, perf, gains, book, sync, message, refreshing, assetDetails)`. Per-asset
 detail pages are precomputed into `Ready.assetDetails` so they open instantly.
 
+**Source sets.** `src/main` is the app; `src/test` the host-JVM suite; `src/probe` holds the live
+provider probe ONLY (`market/LiveProbe.kt`), compiled into both test source sets and shipped in no
+APK; `src/androidTest` holds the repository's single instrumented test, which runs that probe on a
+device (`make probe-device`). `src/probe` exists so the host and the device run the same body: the
+two platforms do not share a TLS stack, so neither run can stand in for the other.
+
 **Outside `app/`**: `scripts/doctor.sh` + `setup.sh` (the dev environment), `scripts/crossimpl.sh`
 (the byte-compat gate), `gradle/libs.versions.toml` (every dependency at an exact version),
 `docs/maintainability.md` (the dependency ledger and deprecation audit), `README.md` (human setup,
@@ -234,7 +243,9 @@ release, and the yearly upgrade checklist in §6 "WHEN ANDROID MOVES").
 | a record kind or format field | `format/Wire.kt` (DTO) + `format/Replay.kt` (fold) + `FORMAT.md` + a test; bump the version only per `FORMAT.md` §8 |
 | a valuation / gain / perf number | `valuation/{Valuator,Perf,Gains}.kt`, mirroring the Go change and the parity test |
 | a quote source or its parsing | `market/{Yahoo,Ft,Morningstar,Airfund}.kt`; fixtures in the market tests |
+| what the live probe checks, on the host JVM AND on a device | `app/src/probe/kotlin/fin/android/market/LiveProbe.kt`, compiled into both test source sets |
 | anything about the HTTP call itself (header, timeout, retry, escaping, a status to treat specially) | `net/Http.kt`, once, for every caller; fake it with `net/FakeHttpServer.kt` |
+| the TLS handshake this app sends | `net/Tls.kt`, and read its doc first: it is a measurement, not a preference |
 | support for another employee-savings fund (FCPE) | one entry in `market/Airfund.kt`'s `AirfundFunds.ALL` (share code + nowcast proxy, plus `navAnchor = NavAnchor.OPEN` when the fund's rules name its holding's OPENING price, mirroring the Go catalog's `nowcast_anchor`) plus its NAV baseline in `app/src/main/resources/fin/android/market/<TICKER>-NAV.csv`, copied from the Go reference's `refdata/`. The ledger asset carries only the ticker |
 | sync behaviour (conflict, offline, pull cadence) | `remote/Sync.kt` |
 | a screen or its styling | `ui/<Screen>.kt`; colours and typography in `ui/Theme.kt` (accent terracotta `#C2613C`, gain/loss via `gainLossColor`); number formatting in `ui/Format.kt` |
@@ -334,6 +345,15 @@ Each of these cost real debugging once. Symptom, cause, what to do.
   `SyncState.authError` (a persistent "re-login" banner), local reads and writes keep working (writes
   stay `dirty`), and the next successful fetch or push clears it. Only an unlock with NO local copy
   surfaces the error.
+- **Every provider answers 429 from a network that plainly works.** Not necessarily a throttle. An
+  anti-bot edge can fingerprint the TLS ClientHello (JA3/JA4) and refuse a stack it does not
+  recognise: on 2026-09-20 Yahoo answered 429 to the host JVM and 200 to the same code on an
+  emulator, same IP, same minute, because Android's Conscrypt and the JDK's JSSE offer different
+  cipher suites. `net/Tls.kt` removes the two obsolete families that gave the host JVM away, and
+  its doc holds the measurement. Diagnosis order: `curl` (a LibreSSL build refused too is a second
+  vote for the edge), then a Go program or `../finador` (accepted rules the IP out), then
+  `make probe`'s `tls` block, then `make probe-device`. If the device is green there is no product
+  bug, and the fix belongs to the probe. Do NOT add an HTTP or TLS library back (§2a).
 - **`make build` warns "Unable to strip".** Benign, on Compose's `libandroidx.graphics.path.so`, the
   single native library.
 
@@ -371,6 +391,9 @@ Tick every line before saying the work is done.
       commit message.
 - [ ] No typographic dash anywhere in the diff.
 - [ ] Committed to `master` with a message that carries the WHY, and pushed.
+- [ ] `make probe-device` green if a release is in view, or if anything under `net/` or `market/`
+      moved. `make probe` is fast feedback, not the gate: the host JVM and a phone do not share a
+      TLS stack (`docs/maintainability.md` §14).
 - [ ] No tag created by hand. If a release is wanted, say so and let a human run `make gh-release`
       (it needs the signing key, which is not in this repo).
 

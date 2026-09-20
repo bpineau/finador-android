@@ -33,6 +33,7 @@ Reviewed 2026-09-20 against the state of the repository on that date.
 | ~~okhttp~~ | third-party, Square | was every HTTP call | **REPLACED BY PLATFORM** (see §6) |
 | ~~okhttp mockwebserver~~ | third-party, Square | was the fake server in 7 test classes | **REPLACED BY PLATFORM** (see §6) |
 | JUnit 4 | third-party, de facto standard | the test runner | KEEP (see §7) |
+| androidx.test:runner | Google AndroidX, **test only** | the `AndroidJUnitRunner` behind `make probe-device` | KEEP (see §7) |
 
 Third-party code shipped inside the APK after this pass: **Bouncy Castle, and nothing else.**
 Everything else is Google (AndroidX), JetBrains (Kotlin) or the Android platform itself.
@@ -216,26 +217,33 @@ option.
      The hermetic `YahooTest`/`QuotesTest` do cover the same paths against the fake server,
      including the 429 retry and the 401-crumb-renewal.
 
-   Re-run on **2026-09-20**, a day later, with the same verdicts and two of them sharpened:
+   Re-run on **2026-09-20**, a day later, and then a third time the same day once the 429s were
+   understood. What that day established, in order:
 
-   - **FT** and **Airfund**: green again, same shapes (42 closes ending 127.17 EUR; 631 and 311
-     NAVs ending 70.68 and 206.8 on 2026-09-16).
-   - **Morningstar**: diagnosed rather than assumed. `tools.morningstar.fr` is a CNAME to
+   - **FT** and **Airfund**: green throughout, same shapes (42 closes ending 127.17 EUR; 631 and
+     311 NAVs ending 70.68 and 206.8 on 2026-09-16).
+   - **Morningstar**: `tools.morningstar.fr` is a CNAME to
      `00844-eurt-tools.eur6c597.eas.morningstar.com`, and **that name has no address record** on
-     any resolver tried, including 1.1.1.1. The host is gone, at the DNS level, for everyone.
-     Nothing to fix here; the ISIN lookup it depends on (Boursorama) still answers 200 and still
-     yields a `0P…` id, so the day Morningstar's endpoint returns, the provider works again.
-   - **Yahoo**: still `429 Too Many Requests` from this IP, on `query1` AND `query2`, over IPv4
-     and IPv6, with and without a cookie, and to plain `curl` as much as to the app. That is an
-     IP-level throttle and it says nothing about the HTTP stack. **Yahoo still owes one green
-     `make probe` from a non-throttled network before the next release.**
+     any resolver tried, including 1.1.1.1. The host is gone, at the DNS level, for everyone. The
+     provider was repointed at `lt.morningstar.com`, which is the host the Go reference uses and
+     which answers today; see §15.
+   - **Yahoo**: `429 Too Many Requests` on every call from the host JVM. Written off as an IP
+     throttle on the first two runs, and that was **wrong**. It is a TLS ClientHello fingerprint,
+     it is fixed, and the whole measurement is `net/Tls.kt` plus §14 below.
 
-   What the probe now prints, so this reasoning does not have to be redone by hand: a
-   `probe net` reachability line per provider host, with the raw HTTP status or the transport
-   failure, BEFORE anything is parsed. 429 is a throttle, no answer is a dead host, and 200 beside
-   a failing provider is a payload change - the only one of the three that is a code bug. The two
-   live shapes met that day are pinned by hermetic tests (`YahooTest.dailyIsNullWhileTheHostThrottles`,
+   What the probe now prints, so this reasoning does not have to be redone by hand: a `tls` block
+   (how many cipher suites the platform offers, how many this app offers, and the status the same
+   URL answers to each) and a `net` reachability line per provider host, BEFORE anything is parsed.
+   429 is a throttle or a fingerprint, no answer is a dead host, and 200 beside a failing provider
+   is a payload change - the only one of the three that is a code bug. The two live shapes met that
+   day are pinned by hermetic tests (`YahooTest.dailyIsNullWhileTheHostThrottles`,
    `dailyIsNullWhenTheHostNeverAnswers`).
+
+   **The probe now runs in two places, and the second is the gate.** `market/LiveProbe.kt` lives in
+   `app/src/probe/kotlin` and is compiled into both test source sets: `make probe` runs it on the
+   host JVM, `make probe-device` runs it as the repository's one instrumented test, on an emulator
+   or a phone. A green host run cannot stand in for a release, because the two platforms do not
+   share a TLS stack. See §14.
 
 **What a reader should still know.** Two differences exist and are handled in `market/Http.kt`:
 a `HttpURLConnection` throws `IOException` on a 4xx/5xx instead of returning the body, so the code
@@ -251,6 +259,15 @@ what `testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"` exp
 API-frozen for a decade, which for a test runner is the desired property rather than a warning
 sign. JUnit 5 on Android needs a third-party Gradle plugin, which is the opposite of what this
 project wants. **KEEP.**
+
+**androidx.test:runner** (`androidx.test:runner:1.7.0`) supplies the `AndroidJUnitRunner` that
+`defaultConfig.testInstrumentationRunner` has always named, and it is pulled in for exactly one
+instrumented test: the live provider probe on a device (`make probe-device`, §14). It is
+first-party AndroidX, it is `androidTestImplementation` only, so it reaches neither the debug nor
+the release APK, and nothing else came with it: the probe touches no `Context`, so
+`androidx.test.ext:junit` and its `InstrumentationRegistry` stayed out. The alternative was to have
+no device check at all, which is what let a host-only failure be mistaken for a product failure for
+two days. **KEEP**, and delete it the day the probe no longer needs a device.
 
 There are no other test dependencies: no mocking framework, no assertion library, no Robolectric.
 The engine layers (`crypto/ domain/ format/ market/ valuation/`) are pure Kotlin with no Android
@@ -574,7 +591,7 @@ Honest estimate, from the wave that was just done end to end (§13's table above
 | Reading the two behaviour-change pages and answering them row by row (§8 is the template) | yearly | **45 minutes**. Most rows are "no" and stay "no" as long as the app keeps one permission, one activity, no service and no reflection. |
 | An emulator smoke on the new API level | yearly | **20 minutes**, `make setup-emulator` included. Not optional: compiling against a platform proves nothing about running on it. |
 | Bouncy Castle security releases | quarterly | **10 minutes**: bump, `make test`, `make crossimpl`. Two bumps, zero incidents so far. |
-| A provider changing its payload (Yahoo, FT, Morningstar, Airfund) | unpredictable, once or twice a year | **1 to 3 hours** for the one that moved. `make probe` says which, and whether it is a payload change at all rather than a throttle or an outage. This is a data risk, not an Android risk, and it is the likeliest thing to break. |
+| A provider changing its payload, its host or its bot policy (Yahoo, FT, Morningstar, Airfund) | unpredictable, once or twice a year | **1 to 3 hours** for the one that moved. `make probe-device` says which, and whether it is a payload change at all rather than a throttle, an outage or a handshake it now refuses (§14). This is a data risk, not an Android risk, and it is the likeliest thing to break. |
 | Play policy (`targetSdk` within a year of the newest API) | not applicable today | zero while the app is distributed as a GitHub-release APK. |
 
 So: **roughly half a day a year of Android upkeep**, plus whatever the market providers do. The two
@@ -583,18 +600,149 @@ library in the request path (okhttp), and the ceremony of a hand-built environme
 
 ### Not done, for a later session
 
-1. **Yahoo owes one green `make probe`** from a network Yahoo is not throttling (§6). Two runs on
-   2026-09-20, hours apart, both answered `429` to the very first reachability call, so nothing
-   about Yahoo's payload was observable that day. Everything else the probe covers is green or
-   diagnosed, and the hermetic tests cover the same code paths, including the 429 retry and the
-   401 crumb renewal - so this is a confirmation still owed, not a suspicion. **A release should
-   wait for it.**
-2. **Morningstar's host is gone at the DNS level** (§6). Nothing to do: it is the last link of the
-   fallback chain, it degrades cleanly, and Boursorama's ISIN lookup still works. If it never comes
-   back, deleting the provider would remove ~120 lines and one of the app's four data sources -
-   a decision to take deliberately, not by attrition.
-3. **Not attempted, deliberately**: raising `minSdk` to drop `androidx.biometric` (§4, a product
+1. **Both of the 2026-09-20 open questions are closed.** Yahoo's `429` was a TLS fingerprint
+   rather than an IP throttle (§14), and Morningstar's dead host was repointed (§15). All four
+   providers are green on the host JVM and on an emulator.
+2. **Not attempted, deliberately**: raising `minSdk` to drop `androidx.biometric` (§4, a product
    decision); hand-building the top bar and the exposed dropdown to drop the last ten `@OptIn`s
    (§12, no functional gain); replacing navigation-compose (§3, refused with reasons); Gradle
    dependency verification (measured and refused above); switching `make setup` to the new
    `android` CLI (no unattended licence flow yet).
+
+---
+
+## 14. The 429 that was not a throttle: TLS fingerprinting, and the probe that can see it
+
+Added 2026-09-20, after two days of reading the same symptom wrong.
+
+### The symptom
+
+`make probe` answered `HTTP 429 Too Many Requests` to **every** Yahoo call, on `query1` and
+`query2`, over IPv4 and IPv6, with and without a cookie, on a network that was not throttled at
+all. It was written off twice as a per-IP rate limit, because `curl` on the same machine answered
+429 too.
+
+### What it really was
+
+Three observations, same machine, same minute, same IP:
+
+| Client | Answer |
+|---|---|
+| the Go reference (`../finador`, and a ten-line Go program) | **HTTP 200** |
+| `curl` 8.7.1, built on LibreSSL/SecureTransport, same URL and User-Agent | HTTP 429 |
+| this app on the host JVM | HTTP 429 |
+
+An IP throttle cannot answer one process and refuse another. The discriminator is the **TLS
+ClientHello**: the exact set of cipher suites, extensions and groups a client offers, which
+anti-bot edges fingerprint (JA3/JA4) and score. Narrowed to a single variable, again on one
+request each:
+
+| ClientHello from the host JVM | Yahoo answers |
+|---|---|
+| the JDK's default 31 suites | 429 |
+| the same 31, reordered so the DHE/DSS ones come last | 429 |
+| the same list **minus** the DHE/DSS suites (18 left) | **200** |
+| the three TLS 1.3 suites plus the ECDHE ones only (9) | **200** |
+| default + protocols pinned to TLS 1.3 and 1.2 (already the default) | 429 |
+| default + ALPN offering `h2, http/1.1` | the exchange breaks: the server picks HTTP/2 and `HttpURLConnection` speaks HTTP/1.1 |
+| default + `x25519` first, or a browser's signature-scheme order | no change either way |
+
+The negotiated suite was `TLS_AES_128_GCM_SHA256` in every case that completed, so nothing about
+the connection changed: only what was **offered**. Go has never offered finite-field
+Diffie-Hellman, which is exactly why the Go tool sailed through.
+
+### What this repository now does
+
+`net/Tls.kt`: a delegating `SSLSocketFactory`, platform API only, that drops the obsolete
+finite-field Diffie-Hellman (`TLS_DHE_*`, `TLS_DH_anon_*`) and DSS suites from what the socket
+offers, and touches nothing else. Forty lines, no dependency, and a deny-list rather than a pinned
+suite list on purpose: naming the suites to offer would freeze this app's handshake at what 2026
+called modern and silently exclude whatever the platform adds next.
+
+It is applied to every https connection in `net/Http.kt`. Every host this app and its probe reach
+(both Yahoo endpoints, `fc.yahoo.com`, FT, Morningstar, Airfund, the GitHub API) answers exactly as
+before, or better.
+
+### The part that matters most: the device was never broken
+
+Android's TLS is **Conscrypt** (BoringSSL), not the JDK's JSSE, and Conscrypt does not enable those
+families in the first place. Measured on an API 37 emulator, through the app's own fetch path, from
+the same IP and the same minute as the red host run:
+
+| Platform | suites offered | after the filter | Yahoo, platform default | Yahoo, this app |
+|---|---|---|---|---|
+| host JVM (Temurin 21) | 31 | 18 | **429** | **200** |
+| Android 17 emulator (API 37) | 18 | 18 | **200** | **200** |
+
+So the filter is a literal no-op on a phone, the released app was fine all along, and the only
+thing that was broken was the ability to see that from a laptop. Two consequences, both shipped:
+
+1. **The host probe is meaningful again**, and it now prints the evidence itself: a `tls` block
+   with the suite counts and the status the same URL answers to the platform's handshake and to
+   this app's.
+2. **A release owes one green `make probe-device`**, not `make probe`. The probe body
+   (`market/LiveProbe.kt`) lives in `app/src/probe/kotlin` and is compiled into both test source
+   sets, so the two runs are the same code; only the TLS stack under it differs, which is the
+   whole point.
+
+### When it happens again
+
+It will: a fingerprint rule is a provider's to change, and nothing here can pin it. The symptom is
+**429 on every call from a network that plainly works**, while a browser on the same machine is
+fine. The diagnosis, in order:
+
+1. `curl` the URL. A `curl` built on LibreSSL/SecureTransport being refused too is a second vote
+   for the edge, not for the address.
+2. Fetch the same URL from a Go program, or run `../finador` (or `../pofo`). Accepted there rules
+   the IP out entirely.
+3. `make probe` and read the `tls` block: two different statuses on those two lines name the cause
+   without further work.
+4. `make probe-device`. If the device is green, **there is no product bug**, and the honest fix is
+   to the probe, not to the app.
+
+What can be done in this repository is narrow, and the options should be weighed rather than
+reached for: change nothing and let the fallback providers carry the symbol; move the call to
+another endpoint of the same provider. Adding an HTTP or TLS library back is not one of them
+(`AGENTS.md` §2a).
+
+
+---
+
+## 15. Morningstar: a dead host, repointed
+
+Added 2026-09-20.
+
+`market/Morningstar.kt` used to call `tools.morningstar.fr` and to resolve an ISIN to a Morningstar
+`0P…` id by scraping Boursorama's AJAX search for a fund-page link. The host stopped resolving in
+2026: it is a CNAME to `00844-eurt-tools.eur6c597.eas.morningstar.com`, and that name has no
+address record on any resolver, for anyone. No amount of client-side work reaches a name that does
+not resolve.
+
+The Go reference (`../pofo/pkg/marketdata/morningstar.go`) had already moved to a host that answers,
+and the provider here is now a port of it:
+
+| | before | now |
+|---|---|---|
+| host | `tools.morningstar.fr` (gone) | `lt.morningstar.com` |
+| ISIN resolution | a regex over a Boursorama HTML fragment | Morningstar's own fund **screener**, JSON |
+| quote currency | never known (left null) | reported by the screener |
+| hosts contacted | two | one |
+
+Three things to know before touching it, all of them in the file's own doc comment:
+
+- **Two view tokens, not interchangeable.** `ok91jeenoo` belongs to the public chart pages and
+  serves the timeseries; `klr5zyak8x` belongs to the fund-search pages and serves the screener. The
+  timeseries token is refused by the screener.
+- **The id carries a `]2]1]` suffix.** The timeseries service reads its `id` as a bracket-separated
+  tuple and answers an **empty array with HTTP 200** for a bare exchange-traded id. Losing that
+  suffix is what once silently emptied this source in the Go reference.
+- **The screener's currency is padded** (`CU$$$$$EUR`) and a venue sub-unit keeps its own spelling,
+  so `GBp` survives the read and `market/Units.kt` can still turn pence into pounds.
+
+The two universes (open-end `FOALL$$ALL` and exchange-traded `ETALL$$ALL`) are searched together
+because a share class sits in exactly one of them and the caller never knows which, and a row whose
+ISIN **is** the query wins over a mere full-text hit, so an ISIN lookup never adopts a same-family
+class quoted in another currency.
+
+Live on 2026-09-20, host JVM and API 37 emulator alike: `LU0171310443`, 43 closes, EUR, last 128.52.
+Boursorama is no longer contacted by this app at all.

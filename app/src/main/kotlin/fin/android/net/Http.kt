@@ -10,6 +10,7 @@ import java.nio.charset.Charset
 import java.nio.charset.IllegalCharsetNameException
 import java.nio.charset.StandardCharsets
 import java.nio.charset.UnsupportedCharsetException
+import javax.net.ssl.HttpsURLConnection
 
 /**
  * The app's whole HTTP stack, on top of the platform's [HttpURLConnection].
@@ -29,6 +30,11 @@ import java.nio.charset.UnsupportedCharsetException
  * - [Response], which always reports a status and a body, including for a 4xx/5xx - the platform
  *   throws on those and hands the body over on a separate stream, which is the one sharp edge of
  *   this API and is handled here so no caller has to know about it.
+ *
+ * TLS is the platform's, with one narrowing: an https connection is given [Tls.socketFactory],
+ * which stops offering the obsolete finite-field Diffie-Hellman and DSS cipher suites. That is not
+ * a security setting, it is what keeps a provider's anti-bot edge from reading the handshake as a
+ * robot's and answering 429; the whole measurement is in `net/Tls.kt`.
  *
  * Gzip is not configured and must not be: the platform adds `Accept-Encoding: gzip` itself and
  * decodes the answer transparently, but only as long as the caller does not set that header by
@@ -158,6 +164,9 @@ internal object Http {
         var conn: HttpURLConnection? = null
         return try {
             conn = (URI(url).toURL().openConnection() as HttpURLConnection).apply {
+                // Offer a handshake today's anti-bot edges recognise; see net/Tls.kt for the
+                // measurement that made this necessary. A no-op on Android.
+                if (this is HttpsURLConnection) sslSocketFactory = Tls.socketFactory
                 requestMethod = method
                 connectTimeout = connectTimeoutMs
                 readTimeout = readTimeoutMs
