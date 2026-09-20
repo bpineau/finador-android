@@ -64,6 +64,15 @@ android {
         compose = true
         buildConfig = true // BuildConfig.VERSION_NAME is shown in Settings
     }
+
+    // The live provider probe (`market/LiveProbe.kt`) is compiled into BOTH test source sets rather
+    // than duplicated: the host JVM and a device do not share a TLS stack, so the same body has to
+    // run in both places to mean anything (see `net/Tls.kt`). It ships in neither APK, debug or
+    // release: `src/probe` is not part of `main`.
+    sourceSets {
+        getByName("test").kotlin.srcDir("src/probe/kotlin")
+        getByName("androidTest").kotlin.srcDir("src/probe/kotlin")
+    }
 }
 
 // The JDK the build RUNS on, pinned here instead of inherited from whatever the laptop happens to
@@ -113,4 +122,11 @@ dependencies {
     implementation(libs.bouncycastle)
     implementation(libs.androidx.biometric)
     testImplementation(libs.junit)
+    // The ONE instrumented test is the live provider probe (`make probe-device`), the only check
+    // that can speak for the TLS stack a phone actually has. androidx.test:runner is what supplies
+    // the AndroidJUnitRunner named in defaultConfig; it is first-party, test-only, and reaches no
+    // APK. Nothing else is needed: the probe touches no Context, so `androidx.test.ext:junit` and
+    // its InstrumentationRegistry stay out.
+    androidTestImplementation(libs.junit)
+    androidTestImplementation(libs.androidx.test.runner)
 }

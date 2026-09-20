@@ -61,7 +61,7 @@ ASSET = $(DIST)/finador-android-v$(VERSION)$(if $(DEBUG_APK),-debug,).apk
 
 .PHONY: help doctor setup setup-emulator preflight test test-class build install run reinstall \
 	release release-apk verify-signature check-signing smoke-release gh-release \
-	gh-release-dry-run lint probe crossimpl emulator emulator-kill clean
+	gh-release-dry-run lint probe probe-device crossimpl emulator emulator-kill clean
 
 help: ## List available targets
 	@grep -E '^[a-z-]+:.*##' $(MAKEFILE_LIST) | awk -F':.*## ' '{printf "  %-18s %s\n", $$1, $$2}'
@@ -211,9 +211,24 @@ gh-release-dry-run: ## Everything gh-release does EXCEPT the tag, the push and t
 	@echo "  upload:   gh release $$(gh release view "v$(VERSION)" >/dev/null 2>&1 && echo 'upload --clobber' || echo create) v$(VERSION) $(ASSET)"
 	@echo "  notes:    $(if $(NOTES),--notes-file $(NOTES),--generate-notes)"
 
-probe: preflight ## Hit the REAL market-data providers over the network and print what came back (not part of `make test`)
-	$(GRADLE) testDebugUnitTest --tests "*LiveProviderProbe*" --rerun-tasks -Dprobe=1 -i \
-	  | grep -E "^probe |FAILED|live providers"
+# The probe's lines are read back from the JUnit XML rather than from Gradle's console: `-i` prints
+# a test's stdout only when Gradle feels like it, and a silent probe reads as a broken probe.
+probe: preflight ## Hit the REAL providers from the HOST JVM (fast feedback, NOT the release gate: see probe-device)
+	@$(GRADLE) testDebugUnitTest --tests "*LiveProviderProbe*" --rerun-tasks -Dprobe=1; \
+	  status=$$?; \
+	  sed 's/.*<!\[CDATA\[//' app/build/test-results/testDebugUnitTest/TEST-*LiveProviderProbe.xml \
+	    | grep '^probe '; \
+	  exit $$status
+
+# The gate. A phone's TLS is Conscrypt and the host JVM's is JSSE: the two send different
+# ClientHellos, providers fingerprint them, so a green `make probe` cannot speak for a release.
+# See net/Tls.kt. Needs a booted emulator (`make emulator`) or a plugged-in phone.
+probe-device: preflight ## Run that same probe ON the device/emulator - the ONE live check a release owes
+	@$(ADB) get-state >/dev/null 2>&1 || { \
+	  echo "ERROR: no device or emulator connected - run 'make emulator' first"; exit 1; }
+	$(ADB) logcat -c
+	$(GRADLE) connectedDebugAndroidTest
+	@$(ADB) logcat -d -s probe:I -v raw | grep '^probe '
 
 lint: preflight ## Android Lint; report in app/build/reports/lint-results-debug.txt
 	$(GRADLE) lintDebug

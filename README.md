@@ -67,7 +67,8 @@ make test-class T=Gains   # one class, when you know where you broke it
 make build                # compile the debug APK (catches Compose/Android errors make test cannot)
 make lint                 # Android Lint; must stay at "No issues found"
 make crossimpl            # byte-compatibility gate against the Go implementation (needs ../finador)
-make probe                # hit the REAL quote providers over the network (never part of make test)
+make probe                # hit the REAL quote providers from the host JVM (never part of make test)
+make probe-device         # the same probe ON a device/emulator: the one live check a release owes
 make clean                # delete build outputs
 ```
 
@@ -154,11 +155,19 @@ app's continuity.
 
 ```sh
 make check-signing        # is a real key configured on this machine? (prints no secret)
+make emulator && make probe-device   # the live providers, through the stack a phone has
 # bump versionName + versionCode in app/build.gradle.kts, commit
 make gh-release-dry-run   # gates + APK + signature check; tags and publishes NOTHING
 make gh-release           # the real thing: tag, push, GitHub release with the APK attached
 make gh-release NOTES=notes.md   # hand-written notes instead of GitHub-generated ones
 ```
+
+**A release owes one green `make probe-device`**, on an emulator or a phone. Not `make probe`: the
+host JVM's TLS is the JDK's JSSE and a phone's is Conscrypt, the two send different handshakes, and
+a provider that fingerprints handshakes answers them differently. On 2026-09-20 the host probe was
+red on every Yahoo call (`429`) while the very same code on the emulator was green, from the same
+IP and the same minute. `net/Tls.kt` holds that measurement. The device probe is not part of
+`gh-release`, because it needs a booted emulator and the live internet; run it by hand first.
 
 `gh-release` runs `make test` and `make crossimpl`, builds the R8-minified release APK,
 verifies its signature with `apksigner`, stages it as
@@ -212,6 +221,7 @@ make build
 make lint        # must print "No issues found"
 make crossimpl   # the .fin file format still matches the Go implementation byte for byte
 make setup-emulator && make emulator && make run    # it RUNS on the new API level
+make probe-device                                   # the providers still answer THAT platform
 ```
 
 Compiling against a new platform proves nothing about running on it: the emulator smoke is not
@@ -272,7 +282,7 @@ Behaviour changes that could plausibly bite this app one day are listed and answ
 `docs/maintainability.md` §8. The `targetSdk` 37 one to remember: Android 17 turns on **Encrypted
 Client Hello** and **Certificate Transparency** by default, which touches the four HTTPS quote
 providers. If a provider ever fails on new phones only, that is the first hypothesis, and `make
-probe` is the test.
+probe-device` is the test: it is the only one that runs on the phone's own TLS stack.
 
 ---
 
@@ -284,7 +294,9 @@ app/src/main/kotlin/fin/android/
   net/     remote/  market/    # HTTP transport, GitHub sync, multi-source quotes
   valuation/                   # valuation, performance, gains
   data/    ui/                 # DI + repository, Compose screens
-app/src/test/kotlin/           # the unit suite (JVM) + FakeHttpServer + the opt-in live probe
+app/src/test/kotlin/           # the unit suite (JVM) + FakeHttpServer
+app/src/probe/kotlin/          # the live provider probe, compiled into BOTH test source sets
+app/src/androidTest/kotlin/    # the one instrumented test: that probe, on a device (make probe-device)
 scripts/doctor.sh setup.sh     # the dev environment
 scripts/crossimpl.sh           # bidirectional compatibility test against the Go binary
 gradle/libs.versions.toml      # every dependency, at an exact version
