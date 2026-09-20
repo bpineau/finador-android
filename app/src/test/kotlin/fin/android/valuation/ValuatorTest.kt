@@ -354,4 +354,80 @@ class ValuatorTest {
         assertTrue(v.positions.any { it.kind == "cash" && it.gross == 10000.0 })
         assertTrue(v.positions.any { it.kind == "cash" && it.gross == 15000.0 })
     }
+    /**
+     * A total must never lose a line in silence. When no rate crosses a record's currency the
+     * amount is counted as zero - the valuation still has to render on a phone - but the note says
+     * WHICH record, in WHICH currency, on WHICH date, instead of "some positions could not be
+     * priced or converted". Mirrors the Go reference, where the same information names the record
+     * (Go D43; the CLI refuses the total outright, a phone screen cannot).
+     */
+    @Test fun aMissingRateNamesTheRecord() {
+        val (book, market) = valuationBook()
+        val withFee = withTx(
+            book,
+            tx("2026-02-20", "pea", "cw8", TxKind.fee, amount = Money(BigDecimal("10000"), "JPY")),
+        )
+        val v = Valuator.value(withFee, market, at = d("2026-06-05"))
+        val note = v.taxNote
+        assertNotNull("a missing rate must be reported", note)
+        for (want in listOf("JPY", "2026-02-20", "fee", "CW8", "counted as 0")) {
+            assertTrue("the note does not name \"$want\": $note", want in note!!)
+        }
+    }
+
+    /**
+     * One line per (record, currency pair), whatever the size of the book: a note the user cannot
+     * read is a note that says nothing.
+     */
+    @Test fun missingRatesAreReportedOncePerRecord() {
+        val (book, market) = valuationBook()
+        val yen = Money(BigDecimal("10000"), "JPY")
+        val withFees = withTx(
+            book,
+            tx("2026-02-20", "pea", "cw8", TxKind.fee, amount = yen),
+            tx("2026-02-21", "pea", "cw8", TxKind.fee, amount = yen),
+            tx("2026-02-22", "pea", "cw8", TxKind.fee, amount = yen),
+        )
+        val v = Valuator.value(withFees, market, at = d("2026-06-05"))
+        val note = v.taxNote!!
+        assertEquals("2026-02-20 named once", 1, Regex("2026-02-20").findAll(note).count())
+        assertTrue("every failing record is named: $note", "2026-02-22" in note)
+    }
+
+    /**
+     * The exact envelope tax is summed in a SORTED account order, exactly as the Go reference does
+     * since D46: a float sum is not associative, so two implementations adding the same per-account
+     * taxes in different orders can differ in their last digits.
+     */
+    @Test fun theEnvelopeTaxTotalIsSummedInASortedOrder() {
+        // Magnitudes ten orders apart: one large envelope and forty tiny ones, each below the ULP
+        // of the large one. Added large-first they vanish, small-first they count - so the order
+        // the sum is taken in is visible in the last digits.
+        val accounts = LinkedHashMap<String, Account>()
+        val txs = LinkedHashMap<String, Tx>()
+        var n = 0
+        fun envelope(id: String, amount: String) {
+            accounts[id] = Account(id, id, "EUR", TaxRule.Value(BigDecimal("0.20")))
+            val t = Tx("s-%04d".format(n++), d("2026-01-05"), id, null, TxKind.statement, BigDecimal.ZERO, eur(amount))
+            txs[t.id] = t
+        }
+        envelope("big", "10000000000.13")
+        repeat(40) { envelope("small%02d".format(it), "0.0000005") }
+        val book = Book(accounts = accounts, txs = txs, config = mapOf("currency" to "EUR"))
+        val market = MarketData()
+
+        val first = Valuator.value(book, market, at = d("2026-06-05"))
+        // Re-declare the envelopes in the reverse order: the total must not move by one ulp.
+        val reversed = book.copy(
+            accounts = accounts.entries.reversed().associate { it.key to it.value },
+            txs = txs.entries.reversed().associate { it.key to it.value },
+        )
+        val second = Valuator.value(reversed, market, at = d("2026-06-05"))
+        assertEquals(first.tax, second.tax, 0.0)
+        // Only the TAX total is pinned here: the gross is summed position by position, in the
+        // order the ledger declares them, and reversing the ledger genuinely reverses that order
+        // (the Go reference does the same). What must not depend on the declaration order is the
+        // per-envelope tax, which both implementations now sum by sorted account id.
+    }
+
 }

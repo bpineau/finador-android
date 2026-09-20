@@ -6,6 +6,10 @@ import fin.android.domain.DividendEvent
 import fin.android.domain.MarketData
 import fin.android.domain.PricePoint
 import fin.android.domain.PriceSeries
+import fin.android.domain.TxKind
+import java.math.BigDecimal
+import java.math.MathContext
+import java.math.RoundingMode
 import java.time.Instant
 import java.time.LocalDate
 import kotlin.math.abs
@@ -171,7 +175,8 @@ object Quotes {
             // chart and the TWR all read as a session that never happened (after a 4:1 split,
             // -75%). Rebuild the whole series from the source instead (Go D40).
             var cached = prices[asset.id]
-            if (restated(cached, daily.closes)) {
+            val restatement = restated(cached, daily.closes)
+            if (restatement != null) {
                 val label = asset.ticker ?: asset.isin ?: asset.name
                 val full = multi.daily(Ref(asset.ticker, asset.isin), from)
                 if (full == null || !Units.same(full.currency, asset.ccy)) {
@@ -179,8 +184,13 @@ object Quotes {
                         "and the deep re-fetch failed: quotes ignored"
                     continue
                 }
-                warnings += "$label: history restated by the source (split or redenomination) - " +
-                    "series rebuilt from $from; check the ledger quantities"
+                // Name the event when it looks like a split, and say which quantities the ledger
+                // owes: the series is now split-adjusted over its whole history and the ledger is
+                // not, so the position reads at 1/N of reality until a record fixes it (Go D47).
+                // The advice comes FIRST, since the holder is shown one message.
+                splitAdvice(book, asset.id, label, restatement)?.let { warnings += it }
+                warnings += "$label: history restated by the source on ${restatement.on} " +
+                    "(split or redenomination) - series rebuilt from $from; check the ledger quantities"
                 cached = null
                 daily = full
             }
@@ -196,6 +206,11 @@ object Quotes {
             daily.currency?.let { currencies.add(it) }
         }
         for (account in book.accounts.values) currencies.add(account.ccy)
+        // A currency reaches the book a THIRD way: on the record itself. A fee charged in JPY, a
+        // deposit made in CHF, a dividend paid in USD on a euro line, a statement declaring a
+        // balance - each is money the valuation has to cross, and collecting only the accounts and
+        // the assets left those amounts with no rate, hence counted as zero (Go D43).
+        for (tx in book.txs.values) currencies.add(tx.amount.ccy)
         currencies.add(refCcy)
 
         // The nowcast proxies. Fetched whether or not the user holds them, since standing in for a
@@ -218,9 +233,13 @@ object Quotes {
             if (daily.openFactors.isNotEmpty()) openFactors[fund.proxy] = PriceSeries(daily.openFactors)
         }
 
+        // The rate is needed AT THE DATE the record carries, not today: a historical deposit is
+        // crossed at the rate of its own day. The FX floor therefore reaches a week before the
+        // oldest record of the book, whatever window the caller asked for (Go D43).
+        val fxFloor = fxHistoryFloor(book, from)
         for (ccy in currencies) {
             if (ccy == "USD") continue
-            val series = yahoo.fxToUsd(ccy, fetchFrom(fx[ccy], from)) ?: continue
+            val series = yahoo.fxToUsd(ccy, fetchFrom(fx[ccy], fxFloor)) ?: continue
             fx[ccy] = (fx[ccy] ?: PriceSeries()).merge(series.points).copy(fetchedAt = now)
         }
 
@@ -301,16 +320,93 @@ object Quotes {
      * nowcast tail - an estimate of a day the fund had not published yet - is never here to be
      * mistaken for a restatement: only published closes are compared.
      */
-    private fun restated(cached: PriceSeries?, incoming: List<PricePoint>): Boolean {
-        if (cached == null || cached.points.isEmpty()) return false
+    private fun restated(cached: PriceSeries?, incoming: List<PricePoint>): Restatement? {
+        if (cached == null || cached.points.isEmpty()) return null
         for (p in incoming) {
             val i = cached.points.binarySearchBy(p.date) { it.date }
             if (i < 0) continue
             val was = cached.points[i].close
-            if (was <= 0 || p.close <= 0) return false
-            return abs(p.close - was) > RESTATED_TOLERANCE * was
+            if (was <= 0 || p.close <= 0) return null
+            if (abs(p.close - was) <= RESTATED_TOLERANCE * was) return null
+            return Restatement(factor = was / p.close, on = p.date)
         }
-        return false
+        return null
+    }
+
+    /** A measured restatement: the [factor] the source applied (cached close divided by the
+     *  re-served one) and the overlap [on] date it was measured on. A 4:1 split serves every close
+     *  at a quarter, so the factor IS the ratio. */
+    internal data class Restatement(val factor: Double, val on: LocalDate)
+
+    /** A split ratio, as it is written ("4:1", "1:10" for a reverse split) and as the multiplier
+     *  the LEDGER quantities owe. */
+    internal data class SplitRatio(val label: String, val quantity: BigDecimal)
+
+    /**
+     * The share splits a restatement factor is matched against, as (new shares, old shares): a 4:1
+     * split multiplies the quantity by 4 and divides the price by 4. Reverses are the same list
+     * inverted. Anything else - a currency redenomination, a class merge, a provider rewriting a
+     * stretch of closes - matches nothing, and nothing is then claimed. Mirrors the Go reference.
+     */
+    private val SPLIT_RATIOS = listOf(
+        2 to 1, 3 to 1, 4 to 1, 5 to 1, 6 to 1, 7 to 1, 8 to 1, 10 to 1, 15 to 1, 20 to 1,
+        50 to 1, 100 to 1, 3 to 2, 4 to 3, 5 to 2, 5 to 3, 5 to 4, 7 to 2, 7 to 5, 9 to 5,
+    )
+
+    /** How far the measured factor may sit from a ratio and still be named: 1 %, which absorbs
+     *  closes rounded to the cent while leaving the ratios far apart (the closest pair is 1.25 and
+     *  1.333). */
+    private const val SPLIT_RATIO_TOLERANCE = 0.01
+
+    /** Matches a restatement [factor] against the usual split ratios; null when it looks like no
+     *  split at all. */
+    internal fun splitRatioFor(factor: Double): SplitRatio? {
+        if (factor <= 0 || factor.isNaN() || factor.isInfinite()) return null
+        for ((n, d) in SPLIT_RATIOS) {
+            val direct = n.toDouble() / d
+            if (abs(factor - direct) <= SPLIT_RATIO_TOLERANCE * direct) {
+                return SplitRatio("$n:$d", BigDecimal(n).divide(BigDecimal(d), MathContext.DECIMAL64))
+            }
+            val inverse = d.toDouble() / n
+            if (abs(factor - inverse) <= SPLIT_RATIO_TOLERANCE * inverse) {
+                return SplitRatio("$d:$n", BigDecimal(d).divide(BigDecimal(n), MathContext.DECIMAL64))
+            }
+        }
+        return null
+    }
+
+    /**
+     * The sentence a measured restatement earns when it looks like a split, or null. A split moves
+     * the POSITION as well as the price, and nothing but a ledger record moves the position: the
+     * source has already re-scaled its whole history, so every trade of the asset predating the
+     * restatement owes the same re-scaling - quantities multiplied, amounts untouched (Go D47).
+     */
+    private fun splitAdvice(book: Book, assetId: String, label: String, r: Restatement): String? {
+        val ratio = splitRatioFor(r.factor) ?: return null
+        val head = "$label: the factor is ${trimRatio(r.factor)}, a ${ratio.label} split"
+        val owed = book.txs.values
+            .filter { it.asset == assetId && (it.kind == TxKind.buy || it.kind == TxKind.sell) && it.date.isBefore(r.on) }
+            .sortedWith(compareBy({ it.date }, { it.id }))
+            .map { "${it.kind} of ${it.date}: ${it.qty.stripTrailingZeros().toPlainString()} becomes " +
+                (it.qty * ratio.quantity).stripTrailingZeros().toPlainString() }
+        if (owed.isEmpty()) {
+            return "$head - no trade of this security predates it, so no quantity to restate"
+        }
+        return "$head - the ledger still holds the pre-split quantities; restate them " +
+            "(edit the quantity, leave the amount alone): ${owed.joinToString("; ")}"
+    }
+
+    /** Renders a measured factor without a trailing-zero tail. */
+    private fun trimRatio(f: Double): String =
+        BigDecimal(f).setScale(3, RoundingMode.HALF_UP).stripTrailingZeros().toPlainString()
+
+    /**
+     * The earliest date an FX series must cover: a week before the oldest record of the book, since
+     * any record may be denominated in any currency. Never later than the caller's own [floor].
+     */
+    private fun fxHistoryFloor(book: Book, floor: LocalDate): LocalDate {
+        val oldest = book.txs.values.minOfOrNull { it.date } ?: return floor
+        return minOf(floor, oldest.minusDays(7))
     }
 
     /**

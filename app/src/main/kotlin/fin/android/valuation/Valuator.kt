@@ -40,8 +40,10 @@ data class ValuationLine(val label: String, val gross: Double, val tax: Double, 
 /**
  * The value of the whole book at [asOf], in [referenceCcy]. Line taxes are the
  * per-position approximation; [gross]/[tax]/[net] use the exact per-account
- * envelope rule, and [taxNote] is set when the two visibly diverge (or when an
- * FX rate was missing - the affected value was counted as 0).
+ * envelope rule, and [taxNote] is set when the two visibly diverge, or when a
+ * rate was missing - in which case it NAMES each record it could not convert
+ * (kind, amount, currency, date, asset, envelope, id), since the amount was
+ * counted as 0 and a total must never lose a line in silence.
  */
 data class Valuation(
     val asOf: LocalDate,
@@ -95,8 +97,32 @@ internal class Valuer(
     private val fx = Converter(market.fx)
     private val prices = market.prices
 
-    /** True when an FX rate was missing and a value was counted as 0. */
-    private var fxMissing = false
+    /**
+     * The amounts no rate could cross, keyed by "what:from->to" so one record is reported once
+     * whatever the number of times it is replayed. A total that quietly drops a line - the
+     * envelope basis understated, the latent tax overstated - is worse than no total at all, so
+     * each one is NAMED: the record, its currency and its date (Go D43). The Go CLI refuses the
+     * total outright; a phone screen has to render, so the amount is counted as 0 and said.
+     */
+    private val fxMissing = LinkedHashMap<String, String>()
+
+    /** Records one failed conversion, named by [what]. */
+    private fun noteMissing(what: String, from: String, to: String) {
+        fxMissing.putIfAbsent("$what:$from->$to", "$what: cannot convert $from to $to - counted as 0")
+    }
+
+    /**
+     * Names one ledger record in the note: what it is, when, on which asset, in which envelope,
+     * and its id. Mirrors the Go reference's `describeTx`.
+     */
+    private fun describeTx(t: Tx): String {
+        val where = mutableListOf<String>()
+        t.asset?.let { id -> book.assets[id]?.let { where += it.name } }
+        book.accounts[t.account]?.let { where += it.name }
+        where += "tx ${t.id}"
+        return "${t.kind} ${t.amount.amount.stripTrailingZeros().toPlainString()} ${t.amount.ccy} " +
+            "on ${t.date} (${where.joinToString(", ")})"
+    }
 
     fun value(): Valuation {
         val positions = mutableListOf<Position>()
@@ -186,17 +212,20 @@ internal class Valuer(
             ValuationLine(it, g, t, g - t)
         }
 
-        // All scope: the exact total tax follows the per-account envelope rule.
+        // All scope: the exact total tax follows the per-account envelope rule. Summed in a
+        // SORTED account order, never the map's: a float sum is not associative, so two orders of
+        // the same per-account taxes can differ in their last digits, and the Go reference sums
+        // this exact list sorted (D46).
         var exactTax = 0.0
-        for ((accId, accGross) in perAccount) {
+        for (accId in perAccount.keys.sorted()) {
             val acc = book.accounts[accId] ?: continue
-            exactTax += accountTax(acc, accGross)
+            exactTax += accountTax(acc, perAccount.getValue(accId))
         }
         var note: String? = null
         val d = exactTax - lineTaxTotal
         if (d > 0.01 || d < -0.01) note = NOTE_TAX_APPROX
-        if (fxMissing) {
-            val missingNote = "some positions could not be priced or converted - counted as 0"
+        if (fxMissing.isNotEmpty()) {
+            val missingNote = fxMissing.values.sorted().joinToString("; ")
             note = if (note == null) missingNote else "$note; $missingNote"
         }
 
@@ -288,11 +317,11 @@ internal class Valuer(
         // it is deliberately absent from the stored series.
         val close = priceOverrides[h.asset.id] ?: prices[h.asset.id]?.at(at)?.first
         if (close != null) {
-            return toRef(toF(h.qty) * close, h.asset.ccy, at)
+            return toRef(toF(h.qty) * close, h.asset.ccy, at, h.asset.name)
         }
         val tx = lastStatement(h.account.id, h.asset.id)
         if (tx != null) {
-            var total = toRef(tx.amount.amount, tx.amount.ccy, at)
+            var total = toRef(tx.amount.amount.toDouble(), tx.amount.ccy, at, describeTx(tx))
             val qAt = quantity(h.account.id, h.asset.id, tx.date)
             if (qAt.signum() > 0) total = total / toF(qAt) * toF(h.qty)
             return total
@@ -302,7 +331,7 @@ internal class Valuer(
 
     private fun statementValue(acc: String, asset: Asset): Double {
         val tx = lastStatement(acc, asset.id) ?: return 0.0
-        return toRef(tx.amount.amount, tx.amount.ccy, at)
+        return toRef(tx.amount.amount.toDouble(), tx.amount.ccy, at, describeTx(tx))
     }
 
     private fun lastStatement(acc: String, asset: String): Tx? {
@@ -338,7 +367,7 @@ internal class Valuer(
             if (t.date.isAfter(at) || t.account != acc || t.asset != asset) continue
             when (t.kind) {
                 TxKind.buy -> {
-                    basis += toRef(t.amount.amount, t.amount.ccy, t.date)
+                    basis += toRef(t)
                     qty += toF(t.qty)
                 }
                 TxKind.sell -> {
@@ -362,7 +391,7 @@ internal class Valuer(
 
     private fun propertyBasis(acc: String, asset: String): Double {
         val first = firstStatement(acc, asset) ?: return 0.0
-        return toRef(first.amount.amount, first.amount.ccy, first.date)
+        return toRef(first)
     }
 
     // ---- exact envelope tax (value.go) ----
@@ -384,13 +413,13 @@ internal class Valuer(
                 TxKind.sell -> -1.0
                 else -> continue
             }
-            basis += sign * toRef(t.amount.amount, t.amount.ccy, t.date)
+            basis += sign * toRef(t)
         }
         basis += cashValue(acc)
         for (p in statementPairs()) {
             if (p.account.id != acc.id || p.asset.kind != AssetKind.PROPERTY) continue
             val first = firstStatement(acc.id, p.asset.id) ?: continue
-            basis += toRef(first.amount.amount, first.amount.ccy, first.date)
+            basis += toRef(first)
         }
         return maxOf(0.0, basis)
     }
@@ -406,7 +435,7 @@ internal class Valuer(
         var anchor: LocalDate? = null
         for (t in sortedTxs) {
             if (t.date.isAfter(at) || t.account != acc.id || t.asset != null || t.kind != TxKind.statement) continue
-            balance = convert(t.amount.amount.toDouble(), t.amount.ccy, acc.ccy, t.date)
+            balance = convert(t.amount.amount.toDouble(), t.amount.ccy, acc.ccy, t.date, describeTx(t))
             anchor = t.date
         }
         for (t in sortedTxs) {
@@ -417,9 +446,9 @@ internal class Valuer(
                 TxKind.withdraw -> -1.0
                 else -> continue
             }
-            balance += sign * convert(t.amount.amount.toDouble(), t.amount.ccy, acc.ccy, t.date)
+            balance += sign * convert(t.amount.amount.toDouble(), t.amount.ccy, acc.ccy, t.date, describeTx(t))
         }
-        return toRef(balance, acc.ccy, at)
+        return toRef(balance, acc.ccy, at, "${acc.name} cash")
     }
 
     // ---- lines (scope.go) ----
@@ -446,18 +475,21 @@ internal class Valuer(
 
     private fun toF(d: BigDecimal): Double = d.toDouble()
 
-    /** Convert [amount] from [from] to [to] at [d]; missing rate → 0, flagged. */
-    private fun convert(amount: Double, from: String, to: String, d: LocalDate): Double {
+    /** Convert [amount] from [from] to [to] at [d]; missing rate → 0, named by [what]. */
+    private fun convert(amount: Double, from: String, to: String, d: LocalDate, what: String): Double {
         val r = fx.convert(amount, from, to, d)
         if (r == null) {
-            fxMissing = true
+            noteMissing(what, from, to)
             return 0.0
         }
         return r
     }
 
-    /** Convert to the reference ccy. */
-    private fun toRef(amount: Double, from: String, d: LocalDate): Double = convert(amount, from, ccy, d)
+    /** Convert to the reference ccy, naming the holding or the envelope the amount belongs to. */
+    private fun toRef(amount: Double, from: String, d: LocalDate, what: String): Double =
+        convert(amount, from, ccy, d, what)
 
-    private fun toRef(amount: BigDecimal, from: String, d: LocalDate): Double = toRef(amount.toDouble(), from, d)
+    /** Convert a RECORD's amount to the reference ccy, at the record's own date, naming it. */
+    private fun toRef(t: Tx): Double =
+        convert(t.amount.amount.toDouble(), t.amount.ccy, ccy, t.date, describeTx(t))
 }
