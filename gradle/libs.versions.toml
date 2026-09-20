@@ -1,10 +1,10 @@
 [versions]
-agp = "9.3.0"
-kotlin = "2.4.10"
+agp = "9.3.3"
+kotlin = "2.4.20"
 composeBom = "2026.06.01"
 activityCompose = "1.13.0"
 serialization = "1.11.0"
-bouncycastle = "1.85"
+bouncycastle = "1.86"
 okhttp = "5.4.0"
 biometric = "1.1.0"
 navigationCompose = "2.9.8"
