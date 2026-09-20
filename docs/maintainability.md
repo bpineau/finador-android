@@ -212,10 +212,30 @@ option.
    - **Yahoo**: verified GREEN on the old stack (daily, FX, and the cookie+crumb quote call, all
      plausible). It could NOT be re-verified on the new stack within the session: repeating the
      probe tripped Yahoo's per-IP rate limit and every request - including plain `curl` with the
-     same User-Agent - answered `429 Too Many Requests` for the rest of the session. **Re-run
-     `make probe` from a fresh IP before the next release and check the four Yahoo lines.**
+     same User-Agent - answered `429 Too Many Requests` for the rest of the session.
      The hermetic `YahooTest`/`QuotesTest` do cover the same paths against the fake server,
      including the 429 retry and the 401-crumb-renewal.
+
+   Re-run on **2026-09-20**, a day later, with the same verdicts and two of them sharpened:
+
+   - **FT** and **Airfund**: green again, same shapes (42 closes ending 127.17 EUR; 631 and 311
+     NAVs ending 70.68 and 206.8 on 2026-09-16).
+   - **Morningstar**: diagnosed rather than assumed. `tools.morningstar.fr` is a CNAME to
+     `00844-eurt-tools.eur6c597.eas.morningstar.com`, and **that name has no address record** on
+     any resolver tried, including 1.1.1.1. The host is gone, at the DNS level, for everyone.
+     Nothing to fix here; the ISIN lookup it depends on (Boursorama) still answers 200 and still
+     yields a `0P…` id, so the day Morningstar's endpoint returns, the provider works again.
+   - **Yahoo**: still `429 Too Many Requests` from this IP, on `query1` AND `query2`, over IPv4
+     and IPv6, with and without a cookie, and to plain `curl` as much as to the app. That is an
+     IP-level throttle and it says nothing about the HTTP stack. **Yahoo still owes one green
+     `make probe` from a non-throttled network before the next release.**
+
+   What the probe now prints, so this reasoning does not have to be redone by hand: a
+   `probe net` reachability line per provider host, with the raw HTTP status or the transport
+   failure, BEFORE anything is parsed. 429 is a throttle, no answer is a dead host, and 200 beside
+   a failing provider is a payload change - the only one of the three that is a code bug. The two
+   live shapes met that day are pinned by hermetic tests (`YahooTest.dailyIsNullWhileTheHostThrottles`,
+   `dailyIsNullWhenTheHostNeverAnswers`).
 
 **What a reader should still know.** Two differences exist and are handled in `market/Http.kt`:
 a `HttpURLConnection` throws `IOException` on a 4xx/5xx instead of returning the body, so the code
@@ -306,13 +326,13 @@ reflection on it); `static final` fields unmodifiable by reflection (no reflecti
 IME composition (no custom IME, no custom edit field); **ECH on by default** and **Certificate
 Transparency on by default** (both touch the four HTTPS providers: all of them are large public
 endpoints served behind CT-logged certificates, and the live probe in §6 confirms the calls still
-succeed under `targetSdk` 37 — this is the one change worth re-checking if a provider ever starts
+succeed under `targetSdk` 37 - this is the one change worth re-checking if a provider ever starts
 failing only on new phones); `ACCESS_LOCAL_NETWORK` (no LAN access); password fields with physical
 keyboards (none); standard-SMS OTP delay (no SMS); background activity launch hardening (the app
 launches no activity from the background); safer native DCL (no `System.load`); Contacts Provider
 restrictions (no contacts); Content Capture deprecation (not used); background audio (none);
 **orientation and resizability constraints ignored on large screens** (the manifest declares no
-`screenOrientation` and no `resizeableActivity`, so there is nothing to be ignored — the app was
+`screenOrientation` and no `resizeableActivity`, so there is nothing to be ignored - the app was
 already free-form); `BluetoothSocket` read (no Bluetooth).
 
 **Net: `targetSdk` 37 required no code change in this app.** That is the dividend of having no
@@ -323,7 +343,8 @@ services, no receivers, no permissions beyond `INTERNET`, and no reflection.
 ## 9. What is honestly left to maintain, every year
 
 Nothing in this repository makes the yearly Android release free. What it does is make it small and
-mechanical. Expect, once a year, roughly half a day:
+mechanical. Expect, once a year, roughly half a day - job by job, with the times measured on the
+wave of September 2026, in §13's table "What you will still maintain every year":
 
 1. **The SDK wave**: Gradle wrapper, AGP, Kotlin, `compileSdk`, `targetSdk`, then the AndroidX
    libraries that gate on `compileSdk`. The order matters and is written down in `README.md`
@@ -442,7 +463,7 @@ maybe 60 lines.
 
 This section is the resume point. It says what has been done and verified, and what has not.
 
-### Done, all four gates green (`make test` 305 tests / `make build` / `make lint` "No issues
+### Done, all four gates green (`make test` 307 tests / `make build` / `make lint` "No issues
 ### found" / `make crossimpl` OK), committed and pushed to master
 
 | Step | Commit | What |
@@ -455,6 +476,9 @@ This section is the resume point. It says what has been done and verified, and w
 | SDK wave 5/5 | `65f1e42` | **targetSdk 36 -> 37**. Both Android 17 behaviour-change lists audited row by row (§8): **no code change was required**. `lintDebug` went to "No issues found" - not one version notice left. |
 | okhttp removal | `f5c7e69` | `net/Http.kt` over `HttpURLConnection`; `net/FakeHttpServer.kt` over `com.sun.net.httpserver` replaces MockWebServer; okhttp + okio gone from the APK; two redundant `@OptIn`s and a dead `kotlin-android` plugin alias removed; `make probe` added. |
 | R8 | `33ef5af` | Dropped the blanket Bouncy Castle keep rule and the dead Tink rules: **release APK 4.21 MB -> 2.12 MB**, 9245 -> 3498 classes. |
+| Reproducible toolchain | `43e4c72` | Java **toolchain pinned to 21** (the bytecode level stays 17), **configuration cache ON**, `android.useAndroidX` (deprecated in AGP 9.4.1) and `android.nonTransitiveRClass` (default true) deleted. |
+| One-command environment | `56b824e` | `make doctor` (read-only), `make setup` (idempotent), `make setup-emulator`, and a `preflight` prerequisite on every build target. |
+| Probe attribution | `cbd14d4` | `make probe` prints a reachability line per provider host, so a throttle, a dead host and a payload change stop looking alike; two hermetic tests pin the two live shapes. |
 
 Also verified by hand, beyond the gates:
 
@@ -468,37 +492,106 @@ Also verified by hand, beyond the gates:
 - The live provider probe: see §6 for exactly what was and was not re-verified. **Yahoo still owes
   a green `make probe` run from a non-rate-limited IP.**
 
+### The environment, the toolchain and the verification question: what was decided, and why
+
+**The JDK is pinned by a Gradle toolchain** (`java { toolchain { languageVersion = 21 } }`), so
+javac, kotlinc and the forked test JVM all run on a JDK 21 whatever the laptop's `java` happens to
+be. The bytecode level stays 17 (`compileOptions` + `jvmTarget`), which is a separate question:
+that is what D8 consumes.
+
+**Auto-provisioning stays off**, deliberately. The only way to have Gradle download a JDK is the
+foojay resolver plugin: a third-party Gradle plugin, resolved from a third-party API, on every
+machine that lacks the right JDK. Against the "fewest moving parts" rule it loses to a package
+manager: `make setup` installs Temurin 21 with one `brew install --cask`, and
+`org.gradle.java.installations.auto-download=false` makes an unsatisfiable toolchain fail loudly
+instead of reaching for the network.
+
+**The configuration cache is on.** Green on `make test`, `make build`, `make lint`,
+`make crossimpl` and the release APK; Gradle had been suggesting it on every build. A future plugin
+that breaks it will say so by name, and the line can go.
+
+**Two `gradle.properties` entries were dead** and were removed: `android.useAndroidX` is
+DEPRECATED in AGP 9.4.1 (`ApiStage.Deprecated` in its own option table) and defaults to true, and
+`android.nonTransitiveRClass` is stable and also defaults to true. A full rebuild with
+`--rerun-tasks --warning-mode all` after removing them: no warning, no output change. The three
+that stay are justified: `jvmargs` (the daemon's heap), `parallel` (free, and correct the day a
+second module appears), `caching` (the build cache, which is what makes a re-run of `make test`
+cost two seconds).
+
+**No dynamic versions anywhere** - verified: `gradle/libs.versions.toml` holds only exact
+versions, no `+`, no `latest.release`, no `-SNAPSHOT`, and the wrapper pins its distribution by
+SHA-256.
+
+**Dependency verification (`gradle/verification-metadata.xml`): measured, then refused.** It was
+generated for real, not guessed at: `./gradlew --write-verification-metadata sha256 assembleDebug
+testDebugUnitTest lintDebug` produces a **2,577-line file pinning 370 artifacts**. Against the
+brief's own test - adopt it only if each bump costs one documented command - it fails on three
+counts:
+
+1. the command only records what the tasks it was given actually resolved, so a path not exercised
+   that day (the release build, an emulator task, a new Lint check) fails later with a
+   "dependency verification failed" that reads like a network error;
+2. a single Compose BOM bump rewrites dozens of entries at once, and a generated 2,500-line diff is
+   reviewed by nobody, which turns a security control into a ritual;
+3. what it defends against is a tampered artifact on Google's Maven or Maven Central - not this
+   project's threat model, and not the thing that has ever broken here.
+
+What IS pinned is what matters most: the Gradle distribution itself (SHA-256 in
+`gradle-wrapper.properties`, added in this pass) and every dependency version exactly. If that
+judgement is ever revisited, the one command above is where to start.
+
+**`make doctor` / `make setup`** (`scripts/doctor.sh`, `scripts/setup.sh`). Doctor is read-only,
+installs nothing, and prints one line per requirement - the version found, or the exact fix command
+- in four sections: build and test (required; the only one that can set a non-zero exit status),
+device and emulator, the cross-implementation gate, release. Setup installs exactly what is
+missing: the Homebrew casks (`temurin@21`, `android-commandlinetools`), `yes | sdkmanager
+--licenses`, `platform-tools`, the platform for `compileSdk` and a build-tools revision; it writes
+`local.properties` if absent, never touches a signing key, and a second run prints "already here"
+everywhere. `make setup-emulator` adds the emulator, a system image and the AVD. On Linux the two
+steps it cannot do are printed with their exact commands, and the rest still runs. Both scripts
+read the JDK version and `compileSdk` out of `app/build.gradle.kts`, so they cannot drift from the
+build.
+
+Proof, not assertion: setup was run against a **temporary `ANDROID_HOME` holding nothing but the
+command-line tools**. It accepted the licences unattended, installed platform-tools, the API 37
+platform and build-tools 37, and a full `assembleDebug --rerun-tasks` against that SDK then
+succeeded - during which AGP downloaded its own default build-tools 36.0.0, confirming that with
+the licences accepted the plugin completes an incomplete SDK by itself.
+
+One thing to watch: **`sdkmanager` is itself deprecated**. cmdline-tools 22 prints, on every call,
+that `android sdk` (the new `android` CLI shipped beside it) is its replacement. `sdkmanager` is
+kept for now because it is the one of the two with a documented non-interactive licence flow, which
+is what makes `make setup` unattended; the switch is a one-function change (`sdk_install` in
+`scripts/setup.sh`) the day the new CLI can accept licences without a human.
+
+### What you will still maintain every year, and how long it takes
+
+Honest estimate, from the wave that was just done end to end (§13's table above is that wave):
+
+| Job | Cadence | Real cost |
+|---|---|---|
+| The SDK wave: wrapper, AGP, Kotlin, `compileSdk`, the AndroidX libraries, `targetSdk`, in that order | yearly, when the new Android ships | **2 to 4 hours** when nothing fights back. This one took longer only because of okhttp, and okhttp is gone. |
+| Reading the two behaviour-change pages and answering them row by row (§8 is the template) | yearly | **45 minutes**. Most rows are "no" and stay "no" as long as the app keeps one permission, one activity, no service and no reflection. |
+| An emulator smoke on the new API level | yearly | **20 minutes**, `make setup-emulator` included. Not optional: compiling against a platform proves nothing about running on it. |
+| Bouncy Castle security releases | quarterly | **10 minutes**: bump, `make test`, `make crossimpl`. Two bumps, zero incidents so far. |
+| A provider changing its payload (Yahoo, FT, Morningstar, Airfund) | unpredictable, once or twice a year | **1 to 3 hours** for the one that moved. `make probe` says which, and whether it is a payload change at all rather than a throttle or an outage. This is a data risk, not an Android risk, and it is the likeliest thing to break. |
+| Play policy (`targetSdk` within a year of the newest API) | not applicable today | zero while the app is distributed as a GitHub-release APK. |
+
+So: **roughly half a day a year of Android upkeep**, plus whatever the market providers do. The two
+jobs that used to enlarge that budget have been removed rather than managed - the only third-party
+library in the request path (okhttp), and the ceremony of a hand-built environment (`make setup`).
+
 ### Not done, for a later session
 
-1. **`make setup` and `make doctor`** (brief part 3). Nothing of this exists yet. The requirements
-   were established while working and are: Homebrew; `temurin@21`; `android-commandlinetools`;
-   `JAVA_HOME` + `ANDROID_HOME`; accepted SDK licences (`sdkmanager --licenses`); the packages
-   `platform-tools`, `platforms;android-37.0`, `build-tools;37.0.0`, `emulator`,
-   `system-images;android-37.0;google_apis;arm64-v8a`; an AVD; and, for a release only, the
-   keystore outside the repo. `make doctor` should be read-only and print OK/MISSING plus the
-   exact fix command; `make setup` idempotent; every other target should fail early with "run
-   make doctor".
-2. **Reproducible build** (brief part 2d), partly done. The wrapper now carries its
-   `distributionSha256Sum` and every version in `gradle/libs.versions.toml` is exact (no `+`, no
-   dynamic range) - verified. Still open: pin the JDK through a Gradle **toolchain** block so the
-   build does not depend on the laptop's default JDK (weigh the foojay resolver plugin against
-   the "fewest plugins" rule - it is a third-party plugin and probably fails that test, in which
-   case pin the toolchain without auto-provisioning and let `make doctor` install the JDK);
-   review `gradle.properties` (`org.gradle.jvmargs`, `parallel`, `caching` - all still
-   justified); and turn the **configuration cache** on if it is green (Gradle prints the
-   suggestion on every build today).
-3. **README and AGENTS.md rewrite for a Go developer landing cold** (brief part 4). Not started.
-   Numbers that MUST be updated wherever they appear: compileSdk/targetSdk **36 -> 37**, Gradle
-   **9.5.0 -> 9.7.1**, AGP **9.3.0 -> 9.4.1**, test count **304 -> 305** (the extra one is the
-   opt-in `LiveProviderProbe`, which is skipped unless `-Dprobe=1`), and the emulator AVD (a
-   `test37` AVD on API 37 now exists beside the old API 36 `test`). AGENTS.md's "Known deferred
-   work" section still says the SDK 37 wave is deferred - **that entry is now obsolete and must
-   be deleted**. AGENTS.md also needs the owner's priorities as its first golden rule, phrased
-   impersonally ("this app is maintained by Go developers, not Android specialists"), and a
-   "when Android moves" yearly checklist. The architecture map needs a row for the new `net/`
-   package.
-4. **The `market/` and `remote/` doc comments** were left as they were; `net/Http.kt` and
-   `net/FakeHttpServer.kt` are documented, but AGENTS.md's table does not mention them yet.
-5. **Not attempted, deliberately**: raising `minSdk` to drop `androidx.biometric` (§4, a product
+1. **Yahoo owes one green `make probe`** from a network Yahoo is not throttling (§6). Everything
+   else the probe covers is green or diagnosed; the hermetic tests cover the same code paths,
+   including the 429 retry and the 401 crumb renewal, so this is a confirmation, not a suspicion.
+2. **Morningstar's host is gone at the DNS level** (§6). Nothing to do: it is the last link of the
+   fallback chain, it degrades cleanly, and Boursorama's ISIN lookup still works. If it never comes
+   back, deleting the provider would remove ~120 lines and one of the app's four data sources -
+   a decision to take deliberately, not by attrition.
+3. **Not attempted, deliberately**: raising `minSdk` to drop `androidx.biometric` (§4, a product
    decision); hand-building the top bar and the exposed dropdown to drop the last ten `@OptIn`s
-   (§12, no functional gain); replacing navigation-compose (§3, refused with reasons).
+   (§12, no functional gain); replacing navigation-compose (§3, refused with reasons); Gradle
+   dependency verification (measured and refused above); switching `make setup` to the new
+   `android` CLI (no unattended licence flow yet).
