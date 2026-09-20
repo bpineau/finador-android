@@ -1,7 +1,7 @@
 # Maintainability inventory
 
-This app is maintained by Go developers, not Android specialists. The standing priorities, in
-order, are: it must keep working on future Android versions and future phones; it must need as
+The goal is code that survives Android upgrades with little or no maintenance. The standing
+priorities, in order, are: it must keep working on future Android versions and future phones; it must need as
 little upkeep as possible; it must depend on as few third-party libraries as possible, because
 every one of them is a future breakage; it must use no deprecated API and nothing on a path to
 deprecation; and a fresh laptop must reach a working build with one obvious command.

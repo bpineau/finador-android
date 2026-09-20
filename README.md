@@ -41,17 +41,17 @@ so that `$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager` exists. Then
 `ANDROID_HOME=/path/to/sdk make setup` does the rest (licences, platform, build-tools). `make
 setup` prints those two steps for you if you run it on Linux with nothing installed.
 
-### If you know Go, this is that
+### How the build is pinned
 
-| Here | In Go terms |
+| Piece | What it guarantees |
 |---|---|
-| `./gradlew` (the wrapper) | a pinned toolchain, like `GOTOOLCHAIN`: it downloads **Gradle 9.7.1** and checks its SHA-256 before running. Never `brew install gradle`. |
-| `gradle/libs.versions.toml` | `go.mod`: every dependency at an **exact** version, no `+`, no ranges, no snapshots. |
-| a version-catalog bump + `make check` | `go get -u` + `go test ./...` |
-| `make test` | `go test ./...` (host JVM, no device: the engine layers are pure Kotlin) |
-| `make build` | `go build` - except the artifact is an APK, not a binary |
-| `make doctor` / `make setup` | no Go equivalent: Go needs a compiler, Android needs an SDK, a platform, build-tools and accepted licences |
-| the Java **toolchain** in `app/build.gradle.kts` | the `go` directive in `go.mod`: pins the JDK the build runs on (21), independently of what is on your PATH |
+| `./gradlew` (the wrapper) | downloads **Gradle 9.7.1** and checks its SHA-256 before running. Never `brew install gradle`. |
+| `gradle/libs.versions.toml` | the one list of dependencies, each at an **exact** version: no `+`, no ranges, no snapshots. |
+| a version-catalog bump + `make check` | how a dependency is upgraded and proven. |
+| `make test` | the unit suite on the host JVM, no device needed (the engine layers are pure Kotlin). |
+| `make build` | the debug APK. |
+| `make doctor` / `make setup` | check / install everything the build needs (JDK, SDK, platform, build-tools, licences). |
+| the Java **toolchain** in `app/build.gradle.kts` | pins the JDK the build runs on (21), independently of what is on your PATH. |
 
 What the app is built with, all pinned: **JDK 21**, Gradle **9.7.1**, Android Gradle Plugin
 **9.4.1**, Kotlin **2.4.20**, Compose BOM **2026.09.00**, `compileSdk`/`targetSdk` **37**,
@@ -287,7 +287,7 @@ app/src/main/kotlin/fin/android/
 app/src/test/kotlin/           # the unit suite (JVM) + FakeHttpServer + the opt-in live probe
 scripts/doctor.sh setup.sh     # the dev environment
 scripts/crossimpl.sh           # bidirectional compatibility test against the Go binary
-gradle/libs.versions.toml      # every dependency version (the "go.mod")
+gradle/libs.versions.toml      # every dependency, at an exact version
 Makefile                       # every command (`make help`)
 ```
 
