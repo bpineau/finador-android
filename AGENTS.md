@@ -24,7 +24,7 @@ when you change architecture or invariants.
    `*_test.go`. Don't change the math without checking parity; if you must, update the Go reference too.
 3. **All docs / comments / code in English.** (User convention.)
 4. **Keep the suite green.** Run the full `testDebugUnitTest` before claiming done; every test must
-   pass (count them from `app/build/test-results/testDebugUnitTest/*.xml`, 296 today).
+   pass (count them from `app/build/test-results/testDebugUnitTest/*.xml`, 304 today).
 5. **Don't weaken security.** Secrets are encrypted under an Android Keystore key
    (`data/SecretStore.kt`); the repo holds only the *encrypted* `.fin`; never log secrets or write
    them to disk in clear.
@@ -133,6 +133,25 @@ that state; per-asset detail pages are **precomputed** into `Ready.assetDetails`
   cached close and the series is dropped and refetched from the floor, with a warning (`Refresh.warnings`
   → snackbar) asking for the ledger quantities to be checked, since a split moves the position too.
   Mirrors Go D40; estimates are stripped before the comparison, so a nowcast tail never triggers it.
+  When the measured factor matches a plain split ratio (`Quotes.splitRatioFor`: 2:1, 3:1, 4:1, 3:2,
+  their reverses...), the warning NAMES the split and lists the quantities each pre-split trade
+  owes - multiply the quantity, leave the amount alone, which is the faithful correction once the
+  whole price history has been re-scaled. A factor matching no ratio (a currency redenomination)
+  claims none. Mirrors Go D47, which also holds the proposal for a native `split` record: the
+  ledger has no way to restate a quantity, and adding a transaction kind would make an older
+  reader reject the file, so it is a version-bump decision, not a bugfix.
+- **A currency reaches the book three ways**: an account is denominated in one, an asset quotes in
+  one, and a RECORD may be written in a fourth (a fee in JPY, a deposit in CHF). `Quotes` collects
+  all three, and the FX window reaches a week before the OLDEST record (`fxHistoryFloor`), because
+  a historical deposit is crossed at the rate of its own day. When a rate is still missing,
+  `Valuator` counts the amount as 0 - a phone screen has to render, where the Go CLI refuses the
+  total - and NAMES the record in `Valuation.taxNote`: its kind, amount, currency, date, asset,
+  envelope and id. `Perf` stays silent on purpose: it reads the same ledger, so the note beside the
+  curve already names what it could not convert. Mirrors Go D43.
+- **Never sum `Double` in a map's own order when the order is not the ledger's.** The addition is
+  not associative, so the same per-envelope taxes added in two orders differ in their last digits,
+  and the Go reference sums that exact list by sorted account id. `Valuer` does the same, which is
+  what keeps the two implementations comparable figure for figure. Mirrors Go D46.
 - **A currency code is never compared with `==` or `equalsIgnoreCase`.** A venue quotes in a
   SUB-UNIT and the provider reports it where a currency is expected: Yahoo answers `GBp` for a
   London line and prices it in PENCE, FT spells it `GBX`, Johannesburg is `ZAc`, Tel Aviv `ILA`,

@@ -6,9 +6,12 @@ import fin.android.domain.AssetKind
 import fin.android.domain.Book
 import fin.android.domain.DividendEvent
 import fin.android.domain.MarketData
+import fin.android.domain.Money
 import fin.android.domain.PricePoint
 import fin.android.domain.PriceSeries
 import fin.android.domain.TaxRule
+import fin.android.domain.Tx
+import fin.android.domain.TxKind
 import okhttp3.mockwebserver.Dispatcher
 import okhttp3.mockwebserver.MockResponse
 import okhttp3.mockwebserver.MockWebServer
@@ -20,6 +23,7 @@ import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Before
 import org.junit.Test
+import java.math.BigDecimal
 import java.time.LocalDate
 
 /**
@@ -695,4 +699,133 @@ class QuotesTest {
         assertEquals(listOf(100.0, 100.5), out.market.prices["aa"]!!.points.map { it.close })
         assertEquals(listOf(d("2026-06-01")), provider.from) // resumed at the last PUBLISHED close
     }
+    /**
+     * A currency reaches the book three ways, and all three need a rate: an account is
+     * denominated in one, an asset quotes in one, and a RECORD may be written in a fourth - a fee
+     * charged in JPY, a deposit made in CHF. Collecting only the first two left those amounts with
+     * no rate to cross at, so the valuation counted them as zero: the envelope basis lost the fee
+     * and the estimated latent tax was overstated. Mirrors the Go reference (D43).
+     */
+    @Test fun everyRecordCurrencyIsFetched() {
+        val provider = FakeProvider(DailyData("USD", listOf(PricePoint(d("2026-06-02"), 110.0))))
+        val b = book().let {
+            it.copy(
+                txs = mapOf(
+                    "t1" to Tx("t1", d("2026-02-01"), "cto", "aa", TxKind.fee, BigDecimal.ZERO, Money(BigDecimal("10000"), "JPY")),
+                    "t2" to Tx("t2", d("2026-02-02"), "cto", null, TxKind.deposit, BigDecimal.ZERO, Money(BigDecimal("500"), "CHF")),
+                    "t3" to Tx("t3", d("2026-02-03"), "cto", null, TxKind.statement, BigDecimal.ZERO, Money(BigDecimal("900"), "SEK")),
+                ),
+            )
+        }
+        val out = Quotes.refresh(
+            b, null, from = d("2026-01-01"), now = d("2026-06-03"),
+            multi = MultiSource(listOf(provider)), yahoo = yahoo(),
+        )
+        assertEquals(setOf("EUR", "USD", "JPY", "CHF", "SEK"), out.fx.keys + "USD")
+        for (ccy in listOf("JPY", "CHF", "SEK")) {
+            assertTrue("$ccy has no FX series: ${out.fx.keys}", out.fx.containsKey(ccy))
+        }
+    }
+
+    /**
+     * The rate is needed AT THE DATE the record carries, not today. A record dated before the
+     * refresh window must widen it, or a historical deposit stays unconvertible for ever.
+     */
+    @Test fun theFxWindowReachesTheOldestRecord() {
+        val provider = FakeProvider(DailyData("USD", listOf(PricePoint(d("2026-06-02"), 110.0))))
+        val b = book().copy(
+            txs = mapOf(
+                "t1" to Tx("t1", d("2019-03-04"), "cto", "aa", TxKind.fee, BigDecimal.ZERO, Money(BigDecimal("10000"), "JPY")),
+            ),
+        )
+        Quotes.refresh(
+            b, null, from = d("2026-01-01"), now = d("2026-06-03"),
+            multi = MultiSource(listOf(provider)), yahoo = yahoo(),
+        )
+        // The FX requests go to the mock server: the oldest one must reach a week before the
+        // record, not the caller's two-year window.
+        val periods = generateSequence { server.takeRequest(1, java.util.concurrent.TimeUnit.MILLISECONDS) }
+            .mapNotNull { it.path }
+            .filter { "USD=X" in it }
+            .toList()
+        assertTrue("no FX request recorded", periods.isNotEmpty())
+        val wanted = d("2019-02-25").atStartOfDay(java.time.ZoneOffset.UTC).toEpochSecond()
+        assertTrue(
+            "the FX window stops short of the oldest record: $periods",
+            periods.any { "period1=$wanted" in it },
+        )
+    }
+
+    /**
+     * The canary of D40 says a history was restated; D47 makes it actionable. When the measured
+     * factor matches a plain split ratio, the warning names the ratio and the quantities the
+     * ledger owes - the price series is split-adjusted over its whole history and the ledger is
+     * not, so the position reads at 1/N of reality until a record fixes it.
+     */
+    @Test fun aRestatementThatLooksLikeASplitNamesTheRatioAndTheQuantities() {
+        val deep = listOf(
+            PricePoint(d("2026-05-15"), 100.0), PricePoint(d("2026-05-18"), 101.0),
+            PricePoint(d("2026-05-19"), 102.0), PricePoint(d("2026-05-20"), 103.0),
+        )
+        val b = book().copy(
+            txs = mapOf(
+                "t1" to Tx("t1", d("2026-05-15"), "cto", "aa", TxKind.buy, BigDecimal("10"), Money(BigDecimal("4000"), "USD")),
+            ),
+        )
+        val existing = MarketData(
+            prices = mapOf(
+                "aa" to PriceSeries(
+                    listOf(PricePoint(d("2026-05-18"), 404.0), PricePoint(d("2026-05-19"), 408.0)),
+                    fetchedAt = d("2026-05-19"),
+                ),
+            ),
+        )
+        val out = Quotes.refreshDetailed(
+            b, existing, from = d("2026-05-15"), now = d("2026-05-20"),
+            multi = MultiSource(listOf(RestatingProvider(deep))), yahoo = yahoo(),
+        )
+        val joined = out.warnings.joinToString("\n")
+        // 05-18 is the first date the cached series and the re-served one share: the junction
+        // the merge would have glued, which is where the factor is measured.
+        for (want in listOf("4:1", "2026-05-18", "AA", "40")) {
+            assertTrue("the warning does not name \"$want\": $joined", want in joined)
+        }
+    }
+
+    /**
+     * A restatement that matches no simple ratio (a currency redenomination, a class merge) must
+     * say so plainly rather than invent a split: nothing is known to be wrong with the quantities.
+     */
+    @Test fun aRestatementWithoutARatioClaimsNothing() {
+        val deep = listOf(PricePoint(d("2026-05-19"), 374.0), PricePoint(d("2026-05-20"), 376.0))
+        val b = book().copy(
+            txs = mapOf(
+                "t1" to Tx("t1", d("2026-05-15"), "cto", "aa", TxKind.buy, BigDecimal("10"), Money(BigDecimal("4000"), "USD")),
+            ),
+        )
+        val existing = MarketData(
+            prices = mapOf("aa" to PriceSeries(listOf(PricePoint(d("2026-05-19"), 408.0)), fetchedAt = d("2026-05-19"))),
+        )
+        val out = Quotes.refreshDetailed(
+            b, existing, from = d("2026-05-15"), now = d("2026-05-20"),
+            multi = MultiSource(listOf(RestatingProvider(deep))), yahoo = yahoo(),
+        )
+        val joined = out.warnings.joinToString("\n")
+        assertTrue("the restatement must be named: $joined", "restated" in joined)
+        assertFalse("no ratio may be claimed: $joined", ":1" in joined || "split ratio" in joined)
+    }
+
+    /** The split-ratio matcher itself, ratio by ratio. */
+    @Test fun splitRatioMatchesOnlyPlainSplits() {
+        assertEquals("4:1", Quotes.splitRatioFor(4.0)?.label)
+        assertEquals("4:1", Quotes.splitRatioFor(3.98)?.label) // a close rounded to the cent
+        assertEquals("2:1", Quotes.splitRatioFor(2.0)?.label)
+        assertEquals("3:2", Quotes.splitRatioFor(1.5)?.label)
+        assertEquals("1:10", Quotes.splitRatioFor(0.1)?.label) // reverse split
+        assertEquals(BigDecimal("4"), Quotes.splitRatioFor(4.0)?.quantity?.stripTrailingZeros())
+        assertNull(Quotes.splitRatioFor(6.55957)) // the franc/euro redenomination
+        assertNull(Quotes.splitRatioFor(1.09))
+        assertNull(Quotes.splitRatioFor(0.0))
+    }
+
 }

@@ -343,6 +343,13 @@ internal class SeriesBuilder(
 
     private fun sorted() = book.txs.values.sortedWith(compareBy({ it.date }, { it.id }))
 
+    /**
+     * Missing rate -> 0, silently: a curve must stay drawable (the Go reference's `Series` does
+     * the same). Silent here only: [Valuer] reads the SAME ledger, so any record this cannot
+     * convert it cannot convert either, and it names that record - currency, date and id - in the
+     * valuation note the screen shows beside this curve (Go D43). The channel exists once; it is
+     * not duplicated per view.
+     */
     private fun convert(amount: Double, from: String, to: String, at: LocalDate): Double =
         fx.convert(amount, from, to, at) ?: 0.0
 
