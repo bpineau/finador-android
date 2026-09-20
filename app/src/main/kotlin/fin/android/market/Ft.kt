@@ -103,7 +103,9 @@ class Ft(
             if (day.isBefore(from)) continue
             out.add(PricePoint(day, cl))
         }
-        return DailyData(currency = currency, closes = out)
+        // FT spells the London pence listing "GBX": the sub-unit is removed here, where its numbers
+        // enter the app, so a GBP holding is priced and not rejected (see [Units]).
+        return Units.normalize(DailyData(currency = currency, closes = out))
     }
 
     /** Currency = the last `:`-separated segment of an FT symbol like "LU0171310443:EUR" or "NTSG:GER:EUR". */

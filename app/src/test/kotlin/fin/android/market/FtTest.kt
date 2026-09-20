@@ -78,6 +78,31 @@ class FtTest {
         assertTrue(seriesReq.body.readUtf8().contains("\"Symbol\":\"222\"")) // picked the EUR xid, not the GBX one
     }
 
+    /**
+     * When only the pence listing exists, FT serves it under "GBX" - the same sub-unit Yahoo spells
+     * "GBp". The numbers are rescaled into pounds here, at the provider boundary, so a GBP holding
+     * is priced by it instead of having the whole series refused on a currency-code comparison.
+     */
+    @Test fun aGbxListingIsServedInPounds() {
+        val penceOnly = """
+            {"data":{"security":[
+              {"name":"Pence listing","symbol":"AAA:LSE:GBX","xid":"111","isPrimary":true}
+            ]}}
+        """.trimIndent()
+        val pencePrices = """
+            {
+              "Dates":["2024-01-15T00:00:00"],
+              "Elements":[{"Currency":"GBX","ComponentSeries":[{"Type":"Close","Values":[12345.0]}]}]
+            }
+        """.trimIndent()
+        server.enqueue(MockResponse().setResponseCode(200).setBody(penceOnly))
+        server.enqueue(MockResponse().setResponseCode(200).setBody(pencePrices))
+
+        val data = ft().daily(Ref(symbol = null, isin = "GB00B16GWD56"), LocalDate.parse("2024-01-01"))!!
+        assertEquals("GBP", data.currency)
+        assertEquals(123.45, data.closes[0].close, 1e-9)
+    }
+
     @Test fun noIdentifierIsNull() {
         assertNull(ft().daily(Ref(symbol = null, isin = null), LocalDate.parse("2024-01-01")))
         assertEquals(0, server.requestCount)

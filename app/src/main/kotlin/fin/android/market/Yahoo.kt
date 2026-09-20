@@ -11,16 +11,17 @@ import okhttp3.OkHttpClient
 import okhttp3.Request
 import java.time.Instant
 import java.time.LocalDate
+import java.time.ZoneId
 import java.time.ZoneOffset
 
 /**
  * The default provider: the unofficial but stable Yahoo Finance chart API. No key, no auth - just a
  * browser-looking User-Agent and one polite retry on 429/5xx.
  *
- * Timezone note: the Go implementation converts each timestamp in the exchange's local zone (via
- * embedded tzdata). The Android side intentionally does NOT bundle tzdata and uses UTC for the
- * civil-day conversion - a quote near midnight may land one day off relative to Go, which is harmless
- * for daily analytics (forward-fill smooths it).
+ * Timezone note: a daily bar carries an instant of the session, not a date, so it is dated in the
+ * venue's own zone ([VenueDay], off the payload's `exchangeTimezoneName`) and never in UTC, which
+ * would put half of every Australian history one day early. Quote units are normalized the same
+ * way, at this boundary: a London line comes back in PENCE, labelled `GBp` ([Units]).
  */
 class Yahoo(
     private val baseUrl: String = "https://query1.finance.yahoo.com",
@@ -38,14 +39,17 @@ class Yahoo(
     override fun daily(ref: Ref, from: LocalDate): DailyData? {
         val symbol = ref.symbol?.takeIf { it.isNotEmpty() } ?: return null // a ticker provider needs a symbol
         val r = chart(symbol, from)?.chart?.result?.firstOrNull() ?: return null
+        val zone = VenueDay.zoneOf(symbol, r.meta?.exchangeTimezoneName)
         val dividends = (r.events?.dividends?.values ?: emptyList())
-            .map { DividendEvent(dateOf(it.date), it.amount) }
+            .map { DividendEvent(VenueDay.dateOf(it.date, zone), it.amount) }
             .sortedBy { it.exDate }
-        return DailyData(
-            currency = r.meta?.currency,
-            closes = closesOf(r),
-            dividends = dividends,
-            openFactors = openFactorsOf(r),
+        return Units.normalize(
+            DailyData(
+                currency = r.meta?.currency,
+                closes = closesOf(r, zone),
+                dividends = dividends,
+                openFactors = openFactorsOf(r, zone),
+            ),
         )
     }
 
@@ -105,7 +109,11 @@ class Yahoo(
                 Session.freshest(price, time, r.preMarketPrice, r.preMarketTime, r.postMarketPrice, r.postMarketTime)
                     .takeIf { it.extended }
             }
-            into[r.symbol] = Quote(r.symbol, price, time, r.currency, offHours)
+            // The units and the venue zone are settled HERE, where the provider's numbers enter the
+            // app: no consumer downstream ever sees a sub-unit code or has to guess a trading day.
+            into[r.symbol] = Units.normalize(
+                Quote(r.symbol, price, time, r.currency, offHours, r.exchangeTimezoneName),
+            )
         }
     }
 
@@ -154,12 +162,17 @@ class Yahoo(
      * every asset at once. Mirrors the FX guard of the Go reference's `market/refresh.go`.
      */
     fun fxToUsd(ccy: String, from: LocalDate): PriceSeries? {
-        val r = chart("${ccy}USD=X", from)?.chart?.result?.firstOrNull() ?: return null
+        val symbol = "${ccy}USD=X"
+        val r = chart(symbol, from)?.chart?.result?.firstOrNull() ?: return null
         val quoted = r.meta?.currency
-        if (quoted != null && quoted != "USD") return null
-        val points = closesOf(r)
-        if (points.isEmpty()) return null
-        return PriceSeries(points)
+        if (!Units.same(quoted, "USD")) return null
+        // A cross stays on the UTC calendar ([VenueDay.zoneOf]); the sub-unit rescaling is here for
+        // form only, a cross never being quoted in one.
+        val data = Units.normalize(
+            DailyData(currency = quoted, closes = closesOf(r, VenueDay.zoneOf(symbol, r.meta?.exchangeTimezoneName))),
+        )
+        if (data.closes.isEmpty()) return null
+        return PriceSeries(data.closes)
     }
 
     /**
@@ -169,14 +182,20 @@ class Yahoo(
      * nothing, and on an FX series every conversion crossing that currency would divide by it (the
      * same rule as the live quotes' own `price <= 0` guard, and as [Converter]'s).
      */
-    private fun closesOf(r: ChartResponse.Result): List<PricePoint> {
+    private fun closesOf(r: ChartResponse.Result, zone: ZoneId?): List<PricePoint> {
         val quoteCloses = r.indicators?.quote?.firstOrNull()?.close ?: return emptyList()
         val timestamps = r.timestamp ?: return emptyList()
         val closes = mutableListOf<PricePoint>()
         for (i in timestamps.indices) {
             if (i >= quoteCloses.size) break
             val c = quoteCloses[i]?.takeIf { it > 0 } ?: continue // holiday, or no usable close
-            closes.add(PricePoint(dateOf(timestamps[i]), c))
+            val day = VenueDay.dateOf(timestamps[i], zone)
+            // Yahoo sometimes repeats the running day; keep the latest value (mirrors Go).
+            if (closes.isNotEmpty() && closes.last().date == day) {
+                closes[closes.size - 1] = PricePoint(day, c)
+                continue
+            }
+            closes.add(PricePoint(day, c))
         }
         return closes
     }
@@ -190,7 +209,7 @@ class Yahoo(
      * adjustment factor, both of which the division cancels, so the factor needs no currency
      * contract and no FX plumbing of its own.
      */
-    private fun openFactorsOf(r: ChartResponse.Result): List<PricePoint> {
+    private fun openFactorsOf(r: ChartResponse.Result, zone: ZoneId?): List<PricePoint> {
         val q = r.indicators?.quote?.firstOrNull() ?: return emptyList()
         val opens = q.open ?: return emptyList() // a payload without the column: nothing to read
         val closes = q.close ?: return emptyList()
@@ -201,7 +220,12 @@ class Yahoo(
             val o = opens[i] ?: continue
             val c = closes[i] ?: continue
             if (o <= 0 || c <= 0) continue
-            factors.add(PricePoint(dateOf(timestamps[i]), o / c))
+            val day = VenueDay.dateOf(timestamps[i], zone)
+            if (factors.isNotEmpty() && factors.last().date == day) {
+                factors[factors.size - 1] = PricePoint(day, o / c)
+                continue
+            }
+            factors.add(PricePoint(day, o / c))
         }
         return factors
     }
@@ -253,9 +277,6 @@ class Yahoo(
         return status to null
     }
 
-    private fun dateOf(epochSeconds: Long): LocalDate =
-        Instant.ofEpochSecond(epochSeconds).atZone(ZoneOffset.UTC).toLocalDate()
-
     companion object {
         private val json = Json { ignoreUnknownKeys = true }
 
@@ -273,6 +294,8 @@ private data class QuoteResponse(val quoteResponse: Body) {
     data class Result(
         val symbol: String,
         val currency: String? = null,
+        // The venue's own zone, which is the calendar its prints belong to (see VenueDay).
+        val exchangeTimezoneName: String? = null,
         val regularMarketPrice: Double? = null,
         val regularMarketTime: Long? = null,
         // Absent for a venue that runs no extended session (hasPrePostMarketData false), and
@@ -298,7 +321,7 @@ private data class ChartResponse(val chart: Chart) {
     )
 
     @Serializable
-    data class Meta(val currency: String? = null)
+    data class Meta(val currency: String? = null, val exchangeTimezoneName: String? = null)
 
     @Serializable
     data class Events(val dividends: Map<String, Dividend>? = null)

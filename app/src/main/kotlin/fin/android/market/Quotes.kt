@@ -155,10 +155,15 @@ object Quotes {
             }
             var daily = multi.daily(Ref(asset.ticker, asset.isin), fetchFrom(prices[asset.id], from)) ?: continue
             // The declared currency is the contract here exactly as it is on the spot pass below: a
-            // series served in another currency (Yahoo's GBp pence metadata, an FT twin listing)
-            // would be merged into a series the valuation reads as the declared one, and persisted.
-            // Skipping leaves `fetchedAt` unstamped, so a later run tries again (mirrors Go).
-            if (daily.currency != null && daily.currency != asset.ccy) continue
+            // series served in another currency (an FT twin listing) would be merged into a series
+            // the valuation reads as the declared one, and persisted. Skipping leaves `fetchedAt`
+            // unstamped, so a later run tries again (mirrors Go).
+            //
+            // The comparison goes through [Units.same], never a bare `!=`: a venue SUB-UNIT is the
+            // same money as its currency (the provider has already rescaled the numbers), and a
+            // London line answering "GBp" for a GBP holding is a match, not a mismatch. Reading it
+            // as one is what used to leave such a holding at its cost basis for ever.
+            if (!Units.same(daily.currency, asset.ccy)) continue
             // A source that RESTATES its history - a share split, a currency redenomination, a
             // class merge - answers the overlap day with a different close. The fetch above is
             // incremental (it starts at the last cached point), so merging such an answer would
@@ -169,7 +174,7 @@ object Quotes {
             if (restated(cached, daily.closes)) {
                 val label = asset.ticker ?: asset.isin ?: asset.name
                 val full = multi.daily(Ref(asset.ticker, asset.isin), from)
-                if (full == null || (full.currency != null && full.currency != asset.ccy)) {
+                if (full == null || !Units.same(full.currency, asset.ccy)) {
                     warnings += "$label: the source restated its history (split or redenomination) " +
                         "and the deep re-fetch failed: quotes ignored"
                     continue
@@ -208,7 +213,7 @@ object Quotes {
             if (fund.navAnchor == NavAnchor.OPEN) start = minOf(start, now.minusDays(ANCHOR_WINDOW_DAYS))
             val daily = multi.daily(Ref(fund.proxy, null), start) ?: continue
             // Same contract: the proxy's declared currency is what the nowcast converts FROM.
-            if (daily.currency != null && daily.currency != fund.proxyCcy) continue
+            if (!Units.same(daily.currency, fund.proxyCcy)) continue
             prices[key] = (prices[key] ?: PriceSeries()).merge(daily.closes).copy(fetchedAt = now)
             if (daily.openFactors.isNotEmpty()) openFactors[fund.proxy] = PriceSeries(daily.openFactors)
         }
@@ -239,37 +244,37 @@ object Quotes {
             val q = quotes[ticker] ?: continue
             // The declared currency is the contract: a quote from a twin listing in another
             // currency is dropped, never spliced into a series denominated in the first one.
-            if (q.currency != null && q.currency != ccy) continue
+            if (!Units.same(q.currency, ccy)) continue
             // The off-hours print is collected apart and merged nowhere; the regular one below is
             // the only thing that reaches the series, opt-in or not.
             q.offHours?.let {
                 offHours[assetId] = OffHoursPrint(ticker, ccy, it.price, it.time, it.session, q.time)
             }
             prices[assetId] = (prices[assetId] ?: PriceSeries())
-                .merge(listOf(PricePoint(dateOf(q.time), q.price))).copy(fetchedAt = now)
+                .merge(listOf(PricePoint(dayOf(q), q.price))).copy(fetchedAt = now)
         }
         for ((symbol, ccy) in fxSymbols) {
             val q = quotes[symbol] ?: continue
-            if (q.currency != null && q.currency != "USD") continue // FX series hold USD per unit
+            if (!Units.same(q.currency, "USD")) continue // FX series hold USD per unit
             fx[ccy] = (fx[ccy] ?: PriceSeries())
-                .merge(listOf(PricePoint(dateOf(q.time), q.price))).copy(fetchedAt = now)
+                .merge(listOf(PricePoint(dayOf(q), q.price))).copy(fetchedAt = now)
         }
 
         // The proxies' own live prices, then the funds' estimated ones. The proxy point lands
         // first so the next refresh anchors on the freshest close the app has.
         for (fund in proxies) {
             val q = quotes[fund.proxy] ?: continue
-            if (q.currency != null && q.currency != fund.proxyCcy) continue
+            if (!Units.same(q.currency, fund.proxyCcy)) continue
             val key = Nowcast.proxyKey(fund.proxy)
             prices[key] = (prices[key] ?: PriceSeries())
-                .merge(listOf(PricePoint(dateOf(q.time), q.price))).copy(fetchedAt = now)
+                .merge(listOf(PricePoint(dayOf(q), q.price))).copy(fetchedAt = now)
         }
         // Rebuilt after the FX spot pass, so the fallback rate is the freshest one the app holds.
         val liveConverter = Converter(fx)
         for ((assetId, fund) in fundTargets) {
             val series = prices[assetId] ?: continue
             val q = quotes[fund.proxy] ?: continue
-            if (q.currency != null && q.currency != fund.proxyCcy) continue
+            if (!Units.same(q.currency, fund.proxyCcy)) continue
             val rate = Nowcast.liveRate(quotes, fund.proxyCcy, fund.ccy)
             prices[assetId] = Nowcast
                 .live(series, prices[Nowcast.proxyKey(fund.proxy)], fund, q, rate, liveConverter, openFactors[fund.proxy])
@@ -327,7 +332,11 @@ object Quotes {
      */
     private const val ANCHOR_WINDOW_DAYS = 14L
 
-    /** The civil day of an epoch-second instant, in UTC - the convention the whole client uses. */
-    private fun dateOf(epochSeconds: Long): LocalDate =
-        java.time.Instant.ofEpochSecond(epochSeconds).atZone(java.time.ZoneOffset.UTC).toLocalDate()
+    /**
+     * The civil day a live quote belongs to: the venue's own, never UTC ([VenueDay]). A print
+     * struck at 10:30 in Sydney falls on the day BEFORE in UTC, and a spot point dated a day early
+     * lands beside the daily bar of the same session instead of on it.
+     */
+    private fun dayOf(q: Quote): LocalDate =
+        VenueDay.dateOf(q.time, VenueDay.zoneOf(q.symbol, q.zone))
 }
