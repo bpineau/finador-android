@@ -14,6 +14,15 @@ when you change architecture or invariants.
 
 ## Golden rules (do not break)
 
+0. **This app is maintained by Go developers, not Android specialists.** Every choice is weighed
+   first on: forward compatibility with future Android versions and future phones; low maintenance;
+   the fewest possible third-party libraries; no deprecated API or library; and a dev environment
+   any newcomer recreates on a fresh laptop with one obvious command (`make setup`, checked by
+   `make doctor`). A feature that costs yearly upkeep must earn it. When a dependency and a hundred
+   lines of platform code do the same job, the platform wins - that is how okhttp left
+   (`docs/maintainability.md` §6) and how `EncryptedSharedPreferences` and `material-icons-extended`
+   left before it. The yearly upgrade checklist is README's "WHEN ANDROID MOVES"; the ledger of what
+   depends on what, and what it costs, is `docs/maintainability.md`.
 1. **The `.fin` format is law.** `../finador/docs/FORMAT.md` is the authoritative spec; the Go code
    in `../finador/internal/store` is the reference. Any change under `crypto/` or `format/` must keep
    reading/writing byte-compatible files. Proof gate: `scripts/crossimpl.sh` (Go reads an
@@ -24,7 +33,8 @@ when you change architecture or invariants.
    `*_test.go`. Don't change the math without checking parity; if you must, update the Go reference too.
 3. **All docs / comments / code in English.** (User convention.)
 4. **Keep the suite green.** Run the full `testDebugUnitTest` before claiming done; every test must
-   pass (count them from `app/build/test-results/testDebugUnitTest/*.xml`, 304 today).
+   pass (count them from `app/build/test-results/testDebugUnitTest/*.xml`, 307 today - one of them,
+   `LiveProviderProbe`, is skipped unless `-Dprobe=1`).
 5. **Don't weaken security.** Secrets are encrypted under an Android Keystore key
    (`data/SecretStore.kt`); the repo holds only the *encrypted* `.fin`; never log secrets or write
    them to disk in clear.
@@ -34,36 +44,42 @@ when you change architecture or invariants.
    holding or amount. Public tickers and ISINs are fine as market-data vectors. The committed
    `app/src/test/resources/sample.ledger` is the Go reference's file, copied byte-for-byte.
 
-## Build / test / run (env is required)
+## Build / test / run
 
-The `Makefile` is the entry point - it exports `JAVA_HOME`/`ANDROID_HOME` itself, so targets work
-from a fresh shell (run from the repo root):
+The `Makefile` is the entry point - it works out `JAVA_HOME`/`ANDROID_HOME` and exports them
+itself, so targets work from a fresh shell (run from the repo root):
 
 ```sh
+make doctor               # read-only: is this machine equipped? what is missing, and the fix
+make setup                # install what is missing (macOS/Homebrew), idempotent, no key touched
 make test                 # full unit suite (host JVM, no device) - your main loop
 make test-class T=Gains   # one test class (cheap)
 make build                # compile the debug APK (catches Compose/Android errors)
 make lint                 # Android Lint (report: app/build/reports/lint-results-debug.txt)
 make crossimpl            # byte-compat gate vs the Go reference (builds /tmp/finador first)
+make probe                # hit the REAL quote providers (network, opt-in, never in `make test`)
 make help                 # everything else (install, run, release, emulator up/down, clean)
 ```
 
-(The raw `./gradlew` tasks behind these work too, with `JAVA_HOME`/`ANDROID_HOME` exported:
-`JAVA_HOME=/Library/Java/JavaVirtualMachines/temurin-21.jdk/Contents/Home`,
-`ANDROID_HOME=/opt/homebrew/share/android-commandlinetools`.)
+Every build target depends on `preflight`, two file tests that turn a missing environment into
+"run make doctor" instead of a Gradle stack trace. The raw `./gradlew` tasks work too, with
+`JAVA_HOME`/`ANDROID_HOME` exported (`make doctor` prints the values it uses).
 
 - **Cheap feedback**: `make test` compiles the whole `main` (so it catches engine/UI compile
   errors) AND runs the pure-Kotlin tests, without a device. Prefer it.
 - Test counts come from `app/build/test-results/testDebugUnitTest/*.xml` (grep `failures=`), since
   `--console=plain` only prints failures.
-- Emulator (AVD named `test`, API 36, screen 320x640): `make emulator` boots it headless and
+- **The JDK is pinned by a Gradle toolchain** (`java { toolchain { ... } }`, 21 today), not
+  inherited from the laptop; the bytecode level stays 17. No auto-provisioning: `make setup`
+  installs the JDK, the build never downloads one. The configuration cache is ON.
+- Emulator: `make setup-emulator` creates the AVD named after `compileSdk` (`test37`, API 37;
+  the older API 36 `test` AVD, screen 320x640, still exists). `make emulator` boots it headless and
   waits; `make run` installs + launches; check `adb logcat -d -s AndroidRuntime:E`;
-  `make emulator-kill` stops it. The AVD holds NO configured state (wiped during the v0.1.7
-  release smoke), so the app lands on **Onboarding** - smoke tests verify boot + first screen,
-  not an unlocked portfolio. (If someone re-onboards it with real credentials, a configured
-  install lands on **Unlock**; no enrolled biometric, so it falls back to a direct button at
-  `adb shell input tap 160 324`.)
-- Full repo workflow doc for humans: `README.md`.
+  `make emulator-kill` stops it. The AVDs hold NO configured state, so the app lands on
+  **Onboarding** - smoke tests verify boot + first screen, not an unlocked portfolio. (If someone
+  re-onboards with real credentials, a configured install lands on **Unlock**; no enrolled
+  biometric, so it falls back to a direct button at `adb shell input tap 160 324`.)
+- Full repo workflow doc for humans, incl. the yearly Android upgrade checklist: `README.md`.
 
 ## Architecture map
 
@@ -78,6 +94,7 @@ market/valuation` layers are **pure Kotlin (no Android imports)** → fast to un
 | `market/` | Yahoo, Ft, Morningstar, Airfund, Nowcast, Session, Units, VenueDay, MultiSource, Converter, FxRates, CacheSidecar, Quotes, Source | fetch quotes (JSON + a Boursorama regex), FX via USD, FINCACHE2 cache; `Airfund` = the NAV feed of the employee-savings funds (FCPE) no quote site covers, with a bundled offline baseline; `Nowcast` = the estimated tail those funds need between their last published NAV and now, anchored on the print that NAV was struck on (`AirfundFund.navAnchor`: the proxy's close by default, its OPEN for a fund valued at its holding's opening price, as `ERES_DATADOG` is); `FxRates` = the display-only read-back of the rates a valuation crossed at (`AppState.Ready.fxRates`, a caption under the total); `Session` + `Quotes.refreshExtended` = the extended-hours opt-in (Settings → Display, off by default), parity with the Go `value --extended`: a US pre/post-market print prices the line, the total AND every figure shown beside them (the gains table's value column, the detail page's price/value) when it is fresher than the regular one, labelled "pre 08:14" / "post 19:59" and NEVER stored (the same pass stores exactly what the plain one does); it also EXPIRES - `Session.stillCurrent` / `Quotes.current` drop a print once its session is over (pre at the regular open, post at the next pre-market open, New York clock, weekends skipped), re-read against `AppRepository`'s injectable clock on every emit, so the screen falls back to the closes by itself; `Units` = the venue SUB-UNITS (`GBp`/`GBX` pence, `ZAc`, `ILA`, `USX`) a provider reports where a currency is expected, removed where its numbers enter the app and folded by `Units.same` in every currency comparison; `VenueDay` = the calendar a bar or print belongs to, read in the venue's own zone (`exchangeTimezoneName`), forward only, a currency cross exempt | ✅ |
 | `valuation/` | Valuator, Perf, Gains | gross/tax/net, TWR/XIRR/etc., period & per-asset gains, asset detail; `priceOverrides` (an off-hours print) reaches `Valuator.value`, `Gains.report` and `Gains.assetDetail` - a valuation and every figure shown with it stand on one price - and NEVER `Perf` or the period/history figures (Go D36/D38: no override in `perf` or `chart`) | ✅ |
 | `storage/` | AtomicFile | the one way a file is replaced: tmp + fsync + rename (+ `.bak`), so a killed process never leaves a short ledger or a short cache | ✅ |
+| `net/` | Http (+ `FakeHttpServer` in tests) | the whole HTTP stack: `url`/`escape`, `send` (headers, JSON body, timeouts, ONE retry on 429/5xx/no-answer), `Response` (status + body, error body included). Platform `HttpURLConnection` only - there is no HTTP library in this app and must not be (`docs/maintainability.md` §6). Tests fake it with `com.sun.net.httpserver` | ✅ |
 | `remote/` | Backend, GitHubBackend, RemoteConfig, Sync | GitHub Contents API, pull/mutate/push + conflict→merge + offline-dirty | Android-light |
 | `data/` | AppContainer, AppRepository, AppState, SecretStore | manual DI, the single facade, Keystore-encrypted secrets | Android |
 | `ui/` | AppRoot, AppViewModel, *Screen, Theme, Format | Compose screens, MVVM, theme | Android |
@@ -95,6 +112,10 @@ that state; per-asset detail pages are **precomputed** into `Ready.assetDetails`
 - **A valuation/gain/perf number** → `valuation/{Valuator,Perf,Gains}.kt`; mirror the Go change and
   the parity test.
 - **A quote source / parsing** → `market/{Yahoo,Ft,Morningstar,Airfund}.kt`; fixtures in the market tests.
+- **Anything about the HTTP call itself** (header, timeout, retry, escaping, a new status to treat
+  specially) → `net/Http.kt`, once, for every caller; fake it with `net/FakeHttpServer.kt`. Is the
+  live internet the suspect rather than the code? `make probe` prints a reachability line per
+  provider host (HTTP status, or the transport failure) before it tries to parse anything.
 - **Another employee-savings fund (FCPE)** → one entry in `market/Airfund.kt`'s `AirfundFunds.ALL`
   (share code + nowcast proxy, plus `navAnchor = NavAnchor.OPEN` when the fund's valuation rules
   name its holding's OPENING price, mirroring the Go catalog's `nowcast_anchor`) plus its NAV
@@ -206,8 +227,8 @@ that state; per-asset detail pages are **precomputed** into `Ready.assetDetails`
   is no `material-icons-extended` dependency anymore - the old one was frozen upstream. Need another
   icon? Copy its `materialPath { ... }` body from the 1.7.8 sources into `FinIcons` (set
   `autoMirror = true` for direction-carrying icons); don't re-add the dependency.
-- **Build types**: `debug` = dev (slow, debuggable). `release` = R8-minified, non-debuggable, ~6 MB,
-  validated end-to-end. It's signed with the **real release key** when `FINADOR_STORE_FILE`,
+- **Build types**: `debug` = dev (slow, debuggable). `release` = R8-minified, non-debuggable,
+  2.12 MB, validated end-to-end. It's signed with the **real release key** when `FINADOR_STORE_FILE`,
   `FINADOR_STORE_PASSWORD`, `FINADOR_KEY_ALIAS` and `FINADOR_KEY_PASSWORD` are set - in
   `~/.gradle/gradle.properties` (never committed) or, failing that, in the **environment**, so a CI
   runner can inject them as secrets. It **falls back to debug signing** when they're absent
@@ -245,16 +266,20 @@ that state; per-asset detail pages are **precomputed** into `Ready.assetDetails`
   by its Go twin, `internal/portfolio/endpoint_fuzz_test.go`).
 - **`Gains.periodGain` rebuilds a full series per window** (8 windows). Building one series over the
   widest window and slicing (as Go's `report.go` does) is a pure speedup - verify TWR-per-window parity.
-- **The SDK 37 wave is deliberately deferred** (user decision, July 2026): compileSdk/targetSdk
-  36 → 37, lifecycle 2.10 → 2.11 (it hard-requires compileSdk 37) and Gradle 9.5 → 9.6 wait until
-  the Android 17 platform settles and an API 37 emulator image is available for the smoke test.
-  They are the ONLY remaining `lintDebug` notices - do not "fix" them piecemeal; do the wave in one
-  pass under the full gates.
+- **Dependency verification** (`gradle/verification-metadata.xml`) is deliberately NOT adopted;
+  the reasoning, with the measured size of the file it would add, is in `docs/maintainability.md`
+  §13. What IS pinned: the Gradle distribution's SHA-256 and every dependency version exactly.
+- **`androidx.biometric` cannot be dropped** without raising `minSdk` to 30, which is a product
+  decision (`docs/maintainability.md` §4). Same for the ten `@ExperimentalMaterial3Api` opt-ins
+  (§12) and navigation-compose (§3): all three examined, all three kept, with reasons.
 - The *data* lives in the user's separate private GitHub repo; this code repo is public at
   `github.com/bpineau/finador-android`.
 
 ## Pointers
 
+- Dev environment, release, and the **yearly Android upgrade checklist**: `README.md`
+  (§6 "WHEN ANDROID MOVES" - the order to bump things, the pages to read, the diagnostic path).
+- Dependency ledger and deprecation audit: `docs/maintainability.md`.
 - Format spec (authoritative): `../finador/docs/FORMAT.md`.
 - Go reference: `../finador/internal/{store,domain,portfolio,perf,market}`.
 - Design rationale lives in commit messages (no separate decision log - write commit messages
