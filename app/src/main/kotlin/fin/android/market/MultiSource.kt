@@ -12,10 +12,16 @@ import java.time.LocalDate
  */
 class MultiSource(private val providers: List<Provider>) {
 
+    /**
+     * The first provider's answer, with any venue SUB-UNIT already removed ([Units.normalize]).
+     * Each provider normalizes its own numbers; doing it again here is free (the call is
+     * idempotent) and makes this the one door a provider added later cannot walk a pence price
+     * through.
+     */
     fun daily(ref: Ref, from: LocalDate): DailyData? {
         for (p in providers) {
             val d = p.daily(ref, from)
-            if (d != null && d.closes.isNotEmpty()) return d
+            if (d != null && d.closes.isNotEmpty()) return Units.normalize(d)
         }
         return null
     }

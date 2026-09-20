@@ -25,6 +25,10 @@ data class Ref(val symbol: String?, val isin: String?)
  * anchor) reads them and can never persist an off-hours trade by accident. [offHours] carries the
  * venue's pre-market or after-hours print instead, and only when one exists and is fresher than the
  * regular one ([Session.freshest]); it is null otherwise, and always null without the opt-in.
+ *
+ * [zone] is the venue's own time zone as the provider names it (Yahoo's `exchangeTimezoneName`),
+ * which is the calendar [time] must be read on: a Sydney print struck at 10:30 falls on the day
+ * BEFORE in UTC (see [VenueDay]). Null when the provider names none, or for a currency cross.
  */
 data class Quote(
     val symbol: String,
@@ -32,6 +36,7 @@ data class Quote(
     val time: Long,
     val currency: String?,
     val offHours: Session.Print? = null,
+    val zone: String? = null,
 )
 
 /**

@@ -2,9 +2,7 @@ package fin.android.market
 
 import fin.android.domain.PricePoint
 import fin.android.domain.PriceSeries
-import java.time.Instant
 import java.time.LocalDate
-import java.time.ZoneOffset
 
 /**
  * Estimates what a lagging fund is worth between its last published NAV and now.
@@ -114,7 +112,8 @@ object Nowcast {
         openFactors: PriceSeries? = null,
     ): PriceSeries {
         if (proxy == null || quote.price <= 0) return series
-        val session = Instant.ofEpochSecond(quote.time).atZone(ZoneOffset.UTC).toLocalDate()
+        // The session the print belongs to is the VENUE's day, not UTC's (see [VenueDay]).
+        val session = VenueDay.dateOf(quote.time, VenueDay.zoneOf(quote.symbol, quote.zone))
         val lastPublished = series.withoutEstimates().points.lastOrNull()?.date
         if (lastPublished != null && !session.isAfter(lastPublished)) return series
         val (anchor, on) = series.at(session.minusDays(1)) ?: return series
@@ -150,7 +149,7 @@ object Nowcast {
     private fun usdValue(quotes: Map<String, Quote>, ccy: String): Double? {
         if (ccy == Converter.USD) return 1.0
         val q = quotes["${ccy}USD=X"] ?: return null
-        if (q.currency != null && q.currency != Converter.USD) return null
+        if (!Units.same(q.currency, Converter.USD)) return null
         return q.price.takeIf { it > 0 }
     }
 

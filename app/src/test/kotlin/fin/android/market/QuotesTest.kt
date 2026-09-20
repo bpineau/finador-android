@@ -130,16 +130,16 @@ class QuotesTest {
 
     /**
      * The declared currency is the contract on the DAILY pass too, not only on the spot one: a
-     * provider answering in another currency (Yahoo's GBp pence metadata, an FT twin listing) would
-     * otherwise have its whole close series merged into a series the valuation reads as the declared
-     * currency - a position wrong by the cross, and persisted. Mirrors the guard of the Go
-     * reference's `internal/market/refresh.go`.
+     * provider answering in another currency (an FT twin listing) would otherwise have its whole
+     * close series merged into a series the valuation reads as the declared currency - a position
+     * wrong by the cross, and persisted. Mirrors the guard of the Go reference's
+     * `internal/market/refresh.go`.
      */
     @Test fun offCurrencyDailySeriesIsIgnored() {
         val provider = FakeProvider(
             DailyData(
-                currency = "GBp", // "AA" is declared in USD
-                closes = listOf(PricePoint(d("2026-06-02"), 12345.0)),
+                currency = "GBP", // "AA" is declared in USD
+                closes = listOf(PricePoint(d("2026-06-02"), 123.45)),
                 dividends = listOf(DividendEvent(d("2026-05-01"), 2.0)),
             ),
         )
@@ -150,13 +150,41 @@ class QuotesTest {
         assertNull("off-currency closes must not reach the cache", out.prices["aa"])
         assertNull("nor its dividends", out.dividends["aa"])
         // The rejected currency must not drag an FX series along either.
-        assertFalse(out.fx.containsKey("GBp"))
+        assertFalse(out.fx.containsKey("GBP"))
+    }
+
+    /**
+     * A venue SUB-UNIT is NOT another currency. Yahoo prices a London line in pence and labels it
+     * "GBp", which differs from the holding's "GBP" by case alone: compared as strings it reads as
+     * a foreign listing, and the line is dropped - a GBP holding then sits at its cost basis for
+     * ever, silently, while the desktop prices it. The provider rescales into pounds and the guard
+     * asks [Units.same], so the series is merged, in pounds.
+     */
+    @Test fun aPenceQuotedLineIsPricedAgainstItsPoundHolding() {
+        val gbpBook = Book(
+            accounts = mapOf("isa" to Account("isa", "ISA Zephyr", "GBP", TaxRule.None)),
+            assets = mapOf("vod" to Asset("vod", AssetKind.SECURITY, "Telecom plc", ticker = "VOD.L", ccy = "GBP")),
+        )
+        val provider = FakeProvider(
+            DailyData(
+                currency = "GBp",
+                closes = listOf(PricePoint(d("2026-06-02"), 12345.0)),
+                dividends = listOf(DividendEvent(d("2026-05-01"), 25.0)),
+            ),
+        )
+        val out = Quotes.refresh(
+            gbpBook, null, from = d("2026-01-01"), now = d("2026-06-03"),
+            multi = MultiSource(listOf(provider)), yahoo = yahoo(),
+        )
+        assertEquals(listOf(123.45), out.prices["vod"]!!.points.map { it.close })
+        assertEquals(listOf(0.25), out.dividends["vod"]!!.map { it.amount })
+        assertFalse("the sub-unit is never a currency of its own", out.fx.containsKey("GBp"))
     }
 
     /** A cached series survives an off-currency answer untouched: the refresh simply adds nothing. */
     @Test fun offCurrencyDailySeriesLeavesTheCachedOneIntact() {
         val provider = FakeProvider(
-            DailyData(currency = "GBp", closes = listOf(PricePoint(d("2026-06-02"), 12345.0))),
+            DailyData(currency = "GBP", closes = listOf(PricePoint(d("2026-06-02"), 123.45))),
         )
         val existing = MarketData(
             prices = mapOf(
@@ -591,6 +619,51 @@ class QuotesTest {
         assertEquals(listOf(404.0, 408.02, 411.0), out.market.prices["aa"]!!.points.map { it.close })
         assertTrue("no restatement here: ${out.warnings}", out.warnings.isEmpty())
         assertEquals(1, provider.from.size) // no deep re-fetch
+    }
+
+    /**
+     * A cache written by an older build, before the daily pass enforced the declared currency, can
+     * hold a whole London history IN PENCE: a hundredfold overstatement that no return and no
+     * plausibility band can see. Nothing re-reads a cached series' unit (it carries none - the
+     * asset's declared currency is what the valuation reads it in), so the canary is what heals it:
+     * the overlap day comes back a hundred times smaller, the series is dropped and rebuilt in
+     * pounds, and the holder is told to check the quantities.
+     */
+    @Test fun aPenceScaledCacheIsRebuiltInPounds() {
+        val gbpBook = Book(
+            accounts = mapOf("isa" to Account("isa", "ISA Zephyr", "GBP", TaxRule.None)),
+            assets = mapOf("vod" to Asset("vod", AssetKind.SECURITY, "Telecom plc", ticker = "VOD.L", ccy = "GBP")),
+        )
+        // What the source serves, in its own unit: pence.
+        val pence = listOf(
+            PricePoint(d("2026-05-18"), 12300.0), PricePoint(d("2026-05-19"), 12345.0),
+            PricePoint(d("2026-05-20"), 12400.0),
+        )
+        val provider = object : Provider {
+            override val name = "pence"
+            val from = mutableListOf<LocalDate>()
+            override fun daily(ref: Ref, from: LocalDate): DailyData {
+                this.from += from
+                return DailyData("GBp", pence.filter { !it.date.isBefore(from) })
+            }
+        }
+        val existing = MarketData(
+            prices = mapOf(
+                "vod" to PriceSeries(
+                    listOf(PricePoint(d("2026-05-18"), 12300.0), PricePoint(d("2026-05-19"), 12345.0)),
+                    fetchedAt = d("2026-05-19"),
+                ),
+            ),
+        )
+
+        val out = Quotes.refreshDetailed(
+            gbpBook, existing, from = d("2026-05-18"), now = d("2026-05-20"),
+            multi = MultiSource(listOf(provider)), yahoo = yahoo(),
+        )
+
+        assertEquals(listOf(123.0, 123.45, 124.0), out.market.prices["vod"]!!.points.map { it.close })
+        assertTrue("the rebuild must be named: ${out.warnings}", out.warnings.any { "restated" in it })
+        assertEquals(listOf(d("2026-05-19"), d("2026-05-18")), provider.from) // incremental, then deep
     }
 
     /**

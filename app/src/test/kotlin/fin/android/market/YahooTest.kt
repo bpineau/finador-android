@@ -230,6 +230,129 @@ class YahooTest {
         assertTrue(yahoo().quotes(listOf("HALTED")).isEmpty())
     }
 
+    // --- Venue sub-units: a London line comes back in PENCE (see Units). ---
+
+    /**
+     * Yahoo reports a London listing as `"currency":"GBp"` and prices it in pence. Handing that
+     * number over as pounds is a 100x valuation error no plausibility check can see (rescaling a
+     * series leaves every return untouched), and REFUSING it - which this client used to do, the
+     * code being compared byte for byte against the holding's declared "GBP" - leaves the holding
+     * at its cost basis for ever. The sub-unit is removed here instead, where the numbers enter.
+     */
+    @Test fun aLondonLineIsServedInPoundsNotPence() {
+        val body = """
+            {"chart":{"result":[{
+              "meta":{"currency":"GBp","exchangeTimezoneName":"Europe/London"},
+              "timestamp":[1705276800],
+              "events":{"dividends":{"1705276800":{"amount":25.0,"date":1705276800}}},
+              "indicators":{"quote":[{"close":[12345.0],"open":[12283.275]}]}
+            }],"error":null}}
+        """.trimIndent()
+        server.enqueue(MockResponse().setResponseCode(200).setBody(body))
+        val data = yahoo().daily(Ref(symbol = "VOD.L", isin = null), LocalDate.parse("2024-01-01"))!!
+        assertEquals("GBP", data.currency)
+        assertEquals(123.45, data.closes[0].close, 1e-9)
+        assertEquals(0.25, data.dividends[0].amount, 1e-9)
+        // The open-to-close ratio is not a price and must survive the rescaling untouched.
+        assertEquals(0.995, data.openFactors[0].close, 1e-9)
+    }
+
+    @Test fun aLondonQuoteIsServedInPoundsNotPence() {
+        serveQuotes(
+            """{"symbol":"VOD.L","currency":"GBp","exchangeTimezoneName":"Europe/London",
+                "regularMarketPrice":12345.0,"regularMarketTime":1767312000,
+                "postMarketPrice":12400.0,"postMarketTime":1767315600}""",
+        )
+        val q = yahoo().quotes(listOf("VOD.L"), extendedHours = true)["VOD.L"]!!
+        assertEquals("GBP", q.currency)
+        assertEquals(123.45, q.price, 1e-9)
+        assertEquals(124.0, q.offHours!!.price, 1e-9) // the off-hours print shares the unit
+    }
+
+    // --- Trading days: a bar carries an instant of the session, not a date (see VenueDay). ---
+
+    /**
+     * The ASX opens at 10:00 in Sydney, 23:00 UTC of the day BEFORE while Australia is on summer
+     * time. Read in UTC, Monday's session lands on the Sunday and Friday's on the Thursday, which
+     * breaks every date-matched join the app makes (the previous close a day change reads, the FX
+     * rate of the day, the overlap day the restatement canary compares) while looking ordinary.
+     */
+    @Test fun anAustralianSessionIsDatedInSydneyNotUtc() {
+        // 1767567600 = Mon 2026-01-05 10:00 Sydney = Sun 2026-01-04 23:00 UTC.
+        val body = """
+            {"chart":{"result":[{
+              "meta":{"currency":"AUD","exchangeTimezoneName":"Australia/Sydney"},
+              "timestamp":[1767567600,1767654000],
+              "events":{"dividends":{"1767567600":{"amount":0.5,"date":1767567600}}},
+              "indicators":{"quote":[{"close":[10.0,11.0],"open":[9.9,10.9]}]}
+            }],"error":null}}
+        """.trimIndent()
+        server.enqueue(MockResponse().setResponseCode(200).setBody(body))
+        val data = yahoo().daily(Ref(symbol = "NST.AX", isin = null), LocalDate.parse("2026-01-01"))!!
+        assertEquals(
+            listOf(LocalDate.parse("2026-01-05"), LocalDate.parse("2026-01-06")),
+            data.closes.map { it.date },
+        )
+        assertEquals(listOf(LocalDate.parse("2026-01-05")), data.dividends.map { it.exDate })
+        assertEquals(
+            listOf(LocalDate.parse("2026-01-05"), LocalDate.parse("2026-01-06")),
+            data.openFactors.map { it.date },
+        )
+    }
+
+    /**
+     * The correction is one-directional. A UTC reading is never LATE, only early, so a venue-local
+     * date EARLIER than the UTC one is not a correction but a zone disagreeing with the instant -
+     * and moving the point backwards could collide with a day the series already holds.
+     */
+    @Test fun aVenueWestOfGreenwichKeepsItsUtcDay() {
+        // 1767661200 = Mon 2026-01-05 20:00 New York = Tue 2026-01-06 01:00 UTC.
+        val body = """
+            {"chart":{"result":[{
+              "meta":{"currency":"USD","exchangeTimezoneName":"America/New_York"},
+              "timestamp":[1767661200],
+              "indicators":{"quote":[{"close":[100.0]}]}
+            }],"error":null}}
+        """.trimIndent()
+        server.enqueue(MockResponse().setResponseCode(200).setBody(body))
+        val data = yahoo().daily(Ref(symbol = "AA", isin = null), LocalDate.parse("2026-01-01"))!!
+        assertEquals(LocalDate.parse("2026-01-06"), data.closes[0].date)
+    }
+
+    /**
+     * A currency cross has no exchange and no trading day, and the zone Yahoo attaches to one is
+     * decorative. It stays on the UTC calendar its whole history was built on: re-dating it would
+     * move a point onto a day the series already holds, and the later value would overwrite the
+     * earlier one - a lost session, worse than a misplaced one.
+     */
+    @Test fun aCurrencyCrossIsNeverRedatedByTimeZone() {
+        // The same Sydney-evening instant, this time on a cross Yahoo tags with a venue zone.
+        val body = """
+            {"chart":{"result":[{
+              "meta":{"currency":"USD","exchangeTimezoneName":"Australia/Sydney"},
+              "timestamp":[1767567600],
+              "indicators":{"quote":[{"close":[0.68]}]}
+            }],"error":null}}
+        """.trimIndent()
+        server.enqueue(MockResponse().setResponseCode(200).setBody(body))
+        val series = yahoo().fxToUsd("AUD", LocalDate.parse("2026-01-01"))!!
+        assertEquals(LocalDate.parse("2026-01-04"), series.points[0].date) // the UTC day, untouched
+    }
+
+    /** An unknown or absent zone name leaves the UTC reading exactly as it was. */
+    @Test fun anUnknownZoneLeavesTheUtcDay() {
+        val body = """
+            {"chart":{"result":[{
+              "meta":{"currency":"AUD","exchangeTimezoneName":"Mars/Olympus"},
+              "timestamp":[1767567600],
+              "indicators":{"quote":[{"close":[10.0]}]}
+            }],"error":null}}
+        """.trimIndent()
+        server.enqueue(MockResponse().setResponseCode(200).setBody(body))
+        val data = yahoo().daily(Ref(symbol = "NST.AX", isin = null), LocalDate.parse("2026-01-01"))!!
+        assertEquals(LocalDate.parse("2026-01-04"), data.closes[0].date)
+    }
+
     // --- Extended hours (parity with the Go reference's `value --extended`). ---
 
     /**

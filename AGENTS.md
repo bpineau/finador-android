@@ -24,7 +24,7 @@ when you change architecture or invariants.
    `*_test.go`. Don't change the math without checking parity; if you must, update the Go reference too.
 3. **All docs / comments / code in English.** (User convention.)
 4. **Keep the suite green.** Run the full `testDebugUnitTest` before claiming done; every test must
-   pass (count them from `app/build/test-results/testDebugUnitTest/*.xml`, 266 today).
+   pass (count them from `app/build/test-results/testDebugUnitTest/*.xml`, 285 today).
 5. **Don't weaken security.** Secrets are encrypted under an Android Keystore key
    (`data/SecretStore.kt`); the repo holds only the *encrypted* `.fin`; never log secrets or write
    them to disk in clear.
@@ -75,7 +75,7 @@ market/valuation` layers are **pure Kotlin (no Android imports)** → fast to un
 | `crypto/` | Argon2, Hkdf, AesGcm, Hashes, Bytes, Ids | KDF, AEAD, base64, Crockford ids | ✅ |
 | `domain/` | Models, Money, MarketData | data model (BigDecimal money, enums, Book) | ✅ |
 | `format/` | Header, Kdf, Wire, Log, Replay, Writer, Merge, Ledger | read/write the `.fin` (AAD-chained records, fold, diff-on-save, union+LWW merge) | ✅ |
-| `market/` | Yahoo, Ft, Morningstar, Airfund, Nowcast, Session, MultiSource, Converter, FxRates, CacheSidecar, Quotes, Source | fetch quotes (JSON + a Boursorama regex), FX via USD, FINCACHE2 cache; `Airfund` = the NAV feed of the employee-savings funds (FCPE) no quote site covers, with a bundled offline baseline; `Nowcast` = the estimated tail those funds need between their last published NAV and now, anchored on the print that NAV was struck on (`AirfundFund.navAnchor`: the proxy's close by default, its OPEN for a fund valued at its holding's opening price, as `ERES_DATADOG` is); `FxRates` = the display-only read-back of the rates a valuation crossed at (`AppState.Ready.fxRates`, a caption under the total); `Session` + `Quotes.refreshExtended` = the extended-hours opt-in (Settings → Display, off by default), parity with the Go `value --extended`: a US pre/post-market print prices the line, the total AND every figure shown beside them (the gains table's value column, the detail page's price/value) when it is fresher than the regular one, labelled "pre 08:14" / "post 19:59" and NEVER stored (the same pass stores exactly what the plain one does); it also EXPIRES - `Session.stillCurrent` / `Quotes.current` drop a print once its session is over (pre at the regular open, post at the next pre-market open, New York clock, weekends skipped), re-read against `AppRepository`'s injectable clock on every emit, so the screen falls back to the closes by itself | ✅ |
+| `market/` | Yahoo, Ft, Morningstar, Airfund, Nowcast, Session, Units, VenueDay, MultiSource, Converter, FxRates, CacheSidecar, Quotes, Source | fetch quotes (JSON + a Boursorama regex), FX via USD, FINCACHE2 cache; `Airfund` = the NAV feed of the employee-savings funds (FCPE) no quote site covers, with a bundled offline baseline; `Nowcast` = the estimated tail those funds need between their last published NAV and now, anchored on the print that NAV was struck on (`AirfundFund.navAnchor`: the proxy's close by default, its OPEN for a fund valued at its holding's opening price, as `ERES_DATADOG` is); `FxRates` = the display-only read-back of the rates a valuation crossed at (`AppState.Ready.fxRates`, a caption under the total); `Session` + `Quotes.refreshExtended` = the extended-hours opt-in (Settings → Display, off by default), parity with the Go `value --extended`: a US pre/post-market print prices the line, the total AND every figure shown beside them (the gains table's value column, the detail page's price/value) when it is fresher than the regular one, labelled "pre 08:14" / "post 19:59" and NEVER stored (the same pass stores exactly what the plain one does); it also EXPIRES - `Session.stillCurrent` / `Quotes.current` drop a print once its session is over (pre at the regular open, post at the next pre-market open, New York clock, weekends skipped), re-read against `AppRepository`'s injectable clock on every emit, so the screen falls back to the closes by itself; `Units` = the venue SUB-UNITS (`GBp`/`GBX` pence, `ZAc`, `ILA`, `USX`) a provider reports where a currency is expected, removed where its numbers enter the app and folded by `Units.same` in every currency comparison; `VenueDay` = the calendar a bar or print belongs to, read in the venue's own zone (`exchangeTimezoneName`), forward only, a currency cross exempt | ✅ |
 | `valuation/` | Valuator, Perf, Gains | gross/tax/net, TWR/XIRR/etc., period & per-asset gains, asset detail; `priceOverrides` (an off-hours print) reaches `Valuator.value`, `Gains.report` and `Gains.assetDetail` - a valuation and every figure shown with it stand on one price - and NEVER `Perf` or the period/history figures (Go D36/D38: no override in `perf` or `chart`) | ✅ |
 | `remote/` | Backend, GitHubBackend, RemoteConfig, Sync | GitHub Contents API, pull/mutate/push + conflict→merge + offline-dirty | Android-light |
 | `data/` | AppContainer, AppRepository, AppState, SecretStore | manual DI, the single facade, Keystore-encrypted secrets | Android |
@@ -132,6 +132,23 @@ that state; per-asset detail pages are **precomputed** into `Ready.assetDetails`
   cached close and the series is dropped and refetched from the floor, with a warning (`Refresh.warnings`
   → snackbar) asking for the ledger quantities to be checked, since a split moves the position too.
   Mirrors Go D40; estimates are stripped before the comparison, so a nowcast tail never triggers it.
+- **A currency code is never compared with `==` or `equalsIgnoreCase`.** A venue quotes in a
+  SUB-UNIT and the provider reports it where a currency is expected: Yahoo answers `GBp` for a
+  London line and prices it in PENCE, FT spells it `GBX`, Johannesburg is `ZAc`, Tel Aviv `ILA`,
+  some US futures `USX`. `GBp` and `GBP` differ by case alone, so a case-INSENSITIVE compare books
+  pence as pounds (a 100x valuation error no plausibility check can see, since rescaling a series
+  leaves every return untouched) and a case-SENSITIVE one refuses the series instead, leaving the
+  holding at its cost basis for ever. `market/Units.kt` removes the sub-unit where each provider's
+  numbers enter the app and `Units.same` answers every "is this the declared currency?" question.
+  A RATIO (`DailyData.openFactors`) carries no currency and is never rescaled. Mirrors Go
+  `pkg/marketdata/units.go`.
+- **A daily bar carries an instant of the session, not a date** (`market/VenueDay.kt`, Go's
+  `sessionDay`). Truncated in UTC, an ASX bar lands one day early (Sydney opens 10:00 = 23:00 UTC
+  the day before in summer), so Sunday closes appear and Fridays go missing, and every date-matched
+  join - the previous close a day change reads, the FX rate of the day, the canary's overlap day -
+  quietly misses. The day is read in the venue's own zone (`exchangeTimezoneName`), FORWARD ONLY (a
+  UTC reading is never late, only early), and a currency cross is exempt: its Yahoo dating carries
+  a separate, known weekend anomaly that a time zone would hide rather than fix.
 - **The market cache is NOT synced** (per-device, regenerable). A freshly synced device has the
   ledger but no prices until `refreshQuotes` runs → period gains read ~0 until quotes load, and
   statement-valued assets (property, cash) have no market "performance" by design.
