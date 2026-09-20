@@ -175,6 +175,73 @@ class SyncTest {
         assertTrue("still unpushed", sync(be).state().dirty)
     }
 
+    // ---- a write that did not finish (process death, the Android normal case) ----
+
+    /**
+     * Every path in [Sync] starts by reading the state file, and an unreadable one used to throw
+     * out of [Sync.state] - so one short write (the file is rewritten on every pull, mutate and
+     * sync) made the UNLOCK itself fail, permanently, since nothing rewrites the file until a sync
+     * runs. It must degrade instead, and degrade to DIRTY: the flag a corrupt file lost is the one
+     * that stops a pull from overwriting unpushed records.
+     */
+    @Test
+    fun aTruncatedStateFileIsReadAsDirtyRatherThanThrowing() {
+        st.writeText("""{"sha":"3","dirty":tr""") // a write killed halfway
+        val be = FakeBackend().apply { data = emptyLedgerBytes(); version = 9 }
+
+        assertTrue(sync(be).state().dirty)
+
+        // And the conservative reading is load-bearing: the local copy is not pulled over.
+        val local = addDeposit(Ledger.open(emptyLedgerBytes(), pw)).toBytes()
+        wc.writeBytes(local)
+        sync(be).pullIfStale()
+        assertEquals("the unpushed record must survive", 1, Ledger.open(wc.readBytes(), pw).book.txs.size)
+    }
+
+    /**
+     * A working copy left short by an older build (or by any write that is not atomic) cannot be
+     * opened, and the dirty guard forbids healing it by pulling: the app would be stuck on the
+     * unlock screen for good. The backup every write keeps is the way out, and what it recovers is
+     * marked dirty so the next sync MERGES it with the remote instead of either side winning.
+     */
+    @Test
+    fun aTruncatedWorkingCopyIsRecoveredFromItsBackup() {
+        val base = emptyLedgerBytes()
+        val be = FakeBackend().apply { data = base; version = 1 }
+        wc.writeBytes(base)
+
+        be.offline = true
+        assertTrue(sync(be).mutate(pw, "add") { addDeposit(it) }.dirty) // wc = 1 record, .bak = none
+        assertTrue(sync(be).mutate(pw, "add") { addWithdraw(it) }.dirty) // wc = 2, .bak = 1
+        val good = wc.readBytes()
+        wc.writeBytes(good.copyOfRange(0, good.size / 2)) // ... and that second write dies halfway
+
+        // The backup is one write behind by construction, so the interrupted edit is the only
+        // casualty: everything written before it comes back.
+        val ledger = sync(be).openForRead(pw)
+        assertEquals(1, ledger.book.txs.size)
+        assertTrue("the recovered copy must be reconciled, not assumed pushed", sync(be).state().dirty)
+        // Healed on disk too: the next open needs no recovery.
+        assertEquals(1, sync(be).openForRead(pw).book.txs.size)
+    }
+
+    /** A wrong passphrase is not a corruption: it must surface as itself, not as a recovery. */
+    @Test
+    fun aWrongPassphraseIsNotRecoveredFromTheBackup() {
+        val be = FakeBackend().apply { data = emptyLedgerBytes(); version = 1 }
+        sync(be).openForRead(pw)
+        sync(be).mutate(pw, "add") { addDeposit(it) } // now there is a .bak
+
+        var failed = false
+        try {
+            sync(be).openForRead("not the passphrase")
+        } catch (_: Exception) {
+            failed = true
+        }
+        assertTrue(failed)
+        assertFalse("nothing was 'recovered', so nothing became dirty", sync(be).state().dirty)
+    }
+
     @Test
     fun conflictTriggersMergeThenRepush() {
         val base = emptyLedgerBytes()
