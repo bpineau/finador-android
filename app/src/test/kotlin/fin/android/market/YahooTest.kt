@@ -149,6 +149,31 @@ class YahooTest {
         assertEquals(2, server.requestCount) // initial 503 + retry
     }
 
+    // The shape a throttled Yahoo really answers with, observed by `make probe` on 2026-09-20:
+    // status 429 and the plain-text body "Too Many Requests", on the retry as well. A series is
+    // then absent, never empty-but-present: an empty DailyData would let MultiSource believe the
+    // provider had spoken and stop there, and would let the cache store a hole.
+    @Test fun dailyIsNullWhileTheHostThrottles() {
+        repeat(2) {
+            server.enqueue(
+                FakeHttpServer.FakeResponse().setResponseCode(429).setBody("Too Many Requests"),
+            )
+        }
+        assertNull(yahoo().daily(Ref(symbol = "AAPL", isin = null), LocalDate.parse("2024-01-01")))
+        assertEquals(2, server.requestCount) // the try and its one retry, and not a third
+    }
+
+    // The other live failure the probe found the same day: a host that never answers at all
+    // (tools.morningstar.fr, whose CNAME target has lost its address record). The transport
+    // failure must read like "no data", not like a crash: every provider is behind MultiSource,
+    // which falls through to the next one.
+    @Test fun dailyIsNullWhenTheHostNeverAnswers() {
+        // Port 1 on loopback: nothing listens there, so the connection is refused at once.
+        val unreachable = Yahoo(baseUrl = "http://127.0.0.1:1", cookieUrl = "http://127.0.0.1:1/cookie")
+        assertNull(unreachable.daily(Ref(symbol = "AAPL", isin = null), LocalDate.parse("2024-01-01")))
+        assertEquals(0, server.requestCount)
+    }
+
     // The v7 quote API is the only source of an intraday price: the chart's daily bar is what a
     // provider publishes, the quote is what the market is doing. It needs a cookie + crumb pair.
     @Test fun quotesFetchesLivePricesInOneBatchedCall() {

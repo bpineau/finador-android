@@ -1,5 +1,6 @@
 package fin.android.market
 
+import fin.android.net.Http
 import org.junit.Assume.assumeTrue
 import org.junit.Test
 import java.time.LocalDate
@@ -25,6 +26,11 @@ import java.time.LocalDate
  * first and last observation, currency) so two runs - before and after a change - can be
  * compared by eye or with `diff`.
  *
+ * It opens with one `probe net` line per provider host, which is what tells a code regression from
+ * an outage: `HTTP 429` is a throttle (wait, or run from another network), no answer at all is a
+ * host that is gone, and `HTTP 200` beside a failing provider below is a payload change - the only
+ * one of the three that this repository can fix.
+ *
  * Only public instruments are named here, as market-data vectors: a widely held US share, a
  * European UCITS ETF, a Luxembourg fund by ISIN, and the two employee-savings share classes the
  * app already knows by name. No account, no holding, no amount.
@@ -41,6 +47,16 @@ class LiveProviderProbe {
             println("probe  ${if (ok) "OK  " else "FAIL"}  ${label.padEnd(28)} $detail")
             if (!ok) failures += label
         }
+
+        // Reachability first, so a failure below can be attributed. A provider that answers 429 or
+        // does not answer at all is an outage or a throttle - nothing for this repository to fix -
+        // while a provider that answers 200 and still yields no series has changed its payload,
+        // which is a code change. Told apart by hand once too often; now printed.
+        reachable("yahoo", "https://query1.finance.yahoo.com/v8/finance/chart/AAPL?range=5d&interval=1d")
+        reachable("ft", "https://markets.ft.com/data/funds/tearsheet/summary?s=LU0171310443")
+        reachable("morningstar", "https://tools.morningstar.fr/api/rest.svc/timeseries_price/ok91jeenoo")
+        reachable("boursorama (ms lookup)", "https://www.boursorama.com/recherche/ajax?query=LU0171310443")
+        reachable("airfund", "https://core.communicate.airfund.io/")
 
         val yahoo = Yahoo()
         for (symbol in listOf("AAPL", "CW8.PA")) {
@@ -87,6 +103,22 @@ class LiveProviderProbe {
     }
 
     private fun enabled(): Boolean = System.getProperty("probe").isNullOrBlank().not()
+
+    /**
+     * Prints one line saying whether [url]'s host answered, and with what. Asserts nothing: a
+     * provider may legitimately answer 404 or 403 to a bare URL - the point is to separate "the
+     * host is there" from "the host is throttling us" (429), "the host is gone" (no answer) and
+     * "the host answered fine, so a null series below means the payload changed".
+     */
+    private fun reachable(label: String, url: String) {
+        val r = Http.send(url, headers = mapOf("User-Agent" to Http.USER_AGENT))
+        val detail = if (r.answered) {
+            "HTTP ${r.code}, ${r.body.length} bytes" + if (r.code == 429) "  <- throttled, not a bug" else ""
+        } else {
+            "no answer: ${r.failure?.javaClass?.simpleName}: ${r.failure?.message}"
+        }
+        println("probe  net   ${"reach $label".padEnd(28)} $detail")
+    }
 
     private fun plausible(d: DailyData?): Boolean =
         d != null && d.closes.size >= 20 && d.closes.all { it.close > 0 } &&
