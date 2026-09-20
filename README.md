@@ -13,8 +13,8 @@ interchangeably from desktop and mobile.
 - **Storage**: GitHub only (the encrypted `.fin` never leaves the repo in clear text); market
   quotes fetched on-device (Airfund -> Yahoo -> FT -> Morningstar) with a local encrypted cache.
 
-This README is written for someone who knows Go and has never built an Android app. No prior
-Android knowledge is assumed anywhere below.
+No prior Android knowledge is assumed anywhere below: every command and every yearly chore is
+spelled out.
 
 ---
 
@@ -23,7 +23,7 @@ Android knowledge is assumed anywhere below.
 ```sh
 git clone https://github.com/bpineau/finador-android && cd finador-android
 make setup     # installs the JDK + Android SDK and accepts the SDK licences (idempotent)
-make test      # 307 unit tests on the host JVM, no phone, no emulator
+make test      # the unit suite on the host JVM, no phone, no emulator
 make build     # compiles the debug APK
 ```
 
@@ -47,7 +47,7 @@ setup` prints those two steps for you if you run it on Linux with nothing instal
 |---|---|
 | `./gradlew` (the wrapper) | downloads **Gradle 9.7.1** and checks its SHA-256 before running. Never `brew install gradle`. |
 | `gradle/libs.versions.toml` | the one list of dependencies, each at an **exact** version: no `+`, no ranges, no snapshots. |
-| a version-catalog bump + `make check` | how a dependency is upgraded and proven. |
+| a version-catalog bump + `make test build lint crossimpl` | how a dependency is upgraded and proven. |
 | `make test` | the unit suite on the host JVM, no device needed (the engine layers are pure Kotlin). |
 | `make build` | the debug APK. |
 | `make doctor` / `make setup` | check / install everything the build needs (JDK, SDK, platform, build-tools, licences). |
@@ -62,7 +62,7 @@ What the app is built with, all pinned: **JDK 21**, Gradle **9.7.1**, Android Gr
 ## 2. Everyday commands
 
 ```sh
-make test                 # the main loop: compiles main + test, runs 307 tests (no device)
+make test                 # the main loop: compiles main + test, runs the suite (no device)
 make test-class T=Gains   # one class, when you know where you broke it
 make build                # compile the debug APK (catches Compose/Android errors make test cannot)
 make lint                 # Android Lint; must stay at "No issues found"
@@ -136,7 +136,7 @@ keytool -genkeypair -v -keystore "$HOME/finador-release.jks" -alias finador \
 chmod 600 "$HOME/finador-release.jks"
 
 cat >> ~/.gradle/gradle.properties <<'EOF'
-FINADOR_STORE_FILE=/Users/<you>/finador-release.jks
+FINADOR_STORE_FILE=/absolute/path/to/finador-release.jks
 FINADOR_STORE_PASSWORD=<store password>
 FINADOR_KEY_ALIAS=finador
 FINADOR_KEY_PASSWORD=<key password>
@@ -160,7 +160,7 @@ make gh-release           # the real thing: tag, push, GitHub release with the A
 make gh-release NOTES=notes.md   # hand-written notes instead of GitHub-generated ones
 ```
 
-`gh-release` runs `make test` and `make crossimpl`, builds the R8-minified release APK (2.12 MB),
+`gh-release` runs `make test` and `make crossimpl`, builds the R8-minified release APK,
 verifies its signature with `apksigner`, stages it as
 `app/build/dist/finador-android-v<version>.apk` and attaches it to the GitHub release. Re-running is
 safe: an existing tag at `HEAD` is reused, an existing release has its asset replaced.
@@ -207,7 +207,7 @@ table and the template for the next one. Most rows are "no": this app declares o
 ### What proves it
 
 ```sh
-make test        # 307 tests
+make test        # the whole unit suite
 make build
 make lint        # must print "No issues found"
 make crossimpl   # the .fin file format still matches the Go implementation byte for byte

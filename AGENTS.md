@@ -1,287 +1,385 @@
 # AGENTS.md - guide for AI coding agents
 
-Read this first. It tells you what the project is, the rules you must not break, where things
-live, and how to change/verify code **cheaply** (few tokens, fast feedback). Keep it up to date
-when you change architecture or invariants.
+Read this first, all of it, before touching anything. It says what the project is FOR, the rules
+that decide every trade-off, how to build and verify cheaply, where things live, and how people get
+this code wrong. If a request and this file disagree, this file wins until a human says otherwise.
+Keep it up to date when you change architecture or invariants.
 
-## What this is
+## 1. What this is, and what it is for
 
-`finador-android` is a native Android app (Kotlin + Jetpack Compose) - the mobile companion to
-**finador** (a Go CLI+web personal wealth tracker, at `../finador`). It reads/writes the same
-**encrypted `.fin` ledger** and syncs it through a **private GitHub repo**. Scope: full read
-(value, gains, per-asset detail), quick transaction entry, and account/asset management
-(Settings → Manage accounts / Manage assets) - everyday parity with the desktop CLI and web.
+`finador-android` is a native Android app (Kotlin + Jetpack Compose) for **tracking a household's
+whole net worth on a phone**: what it is worth today gross / after tax / net, what it gained over
+each period, what each asset contributed, and entering a transaction (a buy, a deposit, a fee) in
+the seconds you actually have to enter it.
 
-## Golden rules (do not break)
+It is the mobile half of a two-program system:
 
-0. **Write code that survives Android upgrades with little or no maintenance.** Every choice is weighed
-   first on: forward compatibility with future Android versions and future phones; low maintenance;
-   the fewest possible third-party libraries; no deprecated API or library; and a dev environment
-   anyone (or any coding agent) recreates on a fresh laptop with one obvious command (`make setup`, checked by
-   `make doctor`). A feature that costs yearly upkeep must earn it. When a dependency and a hundred
-   lines of platform code do the same job, the platform wins - that is how okhttp left
-   (`docs/maintainability.md` §6) and how `EncryptedSharedPreferences` and `material-icons-extended`
-   left before it. The yearly upgrade checklist is README's "WHEN ANDROID MOVES"; the ledger of what
-   depends on what, and what it costs, is `docs/maintainability.md`.
-1. **The `.fin` format is law.** `../finador/docs/FORMAT.md` is the authoritative spec; the Go code
-   in `../finador/internal/store` is the reference. Any change under `crypto/` or `format/` must keep
-   reading/writing byte-compatible files. Proof gate: `scripts/crossimpl.sh` (Go reads an
-   Android-written file and vice-versa) **must** stay green, and the golden tests
-   (`format/SampleLedgerTest`, `crypto/KdfTest`) must pass.
-2. **Valuation/market mirror Go.** `valuation/` and `market/` are faithful ports of
-   `../finador/internal/{portfolio,perf,market}`. The unit tests assert the *same numbers* as the Go
-   `*_test.go`. Don't change the math without checking parity; if you must, update the Go reference too.
-3. **All docs / comments / code in English.** (User convention.)
-4. **Keep the suite green.** Run the full `testDebugUnitTest` before claiming done; every test must
-   pass (count them from `app/build/test-results/testDebugUnitTest/*.xml`, 307 today - one of them,
-   `LiveProviderProbe`, is skipped unless `-Dprobe=1`).
-5. **Don't weaken security.** Secrets are encrypted under an Android Keystore key
-   (`data/SecretStore.kt`); the repo holds only the *encrypted* `.fin`; never log secrets or write
-   them to disk in clear.
-6. **This repo is public: fixtures are fictitious.** Tests, sample data and docs name invented
-   accounts (PEA Zephyr, CTO Meridia, AV Borealis, PEE Halcyon) and the house tickers
-   (CW8.PA, GTWR) - never a real bank or broker the author holds an account at, never a real
-   holding or amount. Public tickers and ISINs are fine as market-data vectors. The committed
-   `app/src/test/resources/sample.ledger` is the Go reference's file, copied byte-for-byte.
+| Repo | What it is | Direction |
+|---|---|---|
+| `../finador` | Go CLI + web, the DESKTOP program and the **reference implementation** of the file format and of every number | this app is a port OF it |
+| `finador-android` (here) | the phone client | reads and writes the SAME file |
+| a private GitHub repo (the user's, not this one) | where the encrypted ledger lives | both programs sync through it |
 
-## Build / test / run
+The two programs share one encrypted `.fin` ledger file, pushed and pulled through the GitHub
+Contents API. There is no server, no account, no backend: GitHub is the transport, the passphrase is
+the only key, and a phone that is offline still reads and writes locally.
 
-The `Makefile` is the entry point - it works out `JAVA_HOME`/`ANDROID_HOME` and exports them
-itself, so targets work from a fresh shell (run from the repo root):
+How a change propagates: a change to the FORMAT or to a computed number starts in `../finador`
+(spec + Go code + Go test), then lands here as a mirror with the same test numbers, and
+`make crossimpl` proves the two still read each other's files. Never the other way round.
 
-```sh
-make doctor               # read-only: is this machine equipped? what is missing, and the fix
-make setup                # install what is missing (macOS/Homebrew), idempotent, no key touched
-make test                 # full unit suite (host JVM, no device) - your main loop
-make test-class T=Gains   # one test class (cheap)
-make build                # compile the debug APK (catches Compose/Android errors)
-make lint                 # Android Lint (report: app/build/reports/lint-results-debug.txt)
-make crossimpl            # byte-compat gate vs the Go reference (builds /tmp/finador first)
-make probe                # hit the REAL quote providers (network, opt-in, never in `make test`)
-make help                 # everything else (install, run, release, emulator up/down, clean)
-```
+**In scope**: full read (value, gains, per-asset detail), quick transaction entry, account and asset
+management, quote fetching, GitHub sync, biometric unlock.
 
-Every build target depends on `preflight`, two file tests that turn a missing environment into
-"run make doctor" instead of a Gradle stack trace. The raw `./gradlew` tasks work too, with
-`JAVA_HOME`/`ANDROID_HOME` exported (`make doctor` prints the values it uses).
+**Deliberately NOT in scope**: brokerage connectivity or any automatic import; trading; a backend of
+our own; analytics, telemetry or crash reporting; ads; any network call to anything but GitHub and
+the four quote providers; notifications, widgets, background work; anything that needs a permission
+beyond `INTERNET`.
 
-- **Cheap feedback**: `make test` compiles the whole `main` (so it catches engine/UI compile
-  errors) AND runs the pure-Kotlin tests, without a device. Prefer it.
-- Test counts come from `app/build/test-results/testDebugUnitTest/*.xml` (grep `failures=`), since
-  `--console=plain` only prints failures.
-- **The JDK is pinned by a Gradle toolchain** (`java { toolchain { ... } }`, 21 today), not
-  inherited from the laptop; the bytecode level stays 17. No auto-provisioning: `make setup`
-  installs the JDK, the build never downloads one. The configuration cache is ON.
-- Emulator: `make setup-emulator` creates the AVD named after `compileSdk` (`test37`, API 37;
-  the older API 36 `test` AVD, screen 320x640, still exists). `make emulator` boots it headless and
-  waits; `make run` installs + launches; check `adb logcat -d -s AndroidRuntime:E`;
-  `make emulator-kill` stops it. The AVDs hold NO configured state, so the app lands on
-  **Onboarding** - smoke tests verify boot + first screen, not an unlocked portfolio. (If someone
-  re-onboards with real credentials, a configured install lands on **Unlock**; no enrolled
-  biometric, so it falls back to a direct button at `adb shell input tap 160 324`.)
-- Full repo workflow doc for humans, incl. the yearly Android upgrade checklist: `README.md`.
+## 2. Engineering principles (the ones that decide trade-offs)
 
-## Architecture map
+The app must keep working, on future Android versions and future phones, with **little or no
+maintenance**. Android has no compatibility promise: every year an API level changes behaviour,
+deprecates APIs and eventually removes them. Everything below follows from that one requirement,
+and it outranks features. When in doubt, do less.
 
-Package root `fin.android` under `app/src/main/kotlin/fin/android/`. The `crypto/domain/format/
-market/valuation` layers are **pure Kotlin (no Android imports)** → fast to unit-test on the JVM.
+### (a) The platform first. A third-party library is a liability that must be argued for.
+
+- DO use the platform and first-party AndroidX / Kotlin APIs, even when it costs a hundred lines.
+  `net/Http.kt` is the worked example: the whole HTTP stack is `HttpURLConnection`, and okhttp left
+  because of it (`docs/maintainability.md` §6). `EncryptedSharedPreferences` and
+  `material-icons-extended` left the same way.
+- DO NOT add a dependency to save a morning. A new library needs a written entry in
+  `docs/maintainability.md` (what it does, who maintains it, what breaks if it dies, what it costs
+  per year) BEFORE the code that uses it, and it is removed as soon as the platform can do the job.
+- Bouncy Castle is the one library kept purely for an algorithm the platform lacks: Argon2id
+  (`docs/maintainability.md` §5). That is the shape of an acceptable justification.
+- There is NO HTTP library in this app. Adding one is a regression, not a fix.
+
+### (b) No deprecated API, and every warning is a bug.
+
+- DO fix, not silence. A clean recompile prints **zero** `w:` deprecation warnings and `make lint`
+  prints `No issues found`. Both are gates, not aspirations.
+- DO NOT add `@Suppress`, `@SuppressLint` or a lint baseline to get green. The only allowed
+  suppressions live in `app/lint.xml`, each carrying its rationale: read them before "fixing" what
+  they cover, and add one only with the same kind of written reason.
+- DO NOT use an API that is deprecated, or announced for deprecation, in new code. How to read a
+  deprecation notice (does it hit every app or only the new `targetSdk`? what is the removal
+  version? is the replacement available at `minSdk` 26?) is README §6.
+- Experimental / `@OptIn` APIs only when the fallback if they are withdrawn is written down:
+  `docs/maintainability.md` §12 lists every current opt-in and its reason.
+
+### (c) Stay current, in the documented order. A deferred upgrade wave freezes everything behind it.
+
+- DO run the yearly wave in README §6's order: Gradle wrapper -> AGP -> Kotlin -> `compileSdk` ->
+  AndroidX libraries -> `targetSdk`, `make test` after each step, one commit each. The order is not
+  negotiable: each tool gates the next.
+- DO read both behaviour-change pages for the new API level and answer them row by row into
+  `docs/maintainability.md` §8 before moving `targetSdk`.
+- DO NOT bump one version out of order, and DO NOT bump a dependency "back" because it demands a
+  newer `compileSdk`: that message is the truth, bump the platform. A deferred wave is what once
+  froze three libraries behind an SDK level.
+- DO NOT skip the emulator smoke. Compiling against a new platform proves nothing about running on
+  it (`make setup-emulator && make emulator && make run`).
+
+### (d) The build is reproducible and the environment is one command.
+
+- DO keep every version exact in `gradle/libs.versions.toml` (no `+`, no range, no snapshot), the
+  Gradle distribution pinned by URL **and** SHA-256, and the JDK pinned by the Gradle toolchain in
+  `app/build.gradle.kts` rather than inherited from the machine.
+- DO keep `make setup` able to equip a bare laptop and `make doctor` able to say what is missing
+  and print the exact fix. Every build target depends on `preflight` so a missing environment reads
+  as "run make doctor", not as a Gradle stack trace.
+- DO NOT add a step that only works on one machine, a tool installed by hand, an absolute path, or
+  an environment variable a fresh clone does not get from the Makefile.
+
+### (e) Byte compatibility with the Go reference is law.
+
+- DO treat `../finador/docs/FORMAT.md` as the spec and `../finador/internal/store` as the reference.
+  Any change under `crypto/` or `format/` must keep reading and writing byte-identical files.
+- DO run `make crossimpl` (Go reads an Android-written file and vice versa) for any such change, and
+  keep `format/SampleLedgerTest` and `crypto/KdfTest` green.
+- DO NOT change a computed number here alone: `valuation/` and `market/` are faithful ports of
+  `../finador/internal/{portfolio,perf,market}` and the tests assert the SAME numbers. Change the Go
+  reference first, mirror it here, update both tests.
+
+### (f) A feature that adds yearly upkeep must earn it.
+
+- DO prefer the version of a feature that adds no permission, no background work, no service, no
+  reflection and no library. Today the app declares one permission (`INTERNET`), one activity, no
+  service, no receiver, no background work and no reflection; that is why most behaviour-change rows
+  answer "no".
+- DO NOT ship a feature whose upkeep is not written down. If it needs a yearly check, it belongs in
+  `docs/maintainability.md` §9 with the others, or it does not ship.
+
+If you were asked for "a quick fix" and the shortest path is to add a library, silence a warning,
+bump one version out of order, or skip a gate: that is not the quick path here. Do the slower,
+smaller thing, or stop and say what the trade-off is.
+
+## 3. The other non-negotiables
+
+1. **Don't weaken security.** Secrets are encrypted under an Android Keystore key
+   (`data/SecretStore.kt`); the remote repo holds only the *encrypted* `.fin`. Never log a secret,
+   a passphrase, a token or a derived key, and never write one to disk in clear.
+2. **This repo is public: every fixture is fictitious.** Tests, sample data and docs use invented
+   accounts (PEA Zephyr, CTO Meridia, AV Borealis, PEE Halcyon) and house tickers (CW8.PA, GTWR).
+   Never a real bank or broker as somebody's, never a real holding, never a real amount. Public
+   tickers and ISINs are fine as market-data vectors. `app/src/test/resources/sample.ledger` is the
+   Go reference's file, copied byte for byte.
+3. **Nothing personal in this repository.** No real name, no employer, no home path, no server
+   name, no amount, no screenshot of real data, in code, tests, docs or commit messages.
+4. **English everywhere** - code, comments, docs, commit messages.
+5. **Never a typographic dash.** No em-dash, no en-dash, anywhere in any file. Use a comma, a colon,
+   parentheses or a plain hyphen.
+6. **Keep the suite green.** The full unit suite must pass before anything is called done.
+
+## 4. How to work
+
+The `Makefile` is the entry point: it works out `JAVA_HOME` and `ANDROID_HOME` and exports them
+itself, so every target works from a bare shell. Run from the repo root.
+
+| Command | What success looks like | Cost |
+|---|---|---|
+| `make doctor` | read-only; prints OK / MISSING per tool with the exact fix command | instant |
+| `make setup` | idempotent install of what is missing (macOS/Homebrew); never touches a signing key | minutes, once |
+| `make test` | **the main loop**; prints `summary: N tests, 0 failures, 0 errors` | ~1 s warm, ~1 min cold |
+| `make test-class T=Gains` | one class, when you know where you broke it | seconds |
+| `make build` | the debug APK; catches Compose/Android errors `make test` cannot | ~1 min |
+| `make lint` | must print `No issues found`; report in `app/build/reports/lint-results-debug.txt` | ~1 min |
+| `make crossimpl` | byte-compat gate vs the Go reference (builds finador first, needs `../finador`) | ~1 min |
+| `make probe` | hits the REAL quote providers over the network; opt-in, never part of `make test` | seconds |
+| `make help` | every other target (install, run, release, emulator up/down, clean) | instant |
+
+`make test` compiles the whole `main` source set as well as the tests, so it catches engine AND UI
+compile errors without a device. Prefer it. The per-test detail is in
+`app/build/test-results/testDebugUnitTest/*.xml`; `--console=plain` only prints failures, which is
+why the Makefile prints the summary line itself.
+
+**Verifying a change cheaply**
+
+1. Engine / format / valuation / market change: `make test-class T=<Area>` first, then full
+   `make test`. For anything under `crypto/` or `format/`, also `make crossimpl`.
+2. UI change: `make build`, plus an emulator smoke if a screen's behaviour changed.
+3. Suspecting the live internet rather than the code: `make probe` prints a reachability line per
+   provider host (HTTP status, or the transport failure) before it tries to parse anything.
+4. Never claim a result you did not run.
+
+**Emulator.** `make setup-emulator` creates the AVD named after `compileSdk` (`test37` today);
+`make emulator` boots it headless and waits, `make run` installs and launches, `make emulator-kill`
+stops it. The AVDs hold no configured state, so the app lands on **Onboarding**: the smoke test
+verifies boot plus first screen, not an unlocked portfolio. Crashes: `adb logcat -d -s
+AndroidRuntime:E`.
+
+**Commits and releases.** Commit to `master` and push; there are no branches and no PR flow. Design
+rationale lives in commit messages: there is no separate decision log, so write the why there.
+Do NOT tag by hand: a `v*` tag is created by `make gh-release`, which is a real publication (it runs
+`make test` and `make crossimpl`, builds the R8-minified release APK, **verifies its signature with
+`apksigner`**, tags, pushes and creates the GitHub release with the APK attached). It refuses to
+publish a debug-signed APK, since that key is public and cannot upgrade an installed app
+(`DEBUG_APK=1` does it deliberately, named `-debug`). Two cheap probes first: `make check-signing`
+(is a real key configured here? prints no secret) and `make gh-release-dry-run` (everything except
+the tag, the push and the release). The release key and its passwords live only OUTSIDE this repo
+and are never committed, printed or uploaded.
+
+## 5. Map
+
+Package root `fin.android` under `app/src/main/kotlin/fin/android/`. The `crypto` / `domain` /
+`format` / `market` / `valuation` layers are **pure Kotlin, no Android imports**, which is what
+makes them testable on the host JVM in a second.
 
 | Area | Key files | Role | Pure? |
 |---|---|---|---|
-| `crypto/` | Argon2, Hkdf, AesGcm, Hashes, Bytes, Ids | KDF, AEAD, base64, Crockford ids | ✅ |
-| `domain/` | Models, Money, MarketData | data model (BigDecimal money, enums, Book) | ✅ |
-| `format/` | Header, Kdf, Wire, Log, Replay, Writer, Merge, Ledger | read/write the `.fin` (AAD-chained records, fold, diff-on-save, union+LWW merge) | ✅ |
-| `market/` | Yahoo, Ft, Morningstar, Airfund, Nowcast, Session, Units, VenueDay, MultiSource, Converter, FxRates, CacheSidecar, Quotes, Source | fetch quotes (JSON + a Boursorama regex), FX via USD, FINCACHE2 cache; `Airfund` = the NAV feed of the employee-savings funds (FCPE) no quote site covers, with a bundled offline baseline; `Nowcast` = the estimated tail those funds need between their last published NAV and now, anchored on the print that NAV was struck on (`AirfundFund.navAnchor`: the proxy's close by default, its OPEN for a fund valued at its holding's opening price, as `ERES_DATADOG` is); `FxRates` = the display-only read-back of the rates a valuation crossed at (`AppState.Ready.fxRates`, a caption under the total); `Session` + `Quotes.refreshExtended` = the extended-hours opt-in (Settings → Display, off by default), parity with the Go `value --extended`: a US pre/post-market print prices the line, the total AND every figure shown beside them (the gains table's value column, the detail page's price/value) when it is fresher than the regular one, labelled "pre 08:14" / "post 19:59" and NEVER stored (the same pass stores exactly what the plain one does); it also EXPIRES - `Session.stillCurrent` / `Quotes.current` drop a print once its session is over (pre at the regular open, post at the next pre-market open, New York clock, weekends skipped), re-read against `AppRepository`'s injectable clock on every emit, so the screen falls back to the closes by itself; `Units` = the venue SUB-UNITS (`GBp`/`GBX` pence, `ZAc`, `ILA`, `USX`) a provider reports where a currency is expected, removed where its numbers enter the app and folded by `Units.same` in every currency comparison; `VenueDay` = the calendar a bar or print belongs to, read in the venue's own zone (`exchangeTimezoneName`), forward only, a currency cross exempt | ✅ |
-| `valuation/` | Valuator, Perf, Gains | gross/tax/net, TWR/XIRR/etc., period & per-asset gains, asset detail; `priceOverrides` (an off-hours print) reaches `Valuator.value`, `Gains.report` and `Gains.assetDetail` - a valuation and every figure shown with it stand on one price - and NEVER `Perf` or the period/history figures (Go D36/D38: no override in `perf` or `chart`) | ✅ |
-| `storage/` | AtomicFile | the one way a file is replaced: tmp + fsync + rename (+ `.bak`), so a killed process never leaves a short ledger or a short cache | ✅ |
-| `net/` | Http (+ `FakeHttpServer` in tests) | the whole HTTP stack: `url`/`escape`, `send` (headers, JSON body, timeouts, ONE retry on 429/5xx/no-answer), `Response` (status + body, error body included). Platform `HttpURLConnection` only - there is no HTTP library in this app and must not be (`docs/maintainability.md` §6). Tests fake it with `com.sun.net.httpserver` | ✅ |
-| `remote/` | Backend, GitHubBackend, RemoteConfig, Sync | GitHub Contents API, pull/mutate/push + conflict→merge + offline-dirty | Android-light |
+| `crypto/` | Argon2, Hkdf, AesGcm, Hashes, Bytes, Ids | KDF, AEAD, base64, Crockford ids | yes |
+| `domain/` | Models, Money, MarketData | data model (BigDecimal money, enums, Book) | yes |
+| `format/` | Header, Kdf, Wire, Log, Replay, Writer, Merge, Ledger | read/write the `.fin` (AAD-chained records, fold, diff-on-save, union + LWW merge) | yes |
+| `market/` | Yahoo, Ft, Morningstar, Airfund, Nowcast, Session, Units, VenueDay, MultiSource, Converter, FxRates, CacheSidecar, Quotes, Source | fetch quotes (JSON plus one Boursorama regex), FX via USD, FINCACHE2 cache. See the sub-table below | yes |
+| `valuation/` | Valuator, Perf, Gains | gross/tax/net, TWR/XIRR, period and per-asset gains, asset detail | yes |
+| `storage/` | AtomicFile | the one way a file is replaced: tmp + fsync + rename (+ `.bak`) | yes |
+| `net/` | Http (+ `FakeHttpServer` in tests) | the whole HTTP stack: `url`/`escape`, `send` (headers, JSON body, timeouts, ONE retry on 429/5xx/no answer), `Response`. Platform `HttpURLConnection` only | yes |
+| `remote/` | Backend, GitHubBackend, RemoteConfig, Sync | GitHub Contents API, pull/mutate/push, conflict -> merge, offline-dirty | Android-light |
 | `data/` | AppContainer, AppRepository, AppState, SecretStore | manual DI, the single facade, Keystore-encrypted secrets | Android |
-| `ui/` | AppRoot, AppViewModel, *Screen, Theme, Format | Compose screens, MVVM, theme | Android |
+| `ui/` | AppRoot, AppViewModel, *Screen, Theme, Format, FinIcons | Compose screens, MVVM, theme, inlined icons | Android |
 
-Data flow: `MainActivity` → `AppRoot` renders `AppViewModel.state: StateFlow<AppState>`
-(Loading/Onboarding/Locked/Ready). `AppRepository` is the only mutator: it opens the ledger via
-`Sync` (working copy in `filesDir/checkout`), values it (`Valuator`/`Gains`/`Perf`), and emits
-`AppState.Ready(valuation, perf, gains, book, sync, message, refreshing, assetDetails)`. UI reads
-that state; per-asset detail pages are **precomputed** into `Ready.assetDetails` for instant opens.
+Inside `market/`, the pieces that are not obvious:
 
-## Where to change X (quick index)
+| File | What it is |
+|---|---|
+| `Airfund` | the official NAV feed of the employee-savings funds (FCPE) no quote site covers, with a bundled offline baseline per fund |
+| `Nowcast` | the estimated tail such a fund needs between its last published NAV and today, read off a listed proxy and anchored on the print that NAV was struck on (`AirfundFund.navAnchor`: the proxy's close by default, its OPEN for a fund valued at its holding's opening price, as `ERES_DATADOG` is) |
+| `Session` + `Quotes.refreshExtended` | the extended-hours opt-in (Settings -> Display, off by default), parity with the Go `value --extended`: a US pre/post-market print prices the line, the total and every figure shown beside them when it is fresher than the regular one, labelled `pre 08:14` / `post 19:59`, never stored, and EXPIRING (`Session.stillCurrent`, New York clock, weekends skipped) against `AppRepository`'s injectable clock |
+| `Units` | the venue SUB-UNITS (`GBp`/`GBX` pence, `ZAc`, `ILA`, `USX`) a provider reports where a currency is expected; removed where the numbers enter the app, folded by `Units.same` in every currency comparison |
+| `VenueDay` | which calendar day a bar or print belongs to, read in the venue's own zone (`exchangeTimezoneName`), forward only, a currency cross exempt |
+| `FxRates` | display-only read-back of the rates a valuation crossed at (`AppState.Ready.fxRates`, a caption under the total) |
 
-- **New record kind / format field** → `format/Wire.kt` (DTO) + `format/Replay.kt` (fold) +
-  `FORMAT.md` + a test; bump version only per `FORMAT.md §8`.
-- **A valuation/gain/perf number** → `valuation/{Valuator,Perf,Gains}.kt`; mirror the Go change and
-  the parity test.
-- **A quote source / parsing** → `market/{Yahoo,Ft,Morningstar,Airfund}.kt`; fixtures in the market tests.
-- **Anything about the HTTP call itself** (header, timeout, retry, escaping, a new status to treat
-  specially) → `net/Http.kt`, once, for every caller; fake it with `net/FakeHttpServer.kt`. Is the
-  live internet the suspect rather than the code? `make probe` prints a reachability line per
-  provider host (HTTP status, or the transport failure) before it tries to parse anything.
-- **Another employee-savings fund (FCPE)** → one entry in `market/Airfund.kt`'s `AirfundFunds.ALL`
-  (share code + nowcast proxy, plus `navAnchor = NavAnchor.OPEN` when the fund's valuation rules
-  name its holding's OPENING price, mirroring the Go catalog's `nowcast_anchor`) plus its NAV
-  baseline in `app/src/main/resources/fin/android/market/<TICKER>-NAV.csv`, copied from the Go
-  reference's `refdata/`. The ledger asset just carries the ticker; nothing else changes.
-- **Sync behaviour** (conflict, offline, pull cadence) → `remote/Sync.kt`.
-- **A screen / styling** → `ui/<Screen>.kt`; colors/typography in `ui/Theme.kt`
-  (accent = terracotta `#C2613C`; gain/loss via `gainLossColor(...)`); number formatting in `ui/Format.kt`.
-- **App state / orchestration** → `data/AppRepository.kt` (+ `AppState.kt`, `AppViewModel.kt`).
+`valuation/` detail worth knowing: `priceOverrides` (an off-hours print) reaches `Valuator.value`,
+`Gains.report` and `Gains.assetDetail` so that a valuation and every figure shown with it stand on
+one price, and NEVER `Perf` or the period/history figures (Go decisions D36/D38: no override in
+`perf` or `chart`).
 
-## Gotchas & non-obvious things
+**Data flow.** `MainActivity` -> `AppRoot` renders `AppViewModel.state: StateFlow<AppState>`
+(Loading / Onboarding / Locked / Ready). `AppRepository` is the only mutator: it opens the ledger via
+`Sync` (working copy in `filesDir/checkout`), values it (`Valuator` / `Gains` / `Perf`) and emits
+`AppState.Ready(valuation, perf, gains, book, sync, message, refreshing, assetDetails)`. Per-asset
+detail pages are precomputed into `Ready.assetDetails` so they open instantly.
 
-- **`AppRepository` mutations are serialized by a `Mutex`** (`exclusive { }`). The Mutex is **not
-  reentrant** - a locked public method must call the `*Locked` private helpers, never another public
-  (locked) method (else deadlock). See `refreshQuotesLocked`.
-- **Estimates are never cached.** A fund published with a lag (`market/Airfund.kt`) gets a nowcast
-  tail read off a listed proxy (`market/Nowcast.kt`), flagged by `PriceSeries.estimatedFrom` /
-  `estimateProxy`. It is recomputed at every refresh, never stored: `Quotes.refresh` strips the
-  previous run's tail before merging anything, and `CacheSidecar.write` strips it again on the way
-  to disk (which also keeps the FINCACHE2 JSON byte-compatible with Go, whose DTO has no such
-  field). Anything showing an estimated price must SAY it is one, as `AssetDetailScreen` does.
-  The proxies are fetched even when the user holds none of them, cached under `proxy:<SYMBOL>` in
-  `MarketData.prices` (no ledger id can collide: those are Crockford base32).
-- **A nowcast anchors on the print the NAV was struck on**, not always on a close. A fund carrying
-  `NavAnchor.OPEN` (`ERES_DATADOG`, valued at the NASDAQ opening price) divides by the proxy's OPEN
-  of the last NAV's day, which reaches the estimate as the session's open-to-close RATIO
-  (`DailyData.openFactors`, read off the Yahoo chart payload's `open` column, held for one pass and
-  stored nowhere, so no asset gains a cached field). Every failure mode falls back on the close and
-  none is an error: no `open` column, a day the proxy did not trade, a failed fetch. An ESTIMATED
-  anchor day keeps the close it was built from, and a nowcast still never overwrites a published NAV.
-- **A source that restates its history makes the series be rebuilt.** The daily fetch is
-  incremental (`Quotes.fetchFrom` resumes at the last cached close), but a share split, a currency
-  redenomination or a class merge rewrites the whole served history, so merging would glue the old
-  scale in front of the new one and leave a permanent cliff the valuation, the chart and the TWR
-  read as a session that never happened. The overlap day is the canary: more than 2 % away from the
-  cached close and the series is dropped and refetched from the floor, with a warning (`Refresh.warnings`
-  → snackbar) asking for the ledger quantities to be checked, since a split moves the position too.
-  Mirrors Go D40; estimates are stripped before the comparison, so a nowcast tail never triggers it.
-  When the measured factor matches a plain split ratio (`Quotes.splitRatioFor`: 2:1, 3:1, 4:1, 3:2,
-  their reverses...), the warning NAMES the split and lists the quantities each pre-split trade
-  owes - multiply the quantity, leave the amount alone, which is the faithful correction once the
-  whole price history has been re-scaled. A factor matching no ratio (a currency redenomination)
-  claims none. Mirrors Go D47, which also holds the proposal for a native `split` record: the
-  ledger has no way to restate a quantity, and adding a transaction kind would make an older
-  reader reject the file, so it is a version-bump decision, not a bugfix.
-- **A currency reaches the book three ways**: an account is denominated in one, an asset quotes in
-  one, and a RECORD may be written in a fourth (a fee in JPY, a deposit in CHF). `Quotes` collects
-  all three, and the FX window reaches a week before the OLDEST record (`fxHistoryFloor`), because
-  a historical deposit is crossed at the rate of its own day. When a rate is still missing,
-  `Valuator` counts the amount as 0 - a phone screen has to render, where the Go CLI refuses the
-  total - and NAMES the record in `Valuation.taxNote`: its kind, amount, currency, date, asset,
-  envelope and id. `Perf` stays silent on purpose: it reads the same ledger, so the note beside the
-  curve already names what it could not convert. Mirrors Go D43.
-- **Never sum `Double` in a map's own order when the order is not the ledger's.** The addition is
-  not associative, so the same per-envelope taxes added in two orders differ in their last digits,
-  and the Go reference sums that exact list by sorted account id. `Valuer` does the same, which is
-  what keeps the two implementations comparable figure for figure. Mirrors Go D46.
-- **A currency code is never compared with `==` or `equalsIgnoreCase`.** A venue quotes in a
-  SUB-UNIT and the provider reports it where a currency is expected: Yahoo answers `GBp` for a
-  London line and prices it in PENCE, FT spells it `GBX`, Johannesburg is `ZAc`, Tel Aviv `ILA`,
-  some US futures `USX`. `GBp` and `GBP` differ by case alone, so a case-INSENSITIVE compare books
-  pence as pounds (a 100x valuation error no plausibility check can see, since rescaling a series
-  leaves every return untouched) and a case-SENSITIVE one refuses the series instead, leaving the
-  holding at its cost basis for ever. `market/Units.kt` removes the sub-unit where each provider's
-  numbers enter the app and `Units.same` answers every "is this the declared currency?" question.
-  A RATIO (`DailyData.openFactors`) carries no currency and is never rescaled. Mirrors Go
-  `pkg/marketdata/units.go`.
-- **A daily bar carries an instant of the session, not a date** (`market/VenueDay.kt`, Go's
-  `sessionDay`). Truncated in UTC, an ASX bar lands one day early (Sydney opens 10:00 = 23:00 UTC
-  the day before in summer), so Sunday closes appear and Fridays go missing, and every date-matched
-  join - the previous close a day change reads, the FX rate of the day, the canary's overlap day -
-  quietly misses. The day is read in the venue's own zone (`exchangeTimezoneName`), FORWARD ONLY (a
-  UTC reading is never late, only early), and a currency cross is exempt: its Yahoo dating carries
-  a separate, known weekend anomaly that a time zone would hide rather than fix.
-- **Every persisted file is replaced atomically** (`storage/AtomicFile.kt`, mirroring the Go
-  reference's `atomicWrite`): the working copy (with a `.bak`), the sync state and the FINCACHE2
-  sidecar. `File.writeBytes` truncates first, and Android kills backgrounded processes whenever it
-  wants memory, so the plain call leaves a short file often enough to matter - and a short `.fin`
-  authenticates as nothing while the dirty guard forbids pulling over it, which is a permanent
-  brick. Two consequences in `remote/Sync.kt`: an unreadable state file reads as `dirty = true`
-  (never as "nothing to push", which would let a pull overwrite unpushed records), and
-  `openForRead` falls back to the `.bak`, promotes it and marks it dirty so the next sync MERGES it.
-- **The market cache is NOT synced** (per-device, regenerable). A freshly synced device has the
-  ledger but no prices until `refreshQuotes` runs → period gains read ~0 until quotes load, and
-  statement-valued assets (property, cash) have no market "performance" by design.
-- **Gains = flow-neutralized market performance** (user-confirmed). Property revaluations and
-  deposits are flows, not gains. Don't "fix" the ~0 on a property-heavy portfolio.
-- **`Ledger.toBytes()` is diff-on-save**: existing record lines are re-emitted verbatim; only new
-  records are sealed and the trailer re-sealed. `merge` re-seals the whole chain (matches Go).
-- **Timestamps must be `Locale.ROOT`** (`format/Timestamps.kt`) - the `ts` is the sealed LWW key.
-- **A rejected GitHub token never blocks local data.** `Sync` records it as `SyncState.authError`
-  (persistent "re-login" banner in the UI), reads/writes keep working locally (writes stay `dirty`),
-  and the next successful fetch/push clears it. Only an unlock with NO local copy surfaces the error.
-- **A `dirty` working copy is never overwritten by a fetch.** It holds records the remote has never
-  seen. `Sync.mutate` merges the fetched remote into it (rather than writing the remote bytes over
-  it) and `pullIfStale` skips the pull entirely while dirty, since that path has no passphrase to
-  merge with. Asserted by `remote/SyncTest`'s two "unpushed local change" tests.
-- **Argon2id is Bouncy Castle** (pure-JVM, so host unit tests run); not `argon2kt`.
-- **Unquoted securities are never worth 0.** Valuation fallback chain (mirrors Go, asserted by
-  `valuation/UnquotedTest`): market close → last statement of the (account, asset) pair (a NAV
-  observation, scaled per share when the quantity changed since) → cost basis. The first statement
-  of a position *bought* in the ledger (basis > 0) is a NAV observation (performance), not an
-  adoption flow; only a declared holding (basis == 0) adopts.
-- **Secrets**: `KeystoreSecretStore` encrypts values with an Android Keystore AES-GCM key into
-  plain SharedPreferences. (The deprecated Jetpack `EncryptedSharedPreferences` and its one-shot
-  migration shim were removed after v0.1.6 - the whole fleet had migrated.)
-- **The 11 Material icons the app draws are inlined** in `ui/FinIcons.kt` (as `FinIcons.<Name>`
-  `ImageVector`s, path data copied verbatim from androidx material-icons 1.7.8, Apache 2.0). There
-  is no `material-icons-extended` dependency anymore - the old one was frozen upstream. Need another
-  icon? Copy its `materialPath { ... }` body from the 1.7.8 sources into `FinIcons` (set
-  `autoMirror = true` for direction-carrying icons); don't re-add the dependency.
-- **Build types**: `debug` = dev (slow, debuggable). `release` = R8-minified, non-debuggable,
-  2.12 MB, validated end-to-end. It's signed with the **real release key** when `FINADOR_STORE_FILE`,
-  `FINADOR_STORE_PASSWORD`, `FINADOR_KEY_ALIAS` and `FINADOR_KEY_PASSWORD` are set - in
-  `~/.gradle/gradle.properties` (never committed) or, failing that, in the **environment**, so a CI
-  runner can inject them as secrets. It **falls back to debug signing** when they're absent
-  (contributors / CI) - see `app/build.gradle.kts` `signingConfigs`. The key and its passwords live
-  ONLY outside this repo (`~/finador-release.jks` + `~/.gradle/gradle.properties`); nothing about
-  them is ever committed, printed or uploaded.
-- **Releasing**: `make gh-release` runs the gates (`test`, `crossimpl`), builds the release APK,
-  **verifies its signature with `apksigner`**, tags, pushes and creates the GitHub release **with the
-  APK attached** as `finador-android-v<version>.apk`. It REFUSES to publish a debug-signed APK: that
-  key is public and cannot upgrade an installed app. `DEBUG_APK=1` publishes one deliberately, named
-  `-debug`. The target is re-runnable (an existing release gets `gh release upload --clobber`, an
-  existing tag at HEAD is reused). Two cheap probes before releasing: `make check-signing` (is a real
-  key configured here? prints no secret) and `make gh-release-dry-run` (everything except the tag,
-  the push and the release).
-- The single native lib is Compose's `libandroidx.graphics.path.so`; "Unable to strip" is a benign warning.
+**Outside `app/`**: `scripts/doctor.sh` + `setup.sh` (the dev environment), `scripts/crossimpl.sh`
+(the byte-compat gate), `gradle/libs.versions.toml` (every dependency at an exact version),
+`docs/maintainability.md` (the dependency ledger and deprecation audit), `README.md` (human setup,
+release, and the yearly upgrade checklist in §6 "WHEN ANDROID MOVES").
 
-## Verifying a change cheaply
+## 6. Where to change X
 
-1. Engine/format/valuation/market change → `make test-class T=<Area>` first, then the full
-   `make test`. For format edits (and toolchain/serialization upgrades) also run `make crossimpl`.
-2. UI change → `make build` (compile) + optional emulator smoke (no crash on the relevant screen).
-3. Always end on green tests + green build before claiming done. Don't trust a change you didn't run.
-4. Deprecation/obsolescence sweep (occasional): a clean recompile prints zero `w:` deprecation
-   warnings, and `lintDebug` (report in `app/build/reports/lint-results-debug.txt`) reports ONLY
-   version-bump notices - anything else is a regression. Deliberate suppressions live in
-   `app/lint.xml`, each with its rationale (read them before "fixing" what they cover).
+| You want to change | Go to |
+|---|---|
+| a record kind or format field | `format/Wire.kt` (DTO) + `format/Replay.kt` (fold) + `FORMAT.md` + a test; bump the version only per `FORMAT.md` §8 |
+| a valuation / gain / perf number | `valuation/{Valuator,Perf,Gains}.kt`, mirroring the Go change and the parity test |
+| a quote source or its parsing | `market/{Yahoo,Ft,Morningstar,Airfund}.kt`; fixtures in the market tests |
+| anything about the HTTP call itself (header, timeout, retry, escaping, a status to treat specially) | `net/Http.kt`, once, for every caller; fake it with `net/FakeHttpServer.kt` |
+| support for another employee-savings fund (FCPE) | one entry in `market/Airfund.kt`'s `AirfundFunds.ALL` (share code + nowcast proxy, plus `navAnchor = NavAnchor.OPEN` when the fund's rules name its holding's OPENING price, mirroring the Go catalog's `nowcast_anchor`) plus its NAV baseline in `app/src/main/resources/fin/android/market/<TICKER>-NAV.csv`, copied from the Go reference's `refdata/`. The ledger asset carries only the ticker |
+| sync behaviour (conflict, offline, pull cadence) | `remote/Sync.kt` |
+| a screen or its styling | `ui/<Screen>.kt`; colours and typography in `ui/Theme.kt` (accent terracotta `#C2613C`, gain/loss via `gainLossColor`); number formatting in `ui/Format.kt` |
+| app state or orchestration | `data/AppRepository.kt` (+ `AppState.kt`, `AppViewModel.kt`) |
+| an icon | `ui/FinIcons.kt`: copy the `materialPath { ... }` body from the androidx material-icons sources (Apache 2.0, version recorded in the file), `autoMirror = true` for direction-carrying icons. Do NOT re-add `material-icons-extended`, which is frozen upstream |
 
-## Known deferred work (intentional, with rationale)
+## 7. Traps
 
-- **Holdings replay is implemented twice** - `valuation/Valuator.kt` (full fold) and
-  `valuation/Perf.kt`'s `SeriesBuilder` (day-walk). Extracting the shared per-tx transition logic
-  would remove drift risk, but it touches parity-tested numbers - do it under the full suite. Until
-  then `valuation/EndpointFuzzTest` is the net: 20000 random ledgers, several records on the same
-  few days, and the last point of the series must equal the valuation (Go D39/D41 were both found
-  by its Go twin, `internal/portfolio/endpoint_fuzz_test.go`).
+Each of these cost real debugging once. Symptom, cause, what to do.
+
+- **The app deadlocks on a mutation.** `AppRepository` serializes mutations with a `Mutex`
+  (`exclusive { }`) and the Mutex is NOT reentrant. A locked public method that calls another public
+  (locked) method hangs for ever. Call the `*Locked` private helpers instead; `refreshQuotesLocked`
+  is the pattern.
+- **An estimated price got cached, or shipped to another device.** Estimates must never persist. A
+  fund published with a lag gets a nowcast tail (`market/Nowcast.kt`) flagged by
+  `PriceSeries.estimatedFrom` / `estimateProxy`, recomputed at every refresh: `Quotes.refresh` strips
+  the previous run's tail before merging, and `CacheSidecar.write` strips it again on the way to disk
+  (which also keeps the FINCACHE2 JSON byte-compatible with Go, whose DTO has no such field).
+  Anything DISPLAYING an estimate must say it is one, as `AssetDetailScreen` does. Proxies are
+  fetched even when the user holds none of them, cached under `proxy:<SYMBOL>` in
+  `MarketData.prices`; no ledger id can collide, those are Crockford base32.
+- **A nowcast for a fund is off by about a day's move.** A NAV is struck on a particular print, not
+  always on a close. A fund carrying `NavAnchor.OPEN` divides by the proxy's OPEN of the last NAV's
+  day, which reaches the estimate as the session's open-to-close RATIO (`DailyData.openFactors`, read
+  off the Yahoo chart payload's `open` column, held for one pass, stored nowhere). Every failure mode
+  falls back on the close and none is an error: no `open` column, a day the proxy did not trade, a
+  failed fetch. An ESTIMATED anchor day keeps the close it was built from, and a nowcast never
+  overwrites a published NAV.
+- **A permanent cliff appears in the chart, the TWR or the valuation.** A source restated its
+  history (a share split, a currency redenomination, a class merge) and the incremental fetch
+  (`Quotes.fetchFrom` resumes at the last cached close) glued the old scale in front of the new one.
+  The overlap day is the canary: more than 2 % from the cached close and the series is dropped and
+  refetched from the floor, with a warning (`Refresh.warnings` -> snackbar) asking for the ledger
+  quantities to be checked, since a split moves the position too. When the measured factor matches a
+  plain ratio (`Quotes.splitRatioFor`: 2:1, 3:1, 4:1, 3:2, their reverses) the warning NAMES the
+  split and lists the quantity each pre-split trade owes: multiply the quantity, leave the amount
+  alone. A factor matching no ratio claims nothing. Mirrors Go D40 and D47; estimates are stripped
+  before the comparison so a nowcast tail never triggers it. The ledger has no way to restate a
+  quantity and adding a transaction kind would make an older reader reject the file, so a native
+  `split` record is a version-bump decision, not a bugfix.
+- **A historical amount lands as 0 and the total looks wrong.** A currency reaches the book three
+  ways: the account is denominated in one, the asset quotes in one, and a RECORD may be written in a
+  fourth (a fee in JPY, a deposit in CHF). `Quotes` collects all three and the FX window reaches a
+  week before the OLDEST record (`fxHistoryFloor`), because a historical deposit is crossed at the
+  rate of its own day. When a rate is still missing, `Valuator` counts the amount as 0 (a phone
+  screen has to render, where the Go CLI refuses the total) and NAMES the record in
+  `Valuation.taxNote`: kind, amount, currency, date, asset, envelope, id. `Perf` stays silent on
+  purpose, the note beside the curve already names it. Mirrors Go D43.
+- **The Kotlin and Go totals differ in the last digits.** Someone summed `Double` in a map's own
+  order. Floating-point addition is not associative, and the Go reference sums that exact list by
+  sorted account id. Do the same. Mirrors Go D46.
+- **A London holding is valued 100x too high, or refused entirely.** A currency code is never
+  compared with `==` or `equalsIgnoreCase`. A venue quotes in a SUB-UNIT and the provider reports it
+  where a currency is expected: Yahoo answers `GBp` for a London line and prices it in PENCE, FT
+  spells it `GBX`, Johannesburg is `ZAc`, Tel Aviv `ILA`, some US futures `USX`. A case-INSENSITIVE
+  compare books pence as pounds (a 100x error no plausibility check can see, since rescaling a series
+  leaves every return untouched); a case-SENSITIVE one refuses the series and leaves the holding at
+  its cost basis for ever. `market/Units.kt` removes the sub-unit where each provider's numbers enter
+  the app, and `Units.same` answers every "is this the declared currency?" question. A RATIO
+  (`DailyData.openFactors`) carries no currency and is never rescaled.
+- **Sunday closes appear and Fridays go missing.** A daily bar carries an instant of the session, not
+  a date. Truncated in UTC, a Sydney bar lands a day early (10:00 local = 23:00 UTC the day before in
+  summer), and every date-matched join quietly misses: the previous close a day change reads, the FX
+  rate of the day, the canary's overlap day. `market/VenueDay.kt` (Go's `sessionDay`) reads the day in
+  the venue's own zone, FORWARD ONLY (a UTC reading is never late, only early); a currency cross is
+  exempt, its Yahoo dating carries a separate known weekend anomaly a time zone would hide.
+- **The app can never open its ledger again.** A file was replaced non-atomically. `File.writeBytes`
+  truncates first and Android kills backgrounded processes whenever it wants memory, so the plain
+  call leaves a short file often enough to matter, and a short `.fin` authenticates as nothing while
+  the dirty guard forbids pulling over it: a permanent brick. Every persisted file goes through
+  `storage/AtomicFile.kt` (tmp + fsync + rename + `.bak`, mirroring Go's `atomicWrite`): the working
+  copy, the sync state, the FINCACHE2 sidecar. Two consequences in `remote/Sync.kt`: an unreadable
+  state file reads as `dirty = true` (never as "nothing to push", which would let a pull overwrite
+  unpushed records), and `openForRead` falls back to the `.bak`, promotes it and marks it dirty so
+  the next sync MERGES it.
+- **A fetch overwrote local records.** It must not: a `dirty` working copy holds records the remote
+  has never seen. `Sync.mutate` merges the fetched remote INTO it rather than writing the remote
+  bytes over it, and `pullIfStale` skips the pull entirely while dirty, since that path has no
+  passphrase to merge with. Asserted by `remote/SyncTest`'s two "unpushed local change" tests.
+- **Period gains read ~0 on a freshly synced device.** The market cache is per-device and NOT synced
+  (it is regenerable). There are no prices until `refreshQuotes` runs. Statement-valued assets
+  (property, cash) have no market performance at all, by design.
+- **A property-heavy portfolio shows ~0 gains.** Gains are flow-neutralized market performance:
+  revaluations and deposits are flows, not gains. This is correct. Do not "fix" it.
+- **An unquoted security shows as worth 0.** It must not. The fallback chain (mirrors Go, asserted by
+  `valuation/UnquotedTest`) is: market close -> last statement of the (account, asset) pair, a NAV
+  observation scaled per share when the quantity changed since -> cost basis. The first statement of
+  a position BOUGHT in the ledger (basis > 0) is a NAV observation (performance), not an adoption
+  flow; only a declared holding (basis == 0) adopts.
+- **A merge or save rewrote lines it should not have.** `Ledger.toBytes()` is diff-on-save: existing
+  record lines are re-emitted verbatim, only new records are sealed and the trailer re-sealed.
+  `merge` re-seals the whole chain, matching Go.
+- **A record loses to the wrong one in a merge.** Timestamps must be formatted with `Locale.ROOT`
+  (`format/Timestamps.kt`): the `ts` is the sealed LWW key.
+- **A rejected GitHub token appears to have locked the user out.** It must not. `Sync` records it as
+  `SyncState.authError` (a persistent "re-login" banner), local reads and writes keep working (writes
+  stay `dirty`), and the next successful fetch or push clears it. Only an unlock with NO local copy
+  surfaces the error.
+- **`make build` warns "Unable to strip".** Benign, on Compose's `libandroidx.graphics.path.so`, the
+  single native library.
+
+## 8. Known deferred work (intentional, with rationale)
+
+- **Holdings replay is implemented twice**: `valuation/Valuator.kt` (full fold) and
+  `valuation/Perf.kt`'s `SeriesBuilder` (day-walk). Extracting the shared per-transaction transition
+  would remove drift risk but touches parity-tested numbers: do it under the full suite. Until then
+  `valuation/EndpointFuzzTest` is the net (random ledgers, several records on the same few days, the
+  last point of the series must equal the valuation; Go D39 and D41 were both found by its Go twin).
 - **`Gains.periodGain` rebuilds a full series per window** (8 windows). Building one series over the
-  widest window and slicing (as Go's `report.go` does) is a pure speedup - verify TWR-per-window parity.
+  widest window and slicing, as Go's `report.go` does, is a pure speedup: verify TWR-per-window
+  parity.
 - **Dependency verification** (`gradle/verification-metadata.xml`) is deliberately NOT adopted;
-  the reasoning, with the measured size of the file it would add, is in `docs/maintainability.md`
-  §13. What IS pinned: the Gradle distribution's SHA-256 and every dependency version exactly.
-- **`androidx.biometric` cannot be dropped** without raising `minSdk` to 30, which is a product
-  decision (`docs/maintainability.md` §4). Same for the ten `@ExperimentalMaterial3Api` opt-ins
-  (§12) and navigation-compose (§3): all three examined, all three kept, with reasons.
-- The *data* lives in the user's separate private GitHub repo; this code repo is public at
-  `github.com/bpineau/finador-android`.
+  the reasoning, with the measured size of the file it would add, is `docs/maintainability.md` §13.
+  What IS pinned: the Gradle distribution's SHA-256 and every dependency version exactly.
+- **`androidx.biometric` cannot be dropped** without raising `minSdk` to 30, a product decision
+  (`docs/maintainability.md` §4). Same for the `@ExperimentalMaterial3Api` opt-ins (§12) and
+  navigation-compose (§3): all three examined, all three kept, with reasons.
+- The *data* lives in a separate private repository; this code repository is public.
 
-## Pointers
+## 9. Definition of done
 
-- Dev environment, release, and the **yearly Android upgrade checklist**: `README.md`
-  (§6 "WHEN ANDROID MOVES" - the order to bump things, the pages to read, the diagnostic path).
-- Dependency ledger and deprecation audit: `docs/maintainability.md`.
-- Format spec (authoritative): `../finador/docs/FORMAT.md`.
-- Go reference: `../finador/internal/{store,domain,portfolio,perf,market}`.
-- Design rationale lives in commit messages (no separate decision log - write commit messages
-  that carry the why).
-- Human setup + run: `README.md`. Common commands: `Makefile` (`make help`).
+Tick every line before saying the work is done.
+
+- [ ] `make test` green: `summary: N tests, 0 failures, 0 errors`.
+- [ ] `make build` green (any change that touches `main`, not only tests).
+- [ ] `make lint` prints `No issues found`, and the compile printed no `w:` deprecation warning.
+- [ ] `make crossimpl` green if anything under `crypto/` or `format/` moved.
+- [ ] No new dependency; or one, with its `docs/maintainability.md` entry written first.
+- [ ] Docs updated in the same commit: this file if an invariant or the architecture moved,
+      `README.md` if a command or the environment moved, `docs/maintainability.md` if a dependency,
+      an opt-in or a deprecation moved.
+- [ ] No secret, no real personal data, no real account or amount added anywhere, including in the
+      commit message.
+- [ ] No typographic dash anywhere in the diff.
+- [ ] Committed to `master` with a message that carries the WHY, and pushed.
+- [ ] No tag created by hand. If a release is wanted, say so and let a human run `make gh-release`
+      (it needs the signing key, which is not in this repo).
+
+## 10. Pointers
+
+- Human setup, running on a phone or emulator, release, and the yearly **WHEN ANDROID MOVES**
+  checklist: `README.md`.
+- Dependency ledger, deprecation audit, opt-in inventory, what upkeep really costs:
+  `docs/maintainability.md`.
+- Format spec, authoritative: `../finador/docs/FORMAT.md`.
+- Go reference implementation: `../finador/internal/{store,domain,portfolio,perf,market}`.
+- Design rationale: commit messages. There is no separate decision log here.
