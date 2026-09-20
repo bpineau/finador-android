@@ -66,8 +66,24 @@ android {
     }
 }
 
+// The JDK the build RUNS on, pinned here instead of inherited from whatever the laptop happens to
+// have on its PATH: Gradle picks an installed JDK 21 for javac, kotlinc and the forked test JVM, so
+// two machines compile the same bytecode. `make doctor` checks that such a JDK exists and
+// `make setup` installs it (Homebrew's `temurin@21`). Auto-provisioning is deliberately OFF (see
+// `gradle.properties`): the only way to turn it on is a third-party resolver plugin that downloads
+// JDKs from a third-party API at build time, which is one more moving part than this project wants
+// for something a package manager already does.
+java {
+    toolchain {
+        languageVersion.set(JavaLanguageVersion.of(21))
+    }
+}
+
 kotlin {
     compilerOptions {
+        // The BYTECODE level, a different question from the JDK above: Android's D8 reads Java 17
+        // class files. Keep it in step with `compileOptions`, or Gradle fails the build with an
+        // inconsistent-JVM-target error.
         jvmTarget.set(JvmTarget.JVM_17)
     }
 }
