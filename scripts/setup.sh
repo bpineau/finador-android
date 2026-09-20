@@ -198,7 +198,7 @@ cat <<EOF
 
 Environment ready. The next command is:
 
-  make test     # 305 unit tests on the host JVM, no device needed
+  make test     # the whole unit suite, on the host JVM, no device needed
 
 If your shell does not export JAVA_HOME/ANDROID_HOME, nothing is broken: every make target
 exports these itself.

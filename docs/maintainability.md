@@ -583,9 +583,12 @@ library in the request path (okhttp), and the ceremony of a hand-built environme
 
 ### Not done, for a later session
 
-1. **Yahoo owes one green `make probe`** from a network Yahoo is not throttling (§6). Everything
-   else the probe covers is green or diagnosed; the hermetic tests cover the same code paths,
-   including the 429 retry and the 401 crumb renewal, so this is a confirmation, not a suspicion.
+1. **Yahoo owes one green `make probe`** from a network Yahoo is not throttling (§6). Two runs on
+   2026-09-20, hours apart, both answered `429` to the very first reachability call, so nothing
+   about Yahoo's payload was observable that day. Everything else the probe covers is green or
+   diagnosed, and the hermetic tests cover the same code paths, including the 429 retry and the
+   401 crumb renewal - so this is a confirmation still owed, not a suspicion. **A release should
+   wait for it.**
 2. **Morningstar's host is gone at the DNS level** (§6). Nothing to do: it is the last link of the
    fallback chain, it degrades cleanly, and Boursorama's ISIN lookup still works. If it never comes
    back, deleting the provider would remove ~120 lines and one of the app's four data sources -
