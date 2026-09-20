@@ -72,9 +72,10 @@ kotlin {
     }
 }
 
-// Forward cross-implementation test properties from the Gradle JVM into the forked test JVM.
+// Forward the opt-in test properties from the Gradle JVM into the forked test JVM: the
+// cross-implementation vectors (scripts/crossimpl.sh) and the live provider probe (`make probe`).
 tasks.withType<Test>().configureEach {
-    listOf("crossimpl.out", "crossimpl.go.file", "crossimpl.go.pw").forEach { key ->
+    listOf("crossimpl.out", "crossimpl.go.file", "crossimpl.go.pw", "probe").forEach { key ->
         System.getProperty(key)?.let { systemProperty(key, it) }
     }
 }
@@ -94,8 +95,6 @@ dependencies {
     implementation(libs.kotlinx.coroutines.android)
     implementation(libs.kotlinx.serialization.json)
     implementation(libs.bouncycastle)
-    implementation(libs.okhttp)
     implementation(libs.androidx.biometric)
     testImplementation(libs.junit)
-    testImplementation(libs.okhttp.mockwebserver)
 }

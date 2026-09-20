@@ -35,7 +35,7 @@ DIST := app/build/dist
 ASSET = $(DIST)/finador-android-v$(VERSION)$(if $(DEBUG_APK),-debug,).apk
 
 .PHONY: help test test-class build install run reinstall release release-apk verify-signature \
-	check-signing smoke-release gh-release gh-release-dry-run lint crossimpl emulator \
+	check-signing smoke-release gh-release gh-release-dry-run lint probe crossimpl emulator \
 	emulator-kill clean
 
 help: ## List available targets
@@ -168,6 +168,10 @@ gh-release-dry-run: ## Everything gh-release does EXCEPT the tag, the push and t
 	@echo "  sha256:   $$(shasum -a 256 "$(ASSET)" | cut -d' ' -f1)"
 	@echo "  upload:   gh release $$(gh release view "v$(VERSION)" >/dev/null 2>&1 && echo 'upload --clobber' || echo create) v$(VERSION) $(ASSET)"
 	@echo "  notes:    $(if $(NOTES),--notes-file $(NOTES),--generate-notes)"
+
+probe: ## Hit the REAL market-data providers over the network and print what came back (not part of `make test`)
+	$(GRADLE) testDebugUnitTest --tests "*LiveProviderProbe*" --rerun-tasks -Dprobe=1 -i \
+	  | grep -E "^probe |FAILED|live providers"
 
 lint: ## Android Lint; report in app/build/reports/lint-results-debug.txt
 	$(GRADLE) lintDebug

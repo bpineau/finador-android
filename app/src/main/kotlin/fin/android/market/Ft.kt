@@ -1,17 +1,13 @@
 package fin.android.market
 
 import fin.android.domain.PricePoint
+import fin.android.net.Http
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.buildJsonArray
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.put
-import okhttp3.HttpUrl.Companion.toHttpUrl
-import okhttp3.MediaType.Companion.toMediaType
-import okhttp3.OkHttpClient
-import okhttp3.Request
-import okhttp3.RequestBody.Companion.toRequestBody
 import java.time.LocalDate
 import java.time.LocalDateTime
 import java.time.format.DateTimeFormatter
@@ -25,7 +21,6 @@ import java.time.temporal.ChronoUnit
  */
 class Ft(
     private val baseUrl: String = "https://markets.ft.com",
-    private val http: OkHttpClient = Http.defaultClient(),
 ) : Provider {
 
     override val name: String = "ft"
@@ -48,9 +43,8 @@ class Ft(
 
     /** Resolves a query (ISIN/ticker/name) through the FT securities search. */
     private fun search(query: String): Resolution? {
-        val url = "$baseUrl/data/searchapi/searchsecurities".toHttpUrl().newBuilder()
-            .addQueryParameter("query", query).build()
-        val body = get(url.toString()) ?: return null
+        val url = Http.url("$baseUrl/data/searchapi/searchsecurities", "query" to query)
+        val body = get(url) ?: return null
         val resp = try {
             json.decodeFromString(SearchResponse.serializer(), body)
         } catch (_: Exception) {
@@ -115,33 +109,17 @@ class Ft(
         return if (parts.size < 2) "" else parts.last()
     }
 
-    private fun get(url: String): String? = execute(Request.Builder().url(url).get())
+    private fun get(url: String): String? = execute(url, "GET", null)
 
-    private fun post(url: String, body: String): String? =
-        execute(Request.Builder().url(url).post(body.toRequestBody(JSON_MEDIA)))
+    private fun post(url: String, body: String): String? = execute(url, "POST", body)
 
     /** Executes with a browser User-Agent and one retry on 429/5xx; null on any IO/HTTP failure. */
-    private fun execute(builder: Request.Builder): String? {
-        repeat(2) { attempt ->
-            try {
-                val req = builder.header("User-Agent", Http.USER_AGENT).header("Accept", "application/json").build()
-                http.newCall(req).execute().use { resp ->
-                    val retriable = resp.code == 429 || resp.code >= 500
-                    if (retriable && attempt == 0) return@repeat
-                    if (resp.code != 200) return null
-                    return resp.body.string()
-                }
-            } catch (_: Exception) {
-                if (attempt == 0) return@repeat
-                return null
-            }
-        }
-        return null
-    }
+    private fun execute(url: String, method: String, body: String?): String? =
+        Http.send(url, method = method, headers = HEADERS, body = body).bodyIf { it == 200 }
 
     companion object {
         private val json = Json { ignoreUnknownKeys = true; encodeDefaults = false }
-        private val JSON_MEDIA = "application/json".toMediaType()
+        private val HEADERS = mapOf("User-Agent" to Http.USER_AGENT, "Accept" to "application/json")
         private val ISO_NO_ZONE: DateTimeFormatter = DateTimeFormatter.ofPattern("yyyy-MM-dd'T'HH:mm:ss")
     }
 }

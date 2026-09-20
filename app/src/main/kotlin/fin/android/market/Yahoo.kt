@@ -3,12 +3,10 @@ package fin.android.market
 import fin.android.domain.DividendEvent
 import fin.android.domain.PricePoint
 import fin.android.domain.PriceSeries
+import fin.android.net.Http
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
-import okhttp3.HttpUrl.Companion.toHttpUrl
-import okhttp3.OkHttpClient
-import okhttp3.Request
 import java.time.Instant
 import java.time.LocalDate
 import java.time.ZoneId
@@ -25,7 +23,6 @@ import java.time.ZoneOffset
  */
 class Yahoo(
     private val baseUrl: String = "https://query1.finance.yahoo.com",
-    private val http: OkHttpClient = Http.defaultClient(),
     private val cookieUrl: String = "https://fc.yahoo.com/",
 ) : Provider {
 
@@ -119,11 +116,12 @@ class Yahoo(
 
     /** The v7 quote call for one chunk, as (HTTP status, body); the body is null on any failure. */
     private fun quoteBody(symbols: List<String>, auth: Auth): Pair<Int, String?> {
-        val url = "$baseUrl/v7/finance/quote".toHttpUrl().newBuilder()
-            .addQueryParameter("symbols", symbols.joinToString(","))
-            .addQueryParameter("crumb", auth.crumb)
-            .build()
-        return fetch(url.toString(), auth.cookie)
+        val url = Http.url(
+            "$baseUrl/v7/finance/quote",
+            "symbols" to symbols.joinToString(","),
+            "crumb" to auth.crumb,
+        )
+        return fetch(url, auth.cookie)
     }
 
     /**
@@ -141,17 +139,11 @@ class Yahoo(
 
     /** Bootstraps Yahoo's consent cookie. The host answers 404 - the cookie is the point, not the body. */
     private fun cookie(): String? {
-        return try {
-            val req = Request.Builder().url(cookieUrl).header("User-Agent", Http.USER_AGENT).get().build()
-            http.newCall(req).execute().use { resp ->
-                resp.headers("Set-Cookie")
-                    .mapNotNull { it.substringBefore(';').takeIf { c -> c.contains('=') } }
-                    .ifEmpty { return null }
-                    .joinToString("; ")
-            }
-        } catch (_: Exception) {
-            null
-        }
+        val resp = Http.send(cookieUrl, headers = mapOf("User-Agent" to Http.USER_AGENT))
+        return resp.header("Set-Cookie")
+            .mapNotNull { it.substringBefore(';').takeIf { c -> c.contains('=') } }
+            .ifEmpty { return null }
+            .joinToString("; ")
     }
 
     /**
@@ -233,13 +225,14 @@ class Yahoo(
     private fun chart(symbol: String, from: LocalDate): ChartResponse? {
         val period1 = from.atStartOfDay(ZoneOffset.UTC).toEpochSecond()
         val period2 = Instant.now().epochSecond + 86400
-        val url = "$baseUrl/v8/finance/chart/$symbol".toHttpUrl().newBuilder()
-            .addQueryParameter("period1", period1.toString())
-            .addQueryParameter("period2", period2.toString())
-            .addQueryParameter("interval", "1d")
-            .addQueryParameter("events", "div")
-            .build()
-        val body = get(url.toString()) ?: return null
+        val url = Http.url(
+            "$baseUrl/v8/finance/chart/${Http.escapePath(symbol)}",
+            "period1" to period1.toString(),
+            "period2" to period2.toString(),
+            "interval" to "1d",
+            "events" to "div",
+        )
+        val body = get(url) ?: return null
         return try {
             json.decodeFromString(ChartResponse.serializer(), body)
         } catch (_: Exception) {
@@ -256,25 +249,12 @@ class Yahoo(
      * status is 0 when the call never got an answer.
      */
     private fun fetch(url: String, cookie: String? = null): Pair<Int, String?> {
-        var status = 0
-        repeat(2) { attempt ->
-            try {
-                val builder = Request.Builder().url(url).header("User-Agent", Http.USER_AGENT).get()
-                if (cookie != null) builder.header("Cookie", cookie)
-                val req = builder.build()
-                http.newCall(req).execute().use { resp ->
-                    status = resp.code
-                    val retriable = resp.code == 429 || resp.code >= 500
-                    if (retriable && attempt == 0) return@repeat
-                    if (resp.code != 200) return status to null
-                    return status to resp.body.string()
-                }
-            } catch (_: Exception) {
-                if (attempt == 0) return@repeat
-                return status to null
-            }
+        val headers = buildMap {
+            put("User-Agent", Http.USER_AGENT)
+            if (cookie != null) put("Cookie", cookie)
         }
-        return status to null
+        val resp = Http.send(url, headers = headers)
+        return resp.code to resp.bodyIf { it == 200 }
     }
 
     companion object {

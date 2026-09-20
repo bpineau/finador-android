@@ -1,9 +1,7 @@
 package fin.android.market
 
-import okhttp3.mockwebserver.Dispatcher
-import okhttp3.mockwebserver.MockResponse
-import okhttp3.mockwebserver.MockWebServer
-import okhttp3.mockwebserver.RecordedRequest
+import fin.android.net.FakeHttpServer
+import fin.android.net.FakeHttpServer.Dispatcher
 import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNotNull
@@ -19,17 +17,17 @@ import java.time.LocalDate
  * live feed win a shared date while the baseline keeps the fund's launch in view.
  */
 class AirfundTest {
-    private lateinit var server: MockWebServer
+    private lateinit var server: FakeHttpServer
     private var status = 201
     private var body = ""
 
     private fun d(s: String) = LocalDate.parse(s)
 
     @Before fun setUp() {
-        server = MockWebServer().also {
-            it.dispatcher = object : Dispatcher() {
-                override fun dispatch(request: RecordedRequest): MockResponse =
-                    MockResponse().setResponseCode(status).setBody(body)
+        server = FakeHttpServer().also {
+            it.dispatcher = object : Dispatcher {
+                override fun dispatch(request: FakeHttpServer.FakeRequest): FakeHttpServer.FakeResponse =
+                    FakeHttpServer.FakeResponse().setResponseCode(status).setBody(body)
             }
             it.start()
         }
@@ -37,7 +35,7 @@ class AirfundTest {
 
     @After fun tearDown() = server.shutdown()
 
-    private fun airfund() = Airfund(baseUrl = server.url("/").toString().trimEnd('/'))
+    private fun airfund() = Airfund(baseUrl = server.url("/").trimEnd('/'))
 
     private val fund = AirfundFunds.byTicker("ERESMONDEM")!!
 
@@ -66,7 +64,7 @@ class AirfundTest {
         assertEquals("POST", req.method)
         assertEquals("/api/v1/navs-evolution-chart/data", req.path)
         assertEquals("application/json; charset=utf-8", req.getHeader("Content-Type"))
-        val sent = req.body.readUtf8()
+        val sent = req.body
         assertTrue(sent, sent.contains("\"isinCode\":\"990000135629\""))
         assertTrue(sent, sent.contains("\"sId\":")) // required: the API answers 500 without it
         assertTrue(sent, sent.contains("\"maxPeriodCode\":\"inception\""))

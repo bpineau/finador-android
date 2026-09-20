@@ -1,12 +1,9 @@
 package fin.android.market
 
 import fin.android.domain.PricePoint
+import fin.android.net.Http
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
-import okhttp3.MediaType.Companion.toMediaType
-import okhttp3.OkHttpClient
-import okhttp3.Request
-import okhttp3.RequestBody.Companion.toRequestBody
 import java.time.LocalDate
 
 /**
@@ -114,7 +111,6 @@ object AirfundFunds {
  */
 class Airfund(
     private val baseUrl: String = "https://core.communicate.airfund.io",
-    private val http: OkHttpClient = Http.defaultClient(),
 ) : Provider {
 
     override val name: String = "airfund"
@@ -137,28 +133,14 @@ class Airfund(
     }
 
     /** POST with a browser User-Agent and one retry on 429/5xx; null on any failure. */
-    private fun post(url: String, payload: String): String? {
-        repeat(2) { attempt ->
-            try {
-                val req = Request.Builder().url(url)
-                    .header("User-Agent", Http.USER_AGENT)
-                    .header("Accept", "application/json")
-                    .post(payload.toRequestBody(JSON_MEDIA))
-                    .build()
-                http.newCall(req).execute().use { resp ->
-                    val retriable = resp.code == 429 || resp.code >= 500
-                    if (retriable && attempt == 0) return@repeat
-                    // This API answers a POST with 201, so the whole 2xx range is a success.
-                    if (resp.code !in 200..299) return null
-                    return resp.body.string()
-                }
-            } catch (_: Exception) {
-                if (attempt == 0) return@repeat
-                return null
-            }
-        }
-        return null
-    }
+    private fun post(url: String, payload: String): String? =
+        Http.send(
+            url,
+            method = "POST",
+            headers = mapOf("User-Agent" to Http.USER_AGENT, "Accept" to "application/json"),
+            body = payload,
+            // This API answers a POST with 201, so the whole 2xx range is a success.
+        ).bodyIf { it in 200..299 }
 
     companion object {
         /** The NAV-history endpoint of the delivery API (POST JSON in, JSON out). */
@@ -171,7 +153,6 @@ class Airfund(
          */
         private const val WIDGET_ID = "41481ca4-919c-46c0-9ca1-41a880ff4e8e"
 
-        private val JSON_MEDIA = "application/json".toMediaType()
         private val json = Json { ignoreUnknownKeys = true; encodeDefaults = true; explicitNulls = true }
 
         /**

@@ -46,7 +46,6 @@ private val ListPadding = androidx.compose.foundation.layout.PaddingValues(16.dp
 /* Portfolio section                                                                              */
 /* ---------------------------------------------------------------------------------------------- */
 
-@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun PortfolioScreen(vm: AppViewModel, ready: AppState.Ready, onAssetClick: (String) -> Unit) {
     Scaffold(topBar = { FinTopBar("finador", ready.refreshing) { vm.syncNow(); vm.refreshQuotes() } }) { padding ->
@@ -106,7 +105,6 @@ fun PortfolioScreen(vm: AppViewModel, ready: AppState.Ready, onAssetClick: (Stri
 /* Gains section                                                                                  */
 /* ---------------------------------------------------------------------------------------------- */
 
-@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun GainsScreen(vm: AppViewModel, ready: AppState.Ready, onAssetClick: (String) -> Unit) {
     Scaffold(topBar = { FinTopBar("Gains", ready.refreshing) { vm.syncNow(); vm.refreshQuotes() } }) { padding ->
