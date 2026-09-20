@@ -1,7 +1,7 @@
 package fin.android.market
 
-import okhttp3.mockwebserver.MockResponse
-import okhttp3.mockwebserver.MockWebServer
+import fin.android.net.FakeHttpServer
+import fin.android.net.Http
 import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
@@ -11,14 +11,14 @@ import org.junit.Test
 import java.time.LocalDate
 
 class YahooTest {
-    private lateinit var server: MockWebServer
+    private lateinit var server: FakeHttpServer
 
-    @Before fun setUp() { server = MockWebServer().also { it.start() } }
+    @Before fun setUp() { server = FakeHttpServer().also { it.start() } }
     @After fun tearDown() { server.shutdown() }
 
     private fun yahoo() = Yahoo(
-        baseUrl = server.url("/").toString().trimEnd('/'),
-        cookieUrl = server.url("/cookie").toString(),
+        baseUrl = server.url("/").trimEnd('/'),
+        cookieUrl = server.url("/cookie"),
     )
 
     // 2024-01-15 00:00 UTC = 1705276800; 2024-01-16 = 1705363200; 2024-03-10 = 1710028800
@@ -32,7 +32,7 @@ class YahooTest {
     """.trimIndent()
 
     @Test fun dailyParsesClosesCurrencyDividends() {
-        server.enqueue(MockResponse().setResponseCode(200).setBody(chartBody))
+        server.enqueue(FakeHttpServer.FakeResponse().setResponseCode(200).setBody(chartBody))
         val data = yahoo().daily(Ref(symbol = "SPY", isin = null), LocalDate.parse("2024-01-01"))!!
         assertEquals("USD", data.currency)
         // null close on the 16th is skipped
@@ -44,9 +44,9 @@ class YahooTest {
         assertEquals(1.25, data.dividends[0].amount, 0.0)
 
         val req = server.takeRequest()
-        assertTrue(req.path!!.startsWith("/v8/finance/chart/SPY?"))
-        assertTrue(req.path!!.contains("interval=1d"))
-        assertTrue(req.path!!.contains("events=div"))
+        assertTrue(req.path.startsWith("/v8/finance/chart/SPY?"))
+        assertTrue(req.path.contains("interval=1d"))
+        assertTrue(req.path.contains("events=div"))
         assertEquals(Http.USER_AGENT, req.getHeader("User-Agent"))
     }
 
@@ -60,7 +60,7 @@ class YahooTest {
               "indicators":{"quote":[{"close":[450.0, 500.0],"open":[445.5, null]}]}
             }],"error":null}}
         """.trimIndent()
-        server.enqueue(MockResponse().setResponseCode(200).setBody(body))
+        server.enqueue(FakeHttpServer.FakeResponse().setResponseCode(200).setBody(body))
         val data = yahoo().daily(Ref(symbol = "SPY", isin = null), LocalDate.parse("2024-01-01"))!!
         assertEquals(1, data.openFactors.size)
         assertEquals(LocalDate.parse("2024-01-15"), data.openFactors[0].date)
@@ -68,7 +68,7 @@ class YahooTest {
     }
 
     @Test fun aPayloadWithoutAnOpenColumnCarriesNoFactor() {
-        server.enqueue(MockResponse().setResponseCode(200).setBody(chartBody))
+        server.enqueue(FakeHttpServer.FakeResponse().setResponseCode(200).setBody(chartBody))
         val data = yahoo().daily(Ref(symbol = "SPY", isin = null), LocalDate.parse("2024-01-01"))!!
         assertTrue(data.openFactors.isEmpty()) // the nowcast then stays anchored on the close
     }
@@ -86,7 +86,7 @@ class YahooTest {
               "indicators":{"quote":[{"close":[0.0, 450.0]}]}
             }],"error":null}}
         """.trimIndent()
-        server.enqueue(MockResponse().setResponseCode(200).setBody(body))
+        server.enqueue(FakeHttpServer.FakeResponse().setResponseCode(200).setBody(body))
         val data = yahoo().daily(Ref(symbol = "SPY", isin = null), LocalDate.parse("2024-01-01"))!!
         assertEquals(1, data.closes.size)
         assertEquals(LocalDate.parse("2024-01-16"), data.closes[0].date)
@@ -101,7 +101,7 @@ class YahooTest {
               "indicators":{"quote":[{"close":[-1.0, 1.085]}]}
             }],"error":null}}
         """.trimIndent()
-        server.enqueue(MockResponse().setResponseCode(200).setBody(body))
+        server.enqueue(FakeHttpServer.FakeResponse().setResponseCode(200).setBody(body))
         val series = yahoo().fxToUsd("EUR", LocalDate.parse("2024-01-01"))!!
         assertEquals(listOf(1.085), series.points.map { it.close })
     }
@@ -119,13 +119,13 @@ class YahooTest {
               "indicators":{"quote":[{"close":[1.085]}]}
             }],"error":null}}
         """.trimIndent()
-        server.enqueue(MockResponse().setResponseCode(200).setBody(fxBody))
+        server.enqueue(FakeHttpServer.FakeResponse().setResponseCode(200).setBody(fxBody))
         val series = yahoo().fxToUsd("EUR", LocalDate.parse("2024-01-01"))!!
         assertEquals(1, series.points.size)
         assertEquals(1.085, series.points[0].close, 0.0)
 
         val req = server.takeRequest()
-        assertTrue(req.path!!.startsWith("/v8/finance/chart/EURUSD%3DX?") || req.path!!.startsWith("/v8/finance/chart/EURUSD=X?"))
+        assertTrue(req.path.startsWith("/v8/finance/chart/EURUSD%3DX?") || req.path.startsWith("/v8/finance/chart/EURUSD=X?"))
     }
 
     /** An FX series holds the USD value of one unit: a cross served in anything else is refused. */
@@ -137,13 +137,13 @@ class YahooTest {
               "indicators":{"quote":[{"close":[0.855]}]}
             }],"error":null}}
         """.trimIndent()
-        server.enqueue(MockResponse().setResponseCode(200).setBody(fxBody))
+        server.enqueue(FakeHttpServer.FakeResponse().setResponseCode(200).setBody(fxBody))
         assertNull(yahoo().fxToUsd("EUR", LocalDate.parse("2024-01-01")))
     }
 
     @Test fun retriesOnceOn500() {
-        server.enqueue(MockResponse().setResponseCode(503))
-        server.enqueue(MockResponse().setResponseCode(200).setBody(chartBody))
+        server.enqueue(FakeHttpServer.FakeResponse().setResponseCode(503))
+        server.enqueue(FakeHttpServer.FakeResponse().setResponseCode(200).setBody(chartBody))
         val data = yahoo().daily(Ref(symbol = "SPY", isin = null), LocalDate.parse("2024-01-01"))!!
         assertEquals(1, data.closes.size)
         assertEquals(2, server.requestCount) // initial 503 + retry
@@ -152,10 +152,10 @@ class YahooTest {
     // The v7 quote API is the only source of an intraday price: the chart's daily bar is what a
     // provider publishes, the quote is what the market is doing. It needs a cookie + crumb pair.
     @Test fun quotesFetchesLivePricesInOneBatchedCall() {
-        server.enqueue(MockResponse().setResponseCode(404).addHeader("Set-Cookie", "A3=ck; Path=/"))
-        server.enqueue(MockResponse().setResponseCode(200).setBody("crumb1"))
+        server.enqueue(FakeHttpServer.FakeResponse().setResponseCode(404).addHeader("Set-Cookie", "A3=ck; Path=/"))
+        server.enqueue(FakeHttpServer.FakeResponse().setResponseCode(200).setBody("crumb1"))
         server.enqueue(
-            MockResponse().setResponseCode(200).setBody(
+            FakeHttpServer.FakeResponse().setResponseCode(200).setBody(
                 """{"quoteResponse":{"result":[
                  {"symbol":"DDOG","currency":"USD","regularMarketPrice":229.29,"regularMarketTime":1785009601},
                  {"symbol":"EURUSD=X","currency":"USD","regularMarketPrice":1.1525,"regularMarketTime":1785011698},
@@ -173,21 +173,21 @@ class YahooTest {
         server.takeRequest() // cookie
         server.takeRequest() // crumb
         val req = server.takeRequest()
-        assertTrue(req.path!!.startsWith("/v7/finance/quote?"))
-        assertTrue(req.path!!.contains("crumb=crumb1"))
+        assertTrue(req.path.startsWith("/v7/finance/quote?"))
+        assertTrue(req.path.contains("crumb=crumb1"))
         assertEquals("A3=ck", req.getHeader("Cookie"))
     }
 
     // An expired crumb answers 401. Renewing the pair once and retrying is what keeps a long-lived
     // install quoting live prices instead of silently sliding back to end-of-day closes.
     @Test fun quotesRenewsStaleCrumbOnce() {
-        server.enqueue(MockResponse().setResponseCode(404).addHeader("Set-Cookie", "A3=old; Path=/"))
-        server.enqueue(MockResponse().setResponseCode(200).setBody("crumb1"))
-        server.enqueue(MockResponse().setResponseCode(401))
-        server.enqueue(MockResponse().setResponseCode(404).addHeader("Set-Cookie", "A3=new; Path=/"))
-        server.enqueue(MockResponse().setResponseCode(200).setBody("crumb2"))
+        server.enqueue(FakeHttpServer.FakeResponse().setResponseCode(404).addHeader("Set-Cookie", "A3=old; Path=/"))
+        server.enqueue(FakeHttpServer.FakeResponse().setResponseCode(200).setBody("crumb1"))
+        server.enqueue(FakeHttpServer.FakeResponse().setResponseCode(401))
+        server.enqueue(FakeHttpServer.FakeResponse().setResponseCode(404).addHeader("Set-Cookie", "A3=new; Path=/"))
+        server.enqueue(FakeHttpServer.FakeResponse().setResponseCode(200).setBody("crumb2"))
         server.enqueue(
-            MockResponse().setResponseCode(200).setBody(
+            FakeHttpServer.FakeResponse().setResponseCode(200).setBody(
                 """{"quoteResponse":{"result":[{"symbol":"DDOG","currency":"USD","regularMarketPrice":229.29,"regularMarketTime":1785009601}]}}""",
             ),
         )
@@ -206,10 +206,10 @@ class YahooTest {
     // A 429 is not an expired crumb. Renewing on it would throw a cookie + crumb + retry at a host
     // that is already throttling, which is how a refresh earns a ban - the very lag this fixes.
     @Test fun quotesDoesNotRenewAuthOnThrottling() {
-        server.enqueue(MockResponse().setResponseCode(404).addHeader("Set-Cookie", "A3=ck; Path=/"))
-        server.enqueue(MockResponse().setResponseCode(200).setBody("crumb1"))
-        server.enqueue(MockResponse().setResponseCode(429)) // first try
-        server.enqueue(MockResponse().setResponseCode(429)) // the one built-in retry
+        server.enqueue(FakeHttpServer.FakeResponse().setResponseCode(404).addHeader("Set-Cookie", "A3=ck; Path=/"))
+        server.enqueue(FakeHttpServer.FakeResponse().setResponseCode(200).setBody("crumb1"))
+        server.enqueue(FakeHttpServer.FakeResponse().setResponseCode(429)) // first try
+        server.enqueue(FakeHttpServer.FakeResponse().setResponseCode(429)) // the one built-in retry
 
         assertTrue(yahoo().quotes(listOf("DDOG")).isEmpty())
         assertEquals(4, server.requestCount) // cookie, crumb, quote, retry - and nothing more
@@ -218,10 +218,10 @@ class YahooTest {
     // A quote with no timestamp is not a quote: dated at the epoch it would splice a 1970 point
     // into the cached series, where nothing ever removes it.
     @Test fun quotesSkipsPricesWithoutTimestamp() {
-        server.enqueue(MockResponse().setResponseCode(404).addHeader("Set-Cookie", "A3=ck; Path=/"))
-        server.enqueue(MockResponse().setResponseCode(200).setBody("crumb1"))
+        server.enqueue(FakeHttpServer.FakeResponse().setResponseCode(404).addHeader("Set-Cookie", "A3=ck; Path=/"))
+        server.enqueue(FakeHttpServer.FakeResponse().setResponseCode(200).setBody("crumb1"))
         server.enqueue(
-            MockResponse().setResponseCode(200).setBody(
+            FakeHttpServer.FakeResponse().setResponseCode(200).setBody(
                 """{"quoteResponse":{"result":[
                  {"symbol":"HALTED","currency":"USD","regularMarketPrice":12.5}]}}""",
             ),
@@ -248,7 +248,7 @@ class YahooTest {
               "indicators":{"quote":[{"close":[12345.0],"open":[12283.275]}]}
             }],"error":null}}
         """.trimIndent()
-        server.enqueue(MockResponse().setResponseCode(200).setBody(body))
+        server.enqueue(FakeHttpServer.FakeResponse().setResponseCode(200).setBody(body))
         val data = yahoo().daily(Ref(symbol = "VOD.L", isin = null), LocalDate.parse("2024-01-01"))!!
         assertEquals("GBP", data.currency)
         assertEquals(123.45, data.closes[0].close, 1e-9)
@@ -287,7 +287,7 @@ class YahooTest {
               "indicators":{"quote":[{"close":[10.0,11.0],"open":[9.9,10.9]}]}
             }],"error":null}}
         """.trimIndent()
-        server.enqueue(MockResponse().setResponseCode(200).setBody(body))
+        server.enqueue(FakeHttpServer.FakeResponse().setResponseCode(200).setBody(body))
         val data = yahoo().daily(Ref(symbol = "NST.AX", isin = null), LocalDate.parse("2026-01-01"))!!
         assertEquals(
             listOf(LocalDate.parse("2026-01-05"), LocalDate.parse("2026-01-06")),
@@ -314,7 +314,7 @@ class YahooTest {
               "indicators":{"quote":[{"close":[100.0]}]}
             }],"error":null}}
         """.trimIndent()
-        server.enqueue(MockResponse().setResponseCode(200).setBody(body))
+        server.enqueue(FakeHttpServer.FakeResponse().setResponseCode(200).setBody(body))
         val data = yahoo().daily(Ref(symbol = "AA", isin = null), LocalDate.parse("2026-01-01"))!!
         assertEquals(LocalDate.parse("2026-01-06"), data.closes[0].date)
     }
@@ -334,7 +334,7 @@ class YahooTest {
               "indicators":{"quote":[{"close":[0.68]}]}
             }],"error":null}}
         """.trimIndent()
-        server.enqueue(MockResponse().setResponseCode(200).setBody(body))
+        server.enqueue(FakeHttpServer.FakeResponse().setResponseCode(200).setBody(body))
         val series = yahoo().fxToUsd("AUD", LocalDate.parse("2026-01-01"))!!
         assertEquals(LocalDate.parse("2026-01-04"), series.points[0].date) // the UTC day, untouched
     }
@@ -348,7 +348,7 @@ class YahooTest {
               "indicators":{"quote":[{"close":[10.0]}]}
             }],"error":null}}
         """.trimIndent()
-        server.enqueue(MockResponse().setResponseCode(200).setBody(body))
+        server.enqueue(FakeHttpServer.FakeResponse().setResponseCode(200).setBody(body))
         val data = yahoo().daily(Ref(symbol = "NST.AX", isin = null), LocalDate.parse("2026-01-01"))!!
         assertEquals(LocalDate.parse("2026-01-04"), data.closes[0].date)
     }
@@ -389,9 +389,9 @@ class YahooTest {
         "regularMarketPrice":126.05,"regularMarketTime":1788968108}"""
 
     private fun serveQuotes(vararg results: String) {
-        server.enqueue(MockResponse().setResponseCode(404).addHeader("Set-Cookie", "A3=ck; Path=/"))
-        server.enqueue(MockResponse().setResponseCode(200).setBody("crumb1"))
-        server.enqueue(MockResponse().setResponseCode(200).setBody(quoteResponse(*results)))
+        server.enqueue(FakeHttpServer.FakeResponse().setResponseCode(404).addHeader("Set-Cookie", "A3=ck; Path=/"))
+        server.enqueue(FakeHttpServer.FakeResponse().setResponseCode(200).setBody("crumb1"))
+        server.enqueue(FakeHttpServer.FakeResponse().setResponseCode(200).setBody(quoteResponse(*results)))
     }
 
     // With the opt-in, the after-hours print is reported apart and says which session it came from;
@@ -422,7 +422,7 @@ class YahooTest {
             Triple("IWDA.AS", iwdaNone, null), // a venue without extended hours serves no such field
         )) {
             server.shutdown() // one server per case: each needs its own auth dance
-            server = MockWebServer().also { it.start() }
+            server = FakeHttpServer().also { it.start() }
             serveQuotes(fixture)
             assertEquals(want, yahoo().quotes(listOf(symbol), extendedHours = true)[symbol]!!.offHours)
         }

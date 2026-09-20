@@ -17,12 +17,6 @@
 -keep class org.bouncycastle.** { *; }
 -dontwarn org.bouncycastle.**
 
-# --- OkHttp / Okio (ship their own rules; silence optional compile-only deps) ---
--dontwarn okhttp3.**
--dontwarn okio.**
--dontwarn org.conscrypt.**
--dontwarn org.openjsse.**
-
 # --- Tink (via androidx.security.crypto / EncryptedSharedPreferences) ---
 # Tink references compile-only Error Prone annotations that aren't on the runtime classpath.
 -dontwarn com.google.errorprone.annotations.**

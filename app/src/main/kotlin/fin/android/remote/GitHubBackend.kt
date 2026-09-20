@@ -1,16 +1,10 @@
 package fin.android.remote
 
 import fin.android.crypto.B64
+import fin.android.net.Http
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
-import okhttp3.HttpUrl.Companion.toHttpUrl
-import okhttp3.MediaType.Companion.toMediaType
-import okhttp3.OkHttpClient
-import okhttp3.Request
-import okhttp3.RequestBody.Companion.toRequestBody
-import java.io.IOException
-import java.util.concurrent.TimeUnit
 
 /**
  * GitHub Contents API transport (pure HTTPS, no `git` binary). Each push is one commit, so the
@@ -25,14 +19,11 @@ class GitHubBackend(
     private val branch: String,
     private val token: String,
     private val baseUrl: String = "https://api.github.com",
-    private val http: OkHttpClient = defaultClient(),
 ) : Backend {
 
     override fun fetch(): Fetched {
-        val url = "$baseUrl/repos/$owner/$repo/contents/$path".toHttpUrl().newBuilder()
-            .addQueryParameter("ref", branch).build()
-        val req = base(Request.Builder().url(url)).get().build()
-        val (code, body) = call(req)
+        val url = Http.url("$baseUrl/repos/$owner/$repo/contents/$path", "ref" to branch)
+        val (code, body) = call(url, "GET", null)
         when (code) {
             200 -> {
                 val r = json.decodeFromString(ContentsResponse.serializer(), body)
@@ -48,10 +39,7 @@ class GitHubBackend(
     override fun push(data: ByteArray, base: Version?, message: String): Version {
         val url = "$baseUrl/repos/$owner/$repo/contents/$path"
         val payload = PutRequest(message = message, content = B64.encode(data), sha = base, branch = branch)
-        val req = base(Request.Builder().url(url))
-            .put(json.encodeToString(PutRequest.serializer(), payload).toRequestBody(JSON_MEDIA))
-            .build()
-        val (code, body) = call(req)
+        val (code, body) = call(url, "PUT", json.encodeToString(PutRequest.serializer(), payload))
         when (code) {
             200, 201 -> return json.decodeFromString(PutResponse.serializer(), body).content.sha
             409, 422 -> throw RemoteError.Conflict()
@@ -62,41 +50,31 @@ class GitHubBackend(
 
     override fun describe(): String = "github:$owner/$repo/$path@$branch"
 
-    private fun base(b: Request.Builder): Request.Builder = b
-        .header("Authorization", "Bearer $token")
-        .header("Accept", "application/vnd.github+json")
-        .header("X-GitHub-Api-Version", "2022-11-28")
-
     /** Executes with one retry on 5xx/429 or IO error; surfaces transport failures as Offline. */
-    private fun call(req: Request): Pair<Int, String> {
-        var last: IOException? = null
-        repeat(2) { attempt ->
-            try {
-                http.newCall(req).execute().use { resp ->
-                    val code = resp.code
-                    if ((code >= 500 || code == 429) && attempt == 0) return@repeat
-                    return code to (resp.body.string())
-                }
-            } catch (e: IOException) {
-                last = e
-                if (attempt == 0) return@repeat
-            }
-        }
-        throw RemoteError.Offline("network error talking to GitHub", last)
+    private fun call(url: String, method: String, body: String?): Pair<Int, String> {
+        val headers = mapOf(
+            "Authorization" to "Bearer $token",
+            "Accept" to "application/vnd.github+json",
+            "X-GitHub-Api-Version" to "2022-11-28",
+        )
+        val resp = Http.send(
+            url,
+            method = method,
+            headers = headers,
+            body = body,
+            // GitHub is the sync path: a phone with no signal must say so quickly rather than
+            // sit on a 15 s connect, which is why this one timeout differs from the providers'.
+            connectTimeoutMs = 8_000,
+        )
+        if (!resp.answered) throw RemoteError.Offline("network error talking to GitHub", resp.failure)
+        return resp.code to resp.body
     }
 
     private fun authMessage(code: Int): String =
         "GitHub token invalid or lacks Contents permission (HTTP $code) - re-login"
 
     companion object {
-        private val JSON_MEDIA = "application/json".toMediaType()
         private val json = Json { ignoreUnknownKeys = true; encodeDefaults = false }
-
-        fun defaultClient(): OkHttpClient = OkHttpClient.Builder()
-            .callTimeout(15, TimeUnit.SECONDS)
-            .connectTimeout(8, TimeUnit.SECONDS)
-            .readTimeout(15, TimeUnit.SECONDS)
-            .build()
     }
 }
 

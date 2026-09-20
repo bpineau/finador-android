@@ -1,7 +1,6 @@
 package fin.android.market
 
-import okhttp3.mockwebserver.MockResponse
-import okhttp3.mockwebserver.MockWebServer
+import fin.android.net.FakeHttpServer
 import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
@@ -11,13 +10,13 @@ import org.junit.Test
 import java.time.LocalDate
 
 class MorningstarTest {
-    private lateinit var server: MockWebServer
+    private lateinit var server: FakeHttpServer
 
-    @Before fun setUp() { server = MockWebServer().also { it.start() } }
+    @Before fun setUp() { server = FakeHttpServer().also { it.start() } }
     @After fun tearDown() { server.shutdown() }
 
     private fun ms(): Morningstar {
-        val url = server.url("/").toString().trimEnd('/')
+        val url = server.url("/").trimEnd('/')
         return Morningstar(base = url, boursoBase = url)
     }
 
@@ -32,8 +31,8 @@ class MorningstarTest {
     private val compactJson = "[[1705276800000,101.5],[1705363200000,-1.0],[1705449600000,103.0]]"
 
     @Test fun dailyResolvesViaBoursoramaThenFetchesNav() {
-        server.enqueue(MockResponse().setResponseCode(200).setBody(boursoHtml))
-        server.enqueue(MockResponse().setResponseCode(200).setBody(compactJson))
+        server.enqueue(FakeHttpServer.FakeResponse().setResponseCode(200).setBody(boursoHtml))
+        server.enqueue(FakeHttpServer.FakeResponse().setResponseCode(200).setBody(compactJson))
 
         val data = ms().daily(Ref(symbol = null, isin = "FR0000000000"), LocalDate.parse("2024-01-01"))!!
         assertNull(data.currency) // Morningstar doesn't disclose currency
@@ -45,14 +44,14 @@ class MorningstarTest {
         assertEquals(103.0, data.closes[1].close, 0.0)
 
         val boursoReq = server.takeRequest()
-        assertTrue(boursoReq.path!!.startsWith("/recherche/ajax?"))
-        assertTrue(boursoReq.path!!.contains("query=FR0000000000"))
+        assertTrue(boursoReq.path.startsWith("/recherche/ajax?"))
+        assertTrue(boursoReq.path.contains("query=FR0000000000"))
         assertEquals("XMLHttpRequest", boursoReq.getHeader("X-Requested-With"))
 
         val navReq = server.takeRequest()
-        assertTrue(navReq.path!!.startsWith("/api/rest.svc/timeseries_price/ok91jeenoo?"))
-        assertTrue(navReq.path!!.contains("id=0P00000ABC"))
-        assertTrue(navReq.path!!.contains("outputType=COMPACTJSON"))
+        assertTrue(navReq.path.startsWith("/api/rest.svc/timeseries_price/ok91jeenoo?"))
+        assertTrue(navReq.path.contains("id=0P00000ABC"))
+        assertTrue(navReq.path.contains("outputType=COMPACTJSON"))
     }
 
     @Test fun noIsinIsNull() {
@@ -61,7 +60,7 @@ class MorningstarTest {
     }
 
     @Test fun boursoramaWithoutIdIsNull() {
-        server.enqueue(MockResponse().setResponseCode(200).setBody("<ul></ul>")) // no 0P… link
+        server.enqueue(FakeHttpServer.FakeResponse().setResponseCode(200).setBody("<ul></ul>")) // no 0P… link
         assertNull(ms().daily(Ref(symbol = null, isin = "FR0000000000"), LocalDate.parse("2024-01-01")))
         assertEquals(1, server.requestCount) // resolution failed → no NAV call
     }

@@ -1,7 +1,6 @@
 package fin.android.market
 
-import okhttp3.mockwebserver.MockResponse
-import okhttp3.mockwebserver.MockWebServer
+import fin.android.net.FakeHttpServer
 import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
@@ -11,12 +10,12 @@ import org.junit.Test
 import java.time.LocalDate
 
 class FtTest {
-    private lateinit var server: MockWebServer
+    private lateinit var server: FakeHttpServer
 
-    @Before fun setUp() { server = MockWebServer().also { it.start() } }
+    @Before fun setUp() { server = FakeHttpServer().also { it.start() } }
     @After fun tearDown() { server.shutdown() }
 
-    private fun ft() = Ft(baseUrl = server.url("/").toString().trimEnd('/'))
+    private fun ft() = Ft(baseUrl = server.url("/").trimEnd('/'))
 
     private val searchBody = """
         {"data":{"security":[
@@ -38,8 +37,8 @@ class FtTest {
     """.trimIndent()
 
     @Test fun dailyResolvesViaSearchThenSeries() {
-        server.enqueue(MockResponse().setResponseCode(200).setBody(searchBody))
-        server.enqueue(MockResponse().setResponseCode(200).setBody(seriesBody))
+        server.enqueue(FakeHttpServer.FakeResponse().setResponseCode(200).setBody(searchBody))
+        server.enqueue(FakeHttpServer.FakeResponse().setResponseCode(200).setBody(seriesBody))
 
         val data = ft().daily(Ref(symbol = null, isin = "LU0171310443"), LocalDate.parse("2024-01-01"))!!
         assertEquals("EUR", data.currency)
@@ -51,13 +50,13 @@ class FtTest {
         assertEquals(103.0, data.closes[1].close, 0.0)
 
         val searchReq = server.takeRequest()
-        assertTrue(searchReq.path!!.startsWith("/data/searchapi/searchsecurities?"))
-        assertTrue(searchReq.path!!.contains("query=LU0171310443"))
+        assertTrue(searchReq.path.startsWith("/data/searchapi/searchsecurities?"))
+        assertTrue(searchReq.path.contains("query=LU0171310443"))
 
         val seriesReq = server.takeRequest()
         assertEquals("POST", seriesReq.method)
         assertEquals("/data/chartapi/series", seriesReq.path)
-        val sent = seriesReq.body.readUtf8()
+        val sent = seriesReq.body
         assertTrue(sent.contains("\"Symbol\":\"123456\"")) // posts the resolved xid
         assertTrue(sent.contains("\"dataPeriod\":\"Day\""))
     }
@@ -69,13 +68,13 @@ class FtTest {
               {"name":"Euro listing","symbol":"BBB:EUR","xid":"222","isPrimary":false}
             ]}}
         """.trimIndent()
-        server.enqueue(MockResponse().setResponseCode(200).setBody(multi))
-        server.enqueue(MockResponse().setResponseCode(200).setBody(seriesBody))
+        server.enqueue(FakeHttpServer.FakeResponse().setResponseCode(200).setBody(multi))
+        server.enqueue(FakeHttpServer.FakeResponse().setResponseCode(200).setBody(seriesBody))
 
         ft().daily(Ref(symbol = null, isin = "X"), LocalDate.parse("2024-01-01"))!!
         server.takeRequest() // search
         val seriesReq = server.takeRequest()
-        assertTrue(seriesReq.body.readUtf8().contains("\"Symbol\":\"222\"")) // picked the EUR xid, not the GBX one
+        assertTrue(seriesReq.body.contains("\"Symbol\":\"222\"")) // picked the EUR xid, not the GBX one
     }
 
     /**
@@ -95,8 +94,8 @@ class FtTest {
               "Elements":[{"Currency":"GBX","ComponentSeries":[{"Type":"Close","Values":[12345.0]}]}]
             }
         """.trimIndent()
-        server.enqueue(MockResponse().setResponseCode(200).setBody(penceOnly))
-        server.enqueue(MockResponse().setResponseCode(200).setBody(pencePrices))
+        server.enqueue(FakeHttpServer.FakeResponse().setResponseCode(200).setBody(penceOnly))
+        server.enqueue(FakeHttpServer.FakeResponse().setResponseCode(200).setBody(pencePrices))
 
         val data = ft().daily(Ref(symbol = null, isin = "GB00B16GWD56"), LocalDate.parse("2024-01-01"))!!
         assertEquals("GBP", data.currency)

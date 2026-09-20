@@ -12,10 +12,8 @@ import fin.android.domain.PriceSeries
 import fin.android.domain.TaxRule
 import fin.android.domain.Tx
 import fin.android.domain.TxKind
-import okhttp3.mockwebserver.Dispatcher
-import okhttp3.mockwebserver.MockResponse
-import okhttp3.mockwebserver.MockWebServer
-import okhttp3.mockwebserver.RecordedRequest
+import fin.android.net.FakeHttpServer
+import fin.android.net.FakeHttpServer.Dispatcher
 import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -30,10 +28,10 @@ import java.time.LocalDate
  * Tests the refresh orchestration of [Quotes]: which instruments are fetched, how new closes and
  * dividends merge into the existing cache, and which FX series are pulled (every currency the book
  * or the display can need, USD excepted). Prices come from a fake provider; FX goes through a
- * [Yahoo] pointed at a MockWebServer.
+ * [Yahoo] pointed at a FakeHttpServer.
  */
 class QuotesTest {
-    private lateinit var server: MockWebServer
+    private lateinit var server: FakeHttpServer
 
     /** Serves a 1-point close series for any `/v8/finance/chart/<CCY>USD=X` FX request. */
     private val fxBody = """
@@ -48,17 +46,17 @@ class QuotesTest {
     private var quoteBody = """{"quoteResponse":{"result":[]}}"""
 
     @Before fun setUp() {
-        server = MockWebServer().also {
-            it.dispatcher = object : Dispatcher() {
-                override fun dispatch(request: RecordedRequest): MockResponse {
-                    val path = request.path.orEmpty()
+        server = FakeHttpServer().also {
+            it.dispatcher = object : Dispatcher {
+                override fun dispatch(request: FakeHttpServer.FakeRequest): FakeHttpServer.FakeResponse {
+                    val path = request.path
                     return when {
                         // The cookie bootstrap: the header is the point, not the body.
                         path.startsWith("/cookie") ->
-                            MockResponse().setResponseCode(404).addHeader("Set-Cookie", "A3=ck; Path=/")
-                        path.startsWith("/v1/test/getcrumb") -> MockResponse().setResponseCode(200).setBody("crumb1")
-                        path.startsWith("/v7/finance/quote") -> MockResponse().setResponseCode(200).setBody(quoteBody)
-                        else -> MockResponse().setResponseCode(200).setBody(fxBody)
+                            FakeHttpServer.FakeResponse().setResponseCode(404).addHeader("Set-Cookie", "A3=ck; Path=/")
+                        path.startsWith("/v1/test/getcrumb") -> FakeHttpServer.FakeResponse().setResponseCode(200).setBody("crumb1")
+                        path.startsWith("/v7/finance/quote") -> FakeHttpServer.FakeResponse().setResponseCode(200).setBody(quoteBody)
+                        else -> FakeHttpServer.FakeResponse().setResponseCode(200).setBody(fxBody)
                     }
                 }
             }
@@ -69,8 +67,8 @@ class QuotesTest {
     @After fun tearDown() { server.shutdown() }
 
     private fun yahoo() = Yahoo(
-        baseUrl = server.url("/").toString().trimEnd('/'),
-        cookieUrl = server.url("/cookie").toString(),
+        baseUrl = server.url("/").trimEnd('/'),
+        cookieUrl = server.url("/cookie"),
     )
 
     /** Provider stub answering every ref with the same closes/dividends. */
@@ -745,7 +743,7 @@ class QuotesTest {
         // The FX requests go to the mock server: the oldest one must reach a week before the
         // record, not the caller's two-year window.
         val periods = generateSequence { server.takeRequest(1, java.util.concurrent.TimeUnit.MILLISECONDS) }
-            .mapNotNull { it.path }
+            .map { it.path }
             .filter { "USD=X" in it }
             .toList()
         assertTrue("no FX request recorded", periods.isNotEmpty())

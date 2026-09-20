@@ -1,13 +1,11 @@
 package fin.android.market
 
 import fin.android.domain.PricePoint
+import fin.android.net.Http
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.double
 import kotlinx.serialization.json.jsonPrimitive
-import okhttp3.HttpUrl.Companion.toHttpUrl
-import okhttp3.OkHttpClient
-import okhttp3.Request
 import java.time.Instant
 import java.time.LocalDate
 import java.time.ZoneOffset
@@ -22,7 +20,6 @@ import java.time.ZoneOffset
 class Morningstar(
     private val base: String = "https://tools.morningstar.fr",
     private val boursoBase: String = "https://www.boursorama.com",
-    private val http: OkHttpClient = Http.defaultClient(),
 ) : Provider {
 
     override val name: String = "morningstar"
@@ -35,22 +32,22 @@ class Morningstar(
 
     /** Queries Boursorama's AJAX search for an ISIN and scrapes the Morningstar "0P…" id. */
     private fun resolveViaBoursorama(isin: String): String? {
-        val url = "$boursoBase/recherche/ajax".toHttpUrl().newBuilder()
-            .addQueryParameter("query", isin).build()
-        val body = get(url.toString(), mapOf("X-Requested-With" to "XMLHttpRequest")) ?: return null
+        val url = Http.url("$boursoBase/recherche/ajax", "query" to isin)
+        val body = get(url, mapOf("X-Requested-With" to "XMLHttpRequest")) ?: return null
         return MS_ID_RE.find(body)?.groupValues?.get(1)
     }
 
     /** Downloads the daily NAV series for a Morningstar id (COMPACTJSON: `[[epochMillis, value], …]`). */
     private fun fetchNav(msID: String, from: LocalDate): DailyData? {
-        val url = "$base/api/rest.svc/timeseries_price/$TOKEN".toHttpUrl().newBuilder()
-            .addQueryParameter("id", msID)
-            .addQueryParameter("idtype", "Morningstar")
-            .addQueryParameter("frequency", "daily")
-            .addQueryParameter("startDate", from.toString())
-            .addQueryParameter("outputType", "COMPACTJSON")
-            .build()
-        val body = get(url.toString(), emptyMap()) ?: return null
+        val url = Http.url(
+            "$base/api/rest.svc/timeseries_price/$TOKEN",
+            "id" to msID,
+            "idtype" to "Morningstar",
+            "frequency" to "daily",
+            "startDate" to from.toString(),
+            "outputType" to "COMPACTJSON",
+        )
+        val body = get(url, emptyMap()) ?: return null
         val rows = try {
             json.decodeFromString(JsonArray.serializer(), body)
         } catch (_: Exception) {
@@ -86,24 +83,9 @@ class Morningstar(
     }
 
     /** GET with a browser User-Agent, the given extra headers, and one retry on 429/5xx; null on failure. */
-    private fun get(url: String, extraHeaders: Map<String, String>): String? {
-        repeat(2) { attempt ->
-            try {
-                val b = Request.Builder().url(url).header("User-Agent", Http.USER_AGENT)
-                for ((k, v) in extraHeaders) b.header(k, v)
-                http.newCall(b.get().build()).execute().use { resp ->
-                    val retriable = resp.code == 429 || resp.code >= 500
-                    if (retriable && attempt == 0) return@repeat
-                    if (resp.code != 200) return null
-                    return resp.body.string()
-                }
-            } catch (_: Exception) {
-                if (attempt == 0) return@repeat
-                return null
-            }
-        }
-        return null
-    }
+    private fun get(url: String, extraHeaders: Map<String, String>): String? =
+        Http.send(url, headers = mapOf("User-Agent" to Http.USER_AGENT) + extraHeaders)
+            .bodyIf { it == 200 }
 
     companion object {
         // Extracts the Morningstar fund id (0P…) from a Boursorama search result fragment.
