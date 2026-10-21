@@ -359,6 +359,71 @@ Each of these cost real debugging once. Symptom, cause, what to do.
 
 ## 8. Known deferred work (intentional, with rationale)
 
+### Pending port from the Go reference (2026-10-21: Go D49, D50, D52, D53, D54, D55)
+
+The Go side now delegates all flow math to pofo v0.2.88 (`metrics.FlowIndex`/`TWR`/`FlowReturns`/
+`Report`); this app still runs the older rules and its numbers differ from the CLI on any sale, any
+empty spell and any ex-date trade. Port these, each with its test, then delete this subsection.
+Go tests named below live in `../finador/internal/{perf,portfolio}/*_test.go`; dates are
+calendar-daily points, `p(date, value)`, flows `f(date, amount)` (+ in, - out).
+
+1. **Flow index (D50, D52), `valuation/Perf.kt`.** Replace the bodies of `twr` and `dailyReturns`
+   with one `flowGrowth(points, flows): (index, live)` that both read, exactly pofo's `flowGrowth`:
+   `byDay` = flows summed per date; `index[0] = 1`, `live[0] = false`,
+   `scale = if (v0 > 0) 1/v0 else 0`; for each `i >= 1` with `v`, `prev`, `F = byDay[date] ?: 0`:
+   if `F == 0 && scale > 0 && v > 0 && prev > 0` then `index[i] = scale*v`, live, next. Else
+   `index[i] = index[i-1]`; money in (`F >= 0`): `num = v, base = prev + F` (start of day); money out
+   (`F < 0`): `num = v - F, base = prev` (at the close); if `base > 0 && (prev > 0 || v > 0)` then
+   `index[i] *= num/base`, live; then `scale = if (v > 0) index[i]/v else 0`.
+   `twr = index.last() - 1`. `dailyReturns`: skip Saturday/Sunday points; each weekday point `i`
+   returns `index[i]/index[last] - 1` from the previous weekday point `last` (starting at 0, moved
+   to `i` whether or not `i` returned), only when `live[i] && index[last] > 0` (a weekend folds
+   into Monday).
+   Cases: whole line sold `p(03-02,1000) p(03-03,1100) p(03-04,0) p(03-05,0)`, `f(03-04,-1050)`:
+   TWR 0.05, 2 daily returns, the second `105/110-1`; half sold `p(..,1000) p(..,1100) p(03-04,525)`,
+   `f(03-04,-525)`: TWR 0.05; cost on an empty scope `p(03-02,1000) p(03-03,0) p(03-04,0)
+   p(03-05,0)`, `f(03-03,-1100) f(03-05,2)`: TWR 0.10, inception gain 98; sold, empty, bought back
+   `p(03-02,1000) p(03-03,0) p(03-04,0) p(03-05,500) p(03-06,550)`, `f(03-03,-1100) f(03-05,500)`:
+   TWR `1.1*1.1-1`, 3 daily returns, drawdown 0. The four existing inflow tests (`0.155`,
+   `317931.29/318100-1`, `0.10`, `0.10`) keep their numbers. Series level (Go
+   `TestSeriesTWRSaneWhenAWholeLineIsSoldOnADownDay`): EUR account, asset closes 03-02 100,
+   03-03 110, 03-04 105, buy 10 for 1000 on 03-02, sell 10 for 1050 on 03-04, book series to 03-06:
+   TWR +5 %, max drawdown `105/110-1`.
+2. **Drawdown on the index (D49), `Perf.compute`/`maxDrawdown`.** Measure `maxDrawdown` on
+   `flowGrowth(...).index`, never on the values. Case: `p(06-01,100) p(06-02,110) p(06-03,55)
+   p(06-04,49.5)`, `f(06-03,-55)`: depth -0.10 (peak 06-03, trough 06-04). The three no-flow
+   drawdown tests keep -0.25, -0.20, -0.5.
+3. **Track record starts at the first holding (D52), `Perf.compute`.** Drop the points before the
+   first non-zero value, and the flows dated at or before the new first point (they are part of its
+   value: they must not reach XIRR or a gain twice); `PerfMetrics.from` and `days` start there.
+   Case (Go `TestReportInceptionIsTheFirstHolding`): 500 zero points from 2025-01-01, then from
+   2026-05-16 sixty-one points `100 + 0.1*i + (i % 3)`, `f(2026-05-16, 100)`, to 2026-07-15: since
+   2026-05-16, 60 days, no CAGR and no risk figures, TWR 0.06.
+4. **Coupons go to the previous close's holders (D53), `SeriesBuilder.build`.** Call
+   `w.applyDividends(d, from.isBefore(d), flows)` BEFORE the day's transaction loop, not after.
+   Case: EUR account, assets `aa`, `bb`, ex-date 03-04 paying 2 and 3; `aa` buy 10 for 1000 on
+   03-02 and buy 5 for 490 on 03-04; `bb` buy 4 for 400 on 03-02 and sell 4 for 388 on 03-04;
+   series 03-01..03-05: coupon flows on 03-04 are -20 (aa) and -12 (bb).
+5. **A manual dividend silences its envelope only (D53), `manualDividendAssets`.** Key it by
+   `(account, asset)` (Go `manualDividendPairs`) and test `(p.accId to p.asset.id)` in
+   `applyDividends`. Case: accounts `cto`, `pea`, asset `vt`, ex 03-04 paying 1, both buy 10 for
+   1000 on 03-02, a manual dividend of 10 in `cto` on 03-10; series 03-01..03-12: exactly one coupon
+   per envelope, -10 on 03-10 (cto) and -10 on 03-04 (pea), total -20.
+6. **Month windows (D54): nothing to port.** `LocalDate.minusMonths` already clamps like EDATE,
+   which Go now matches (`1m` from 2026-03-31 is 2026-02-28, from 2028-03-31 is 2028-02-29, `1y`
+   from 2028-02-29 is 2027-02-28); a test in `Gains` pinning those keeps it so.
+7. **FX crosses dated on their own session (D55), `market/Yahoo.kt` + `CacheSidecar.kt`.** A cross
+   (`...=X`) still reads its bars on the UTC calendar, a session off every winter day and every
+   summer Friday. Port pofo's `crossSessionDay`: read the timestamp in `exchangeTimezoneName`
+   (Europe/London when absent); a bar stamped exactly 00:00:00 local on or after 2010-08-04 holds
+   the PREVIOUS weekday's close (step back one day, then past Saturday and Sunday); before that date,
+   or at any other instant (the live quote), keep the local date. Cases (London stamps -> date):
+   2009-06-01 00:00 -> 2009-06-01; 2024-03-28 00:00 -> 03-27; 2024-04-01 00:00 -> 03-29;
+   2024-04-02 00:00 -> 04-01; 2024-10-28 00:00 -> 10-25; 2024-10-29 00:00 -> 10-28; 2024-10-30
+   02:11 -> 10-30; no point ever on a weekend. Then bump `CacheSidecar.MAGIC` to `FINCACHE3` (AAD
+   too, and `CacheSidecarTest`): an older sidecar is ignored and rebuilt, the only way the misdated
+   points already cached get rewritten (FORMAT.md §7: each implementation versions its own sidecar).
+
 - **Holdings replay is implemented twice**: `valuation/Valuator.kt` (full fold) and
   `valuation/Perf.kt`'s `SeriesBuilder` (day-walk). Extracting the shared per-transaction transition
   would remove drift risk but touches parity-tested numbers: do it under the full suite. Until then
