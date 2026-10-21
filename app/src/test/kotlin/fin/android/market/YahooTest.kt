@@ -9,6 +9,8 @@ import org.junit.Assert.assertTrue
 import org.junit.Before
 import org.junit.Test
 import java.time.LocalDate
+import java.time.ZoneId
+import java.time.ZonedDateTime
 
 class YahooTest {
     private lateinit var server: FakeHttpServer
@@ -345,23 +347,64 @@ class YahooTest {
     }
 
     /**
-     * A currency cross has no exchange and no trading day, and the zone Yahoo attaches to one is
-     * decorative. It stays on the UTC calendar its whole history was built on: re-dating it would
-     * move a point onto a day the series already holds, and the later value would overwrite the
-     * earlier one - a lost session, worse than a misplaced one.
+     * Mirrors pofo's TestCurrencyCrossDatedOnTheSessionItCloses (Go D55). Yahoo stamps every daily
+     * bar of a cross at MIDNIGHT LONDON, and since 2010-08-04 the bar's close is the rate at that
+     * instant, the end of the PREVIOUS session: the bar stamped Monday 00:00 is Friday's close, on
+     * either side of a clock change. Before the switch a bar carried its own day's rate. A bar
+     * stamped at any other instant is the live quote and keeps its day. The UTC dating put the
+     * whole of winter a day late and, in summer, dated Monday's bar on a Sunday and left Friday
+     * empty.
      */
-    @Test fun aCurrencyCrossIsNeverRedatedByTimeZone() {
-        // The same Sydney-evening instant, this time on a cross Yahoo tags with a venue zone.
+    @Test fun aCurrencyCrossIsDatedOnTheSessionItCloses() {
+        fun at(y: Int, m: Int, d: Int, hh: Int, mm: Int) =
+            ZonedDateTime.of(y, m, d, hh, mm, 0, 0, ZoneId.of("Europe/London")).toEpochSecond()
+        val bars = listOf(
+            // Before the switch: the bar is its own day, summer time or not.
+            Triple(at(2009, 6, 1, 0, 0), 1.41, "2009-06-01"), // Monday, BST: used to land on Sunday
+            Triple(at(2009, 6, 5, 0, 0), 1.42, "2009-06-05"),
+            // After it, across the March clock change (GMT -> BST on 2024-03-31).
+            Triple(at(2024, 3, 28, 0, 0), 1.0830, "2024-03-27"),
+            Triple(at(2024, 3, 29, 0, 0), 1.0790, "2024-03-28"),
+            Triple(at(2024, 4, 1, 0, 0), 1.0786, "2024-03-29"), // Monday's bar is Friday's close
+            Triple(at(2024, 4, 2, 0, 0), 1.0740, "2024-04-01"),
+            // And across the October one (BST -> GMT on 2024-10-27).
+            Triple(at(2024, 10, 24, 0, 0), 1.0781, "2024-10-23"),
+            Triple(at(2024, 10, 25, 0, 0), 1.0824, "2024-10-24"),
+            Triple(at(2024, 10, 28, 0, 0), 1.0797, "2024-10-25"),
+            Triple(at(2024, 10, 29, 0, 0), 1.0817, "2024-10-28"),
+            // The live quote, stamped when it was taken: its own day.
+            Triple(at(2024, 10, 30, 2, 11), 1.0821, "2024-10-30"),
+        )
         val body = """
             {"chart":{"result":[{
-              "meta":{"currency":"USD","exchangeTimezoneName":"Australia/Sydney"},
-              "timestamp":[1767567600],
-              "indicators":{"quote":[{"close":[0.68]}]}
+              "meta":{"currency":"USD","exchangeTimezoneName":"Europe/London"},
+              "timestamp":[${bars.joinToString(",") { it.first.toString() }}],
+              "indicators":{"quote":[{"close":[${bars.joinToString(",") { it.second.toString() }}]}]}
             }],"error":null}}
         """.trimIndent()
         server.enqueue(FakeHttpServer.FakeResponse().setResponseCode(200).setBody(body))
-        val series = yahoo().fxToUsd("AUD", LocalDate.parse("2026-01-01"))!!
-        assertEquals(LocalDate.parse("2026-01-04"), series.points[0].date) // the UTC day, untouched
+        val series = yahoo().fxToUsd("EUR", LocalDate.parse("2009-01-01"))!!
+        assertEquals("a cross must keep every bar", bars.size, series.points.size)
+        for ((i, p) in series.points.withIndex()) {
+            assertEquals(LocalDate.parse(bars[i].third), p.date)
+            assertEquals(bars[i].second, p.close, 0.0)
+            assertTrue("a cross point dated on a weekend: ${p.date}", p.date.dayOfWeek.value <= 5)
+        }
+    }
+
+    /** A cross whose payload names no zone is read on London's clock, where Yahoo stamps it. */
+    @Test fun aCrossWithNoZoneIsReadInLondon() {
+        // 1711926000 = Mon 2024-04-01 00:00 London (BST) = Sun 2024-03-31 23:00 UTC.
+        val body = """
+            {"chart":{"result":[{
+              "meta":{"currency":"USD"},
+              "timestamp":[1711926000],
+              "indicators":{"quote":[{"close":[1.0786]}]}
+            }],"error":null}}
+        """.trimIndent()
+        server.enqueue(FakeHttpServer.FakeResponse().setResponseCode(200).setBody(body))
+        val series = yahoo().fxToUsd("EUR", LocalDate.parse("2024-01-01"))!!
+        assertEquals(LocalDate.parse("2024-03-29"), series.points[0].date) // Friday's close
     }
 
     /** An unknown or absent zone name leaves the UTC reading exactly as it was. */

@@ -17,20 +17,23 @@ import java.util.zip.GZIPInputStream
 import java.util.zip.GZIPOutputStream
 
 /**
- * The encrypted market-quote sidecar (FINCACHE2, FORMAT.md §7). On-disk layout:
+ * The encrypted market-quote sidecar (FINCACHE3, FORMAT.md §7). On-disk layout:
  *
  * ```
- * "FINCACHE2"(9 ascii) ‖ nonce[12] ‖ AES-256-GCM( gzip( JSON(MarketData) ), AAD="FINCACHE2" )
+ * "FINCACHE3"(9 ascii) ‖ nonce[12] ‖ AES-256-GCM( gzip( JSON(MarketData) ), AAD="FINCACHE3" )
  * ```
  *
  * The cache is fully regenerable: a missing, unreadable or wrong-magic file is never an error -
- * [read] returns null and a refresh rebuilds it. The JSON shape matches the Go implementation byte
+ * [read] returns null and a refresh rebuilds it. The magic is also the cache's VERSION: bumping it
+ * is how a correction to already-fetched quotes reaches a cache that incremental refreshes would
+ * never rewrite. FINCACHE2 sidecars hold Yahoo currency crosses dated on the UTC calendar, a session
+ * off (fixed by [VenueDay.crossDateOf], Go D55), so they are ignored and rebuilt once. The JSON shape matches the Go implementation byte
  * for byte (`{"d","c"}` points, `{"exDate","amount"}` dividends, dates as civil-day `YYYY-MM-DD`
  * strings) so a ledger's cache is portable across implementations. The Android cacheDir wiring is
  * kept out of this object: callers pass a [File], which keeps it host-JVM testable.
  */
 object CacheSidecar {
-    private const val MAGIC = "FINCACHE2"
+    private const val MAGIC = "FINCACHE3"
     private val MAGIC_BYTES = MAGIC.toByteArray(Charsets.US_ASCII)
     private val json = Json { ignoreUnknownKeys = true; encodeDefaults = false }
 
@@ -55,7 +58,7 @@ object CacheSidecar {
     }
 
     /**
-     * Encrypts [data] under [keyCache] and writes it to [file] in FINCACHE2 format.
+     * Encrypts [data] under [keyCache] and writes it to [file] in FINCACHE3 format.
      *
      * Nowcast tails are dropped first ([MarketData.withoutEstimates]): the cache is the app's record
      * of what a source published, and it is shared byte for byte with the Go implementation, which

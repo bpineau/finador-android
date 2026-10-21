@@ -18,7 +18,8 @@ import java.time.ZoneOffset
  *
  * Timezone note: a daily bar carries an instant of the session, not a date, so it is dated in the
  * venue's own zone ([VenueDay], off the payload's `exchangeTimezoneName`) and never in UTC, which
- * would put half of every Australian history one day early. Quote units are normalized the same
+ * would put half of every Australian history one day early; a currency cross's bar, stamped at
+ * midnight London, is dated on the session whose close it holds ([VenueDay.crossDateOf]). Quote units are normalized the same
  * way, at this boundary: a London line comes back in PENCE, labelled `GBp` ([Units]).
  */
 class Yahoo(
@@ -43,7 +44,7 @@ class Yahoo(
         return Units.normalize(
             DailyData(
                 currency = r.meta?.currency,
-                closes = closesOf(r, zone),
+                closes = closesOf(r, VenueDay.barDay(symbol, r.meta?.exchangeTimezoneName)),
                 dividends = dividends,
                 openFactors = openFactorsOf(r, zone),
             ),
@@ -158,10 +159,10 @@ class Yahoo(
         val r = chart(symbol, from)?.chart?.result?.firstOrNull() ?: return null
         val quoted = r.meta?.currency
         if (!Units.same(quoted, "USD")) return null
-        // A cross stays on the UTC calendar ([VenueDay.zoneOf]); the sub-unit rescaling is here for
-        // form only, a cross never being quoted in one.
+        // A cross bar is dated on the session whose close it holds ([VenueDay.crossDateOf]); the
+        // sub-unit rescaling is here for form only, a cross never being quoted in one.
         val data = Units.normalize(
-            DailyData(currency = quoted, closes = closesOf(r, VenueDay.zoneOf(symbol, r.meta?.exchangeTimezoneName))),
+            DailyData(currency = quoted, closes = closesOf(r, VenueDay.barDay(symbol, r.meta?.exchangeTimezoneName))),
         )
         if (data.closes.isEmpty()) return null
         return PriceSeries(data.closes)
@@ -172,16 +173,17 @@ class Yahoo(
      * one: a null (a holiday) and a non-positive number alike. A zero close is served on halted and
      * freshly listed lines, and it is not a price - stored, it would show a held position as worth
      * nothing, and on an FX series every conversion crossing that currency would divide by it (the
-     * same rule as the live quotes' own `price <= 0` guard, and as [Converter]'s).
+     * same rule as the live quotes' own `price <= 0` guard, and as [Converter]'s). [dayOf] dates a
+     * bar's timestamp ([VenueDay.barDay]).
      */
-    private fun closesOf(r: ChartResponse.Result, zone: ZoneId?): List<PricePoint> {
+    private fun closesOf(r: ChartResponse.Result, dayOf: (Long) -> LocalDate): List<PricePoint> {
         val quoteCloses = r.indicators?.quote?.firstOrNull()?.close ?: return emptyList()
         val timestamps = r.timestamp ?: return emptyList()
         val closes = mutableListOf<PricePoint>()
         for (i in timestamps.indices) {
             if (i >= quoteCloses.size) break
             val c = quoteCloses[i]?.takeIf { it > 0 } ?: continue // holiday, or no usable close
-            val day = VenueDay.dateOf(timestamps[i], zone)
+            val day = dayOf(timestamps[i])
             // Yahoo sometimes repeats the running day; keep the latest value (mirrors Go).
             if (closes.isNotEmpty() && closes.last().date == day) {
                 closes[closes.size - 1] = PricePoint(day, c)
@@ -189,6 +191,8 @@ class Yahoo(
             }
             closes.add(PricePoint(day, c))
         }
+        // A cross bar dated one session back can fall behind the point before it; pofo sorts too.
+        closes.sortBy { it.date }
         return closes
     }
 

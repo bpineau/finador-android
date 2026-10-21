@@ -195,7 +195,7 @@ makes them testable on the host JVM in a second.
 | `crypto/` | Argon2, Hkdf, AesGcm, Hashes, Bytes, Ids | KDF, AEAD, base64, Crockford ids | yes |
 | `domain/` | Models, Money, MarketData | data model (BigDecimal money, enums, Book) | yes |
 | `format/` | Header, Kdf, Wire, Log, Replay, Writer, Merge, Ledger | read/write the `.fin` (AAD-chained records, fold, diff-on-save, union + LWW merge) | yes |
-| `market/` | Yahoo, Ft, Morningstar, Airfund, Nowcast, Session, Units, VenueDay, MultiSource, Converter, FxRates, CacheSidecar, Quotes, Source | fetch quotes (JSON everywhere), FX via USD, FINCACHE2 cache. See the sub-table below | yes |
+| `market/` | Yahoo, Ft, Morningstar, Airfund, Nowcast, Session, Units, VenueDay, MultiSource, Converter, FxRates, CacheSidecar, Quotes, Source | fetch quotes (JSON everywhere), FX via USD, FINCACHE3 cache. See the sub-table below | yes |
 | `valuation/` | Valuator, Perf, Gains | gross/tax/net, TWR/XIRR, period and per-asset gains, asset detail | yes |
 | `storage/` | AtomicFile | the one way a file is replaced: tmp + fsync + rename (+ `.bak`) | yes |
 | `net/` | Http, Tls (+ `FakeHttpServer` in tests) | the whole HTTP stack: `url`/`escape`, `send` (headers, JSON body, timeouts, ONE retry on 429/5xx/no answer), `Response`. Platform `HttpURLConnection` only; `Tls` narrows the offered cipher suites so a provider's anti-bot edge does not read the handshake as a robot's | yes |
@@ -211,7 +211,7 @@ Inside `market/`, the pieces that are not obvious:
 | `Nowcast` | the estimated tail such a fund needs between its last published NAV and today, read off a listed proxy and anchored on the print that NAV was struck on (`AirfundFund.navAnchor`: the proxy's close by default, its OPEN for a fund valued at its holding's opening price, as `ERES_DATADOG` is) |
 | `Session` + `Quotes.refreshExtended` | the extended-hours opt-in (Settings -> Display, off by default), parity with the Go `value --extended`: a US pre/post-market print prices the line, the total and every figure shown beside them when it is fresher than the regular one, labelled `pre 08:14` / `post 19:59`, never stored, and EXPIRING (`Session.stillCurrent`, New York clock, weekends skipped) against `AppRepository`'s injectable clock |
 | `Units` | the venue SUB-UNITS (`GBp`/`GBX` pence, `ZAc`, `ILA`, `USX`) a provider reports where a currency is expected; removed where the numbers enter the app, folded by `Units.same` in every currency comparison |
-| `VenueDay` | which calendar day a bar or print belongs to, read in the venue's own zone (`exchangeTimezoneName`), forward only, a currency cross exempt |
+| `VenueDay` | which calendar day a bar or print belongs to, read in the venue's own zone (`exchangeTimezoneName`), forward only; a currency cross's bar on the session whose close it holds (`crossDateOf`) |
 | `FxRates` | display-only read-back of the rates a valuation crossed at (`AppState.Ready.fxRates`, a caption under the total) |
 
 `valuation/` detail worth knowing: `priceOverrides` (an off-hours print) reaches `Valuator.value`,
@@ -264,7 +264,7 @@ Each of these cost real debugging once. Symptom, cause, what to do.
   fund published with a lag gets a nowcast tail (`market/Nowcast.kt`) flagged by
   `PriceSeries.estimatedFrom` / `estimateProxy`, recomputed at every refresh: `Quotes.refresh` strips
   the previous run's tail before merging, and `CacheSidecar.write` strips it again on the way to disk
-  (which also keeps the FINCACHE2 JSON byte-compatible with Go, whose DTO has no such field).
+  (which also keeps the FINCACHE3 JSON byte-compatible with Go, whose DTO has no such field).
   Anything DISPLAYING an estimate must say it is one, as `AssetDetailScreen` does. Proxies are
   fetched even when the user holds none of them, cached under `proxy:<SYMBOL>` in
   `MarketData.prices`; no ledger id can collide, those are Crockford base32.
@@ -311,14 +311,18 @@ Each of these cost real debugging once. Symptom, cause, what to do.
   a date. Truncated in UTC, a Sydney bar lands a day early (10:00 local = 23:00 UTC the day before in
   summer), and every date-matched join quietly misses: the previous close a day change reads, the FX
   rate of the day, the canary's overlap day. `market/VenueDay.kt` (Go's `sessionDay`) reads the day in
-  the venue's own zone, FORWARD ONLY (a UTC reading is never late, only early); a currency cross is
-  exempt, its Yahoo dating carries a separate known weekend anomaly a time zone would hide.
+  the venue's own zone, FORWARD ONLY (a UTC reading is never late, only early). A currency cross
+  has no venue: Yahoo stamps its bar at midnight London and, since 2010-08-04, that bar holds the
+  PREVIOUS session's close, so `VenueDay.crossDateOf` (pofo's `crossSessionDay`, Go D55) dates it
+  one weekday back (Monday's bar is Friday's close). Read in UTC it was a day late all winter and,
+  in summer, Monday's bar sat on a Sunday and Friday had none. Fixing it bumped the sidecar to
+  FINCACHE3, the one way already-cached points get rewritten.
 - **The app can never open its ledger again.** A file was replaced non-atomically. `File.writeBytes`
   truncates first and Android kills backgrounded processes whenever it wants memory, so the plain
   call leaves a short file often enough to matter, and a short `.fin` authenticates as nothing while
   the dirty guard forbids pulling over it: a permanent brick. Every persisted file goes through
   `storage/AtomicFile.kt` (tmp + fsync + rename + `.bak`, mirroring Go's `atomicWrite`): the working
-  copy, the sync state, the FINCACHE2 sidecar. Two consequences in `remote/Sync.kt`: an unreadable
+  copy, the sync state, the FINCACHE3 sidecar. Two consequences in `remote/Sync.kt`: an unreadable
   state file reads as `dirty = true` (never as "nothing to push", which would let a pull overwrite
   unpushed records), and `openForRead` falls back to the `.bak`, promotes it and marks it dirty so
   the next sync MERGES it.
@@ -358,26 +362,6 @@ Each of these cost real debugging once. Symptom, cause, what to do.
   single native library.
 
 ## 8. Known deferred work (intentional, with rationale)
-
-### Pending port from the Go reference (2026-10-21: Go D49, D50, D52, D53, D54, D55)
-
-The Go side now delegates all flow math to pofo v0.2.88 (`metrics.FlowIndex`/`TWR`/`FlowReturns`/
-`Report`); this app still runs the older rules and its numbers differ from the CLI on any sale, any
-empty spell and any ex-date trade. Port these, each with its test, then delete this subsection.
-Go tests named below live in `../finador/internal/{perf,portfolio}/*_test.go`; dates are
-calendar-daily points, `p(date, value)`, flows `f(date, amount)` (+ in, - out).
-
-7. **FX crosses dated on their own session (D55), `market/Yahoo.kt` + `CacheSidecar.kt`.** A cross
-   (`...=X`) still reads its bars on the UTC calendar, a session off every winter day and every
-   summer Friday. Port pofo's `crossSessionDay`: read the timestamp in `exchangeTimezoneName`
-   (Europe/London when absent); a bar stamped exactly 00:00:00 local on or after 2010-08-04 holds
-   the PREVIOUS weekday's close (step back one day, then past Saturday and Sunday); before that date,
-   or at any other instant (the live quote), keep the local date. Cases (London stamps -> date):
-   2009-06-01 00:00 -> 2009-06-01; 2024-03-28 00:00 -> 03-27; 2024-04-01 00:00 -> 03-29;
-   2024-04-02 00:00 -> 04-01; 2024-10-28 00:00 -> 10-25; 2024-10-29 00:00 -> 10-28; 2024-10-30
-   02:11 -> 10-30; no point ever on a weekend. Then bump `CacheSidecar.MAGIC` to `FINCACHE3` (AAD
-   too, and `CacheSidecarTest`): an older sidecar is ignored and rebuilt, the only way the misdated
-   points already cached get rewritten (FORMAT.md §7: each implementation versions its own sidecar).
 
 - **Holdings replay is implemented twice**: `valuation/Valuator.kt` (full fold) and
   `valuation/Perf.kt`'s `SeriesBuilder` (day-walk). Extracting the shared per-transaction transition

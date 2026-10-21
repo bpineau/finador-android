@@ -1,5 +1,6 @@
 package fin.android.market
 
+import fin.android.crypto.AesGcm
 import fin.android.domain.DividendEvent
 import fin.android.domain.MarketData
 import fin.android.domain.PricePoint
@@ -10,8 +11,10 @@ import org.junit.Assert.assertTrue
 import org.junit.Rule
 import org.junit.Test
 import org.junit.rules.TemporaryFolder
+import java.io.ByteArrayOutputStream
 import java.io.File
 import java.time.LocalDate
+import java.util.zip.GZIPOutputStream
 
 class CacheSidecarTest {
     @get:Rule val tmp = TemporaryFolder()
@@ -73,7 +76,23 @@ class CacheSidecarTest {
         val f = tmp.newFile("magic.cache")
         CacheSidecar.write(f, keyCache, data)
         val raw = f.readBytes()
-        assertEquals("FINCACHE2", String(raw.copyOfRange(0, 9), Charsets.US_ASCII))
+        assertEquals("FINCACHE3", String(raw.copyOfRange(0, 9), Charsets.US_ASCII))
+    }
+
+    /**
+     * The magic is the cache's version (FORMAT.md §7, Go D55): a well-formed FINCACHE2 sidecar holds
+     * currency crosses dated on the UTC calendar, a session off, which incremental refreshes never
+     * rewrite. It is ignored like a missing file, and the next refresh rebuilds every series.
+     */
+    @Test fun aFincache2SidecarIsIgnored() {
+        val f = tmp.newFile("v2.cache")
+        val magic = "FINCACHE2".toByteArray(Charsets.US_ASCII)
+        val jsonBytes = """{"fx":{"EUR":{"points":[{"d":"2024-01-20","c":1.08}]}}}""".toByteArray(Charsets.UTF_8)
+        val gz = ByteArrayOutputStream()
+        GZIPOutputStream(gz).use { it.write(jsonBytes) }
+        val nonce = ByteArray(AesGcm.NONCE_LEN) { 7 }
+        f.writeBytes(magic + nonce + AesGcm.seal(keyCache, nonce, gz.toByteArray(), magic))
+        assertNull(CacheSidecar.read(f, keyCache))
     }
 
     @Test fun garbageReturnsNull() {
