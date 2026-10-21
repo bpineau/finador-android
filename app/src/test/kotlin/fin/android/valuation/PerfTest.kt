@@ -446,6 +446,36 @@ class PerfTest {
     }
 
     /**
+     * Go TestSeriesAutoDividendGoesToThePreviousCloseHolders (D53): the dividend of an ex-date
+     * belongs to the shares held at the previous close. A share bought ON the ex-date is bought
+     * without its coupon, and a share sold that day still collects it. `aa`: 10 held the day
+     * before, 5 more bought on the ex-date, so 10 x 2; `bb`: 4 held, all sold on the ex-date, so
+     * 4 x 3.
+     */
+    @Test fun autoDividendGoesToThePreviousCloseHolders() {
+        nextSeq = 0
+        val accounts = mapOf("cto" to Account("cto", "CTO Meridia", "EUR", TaxRule.None))
+        val assets = mapOf(
+            "aa" to Asset("aa", AssetKind.SECURITY, "aa", ccy = "EUR", group = "g"),
+            "bb" to Asset("bb", AssetKind.SECURITY, "bb", ccy = "EUR", group = "g"),
+        )
+        val txs = listOf(
+            tx("2026-03-02", "cto", "aa", TxKind.buy, "10", eur("1000")),
+            tx("2026-03-04", "cto", "aa", TxKind.buy, "5", eur("490")),
+            tx("2026-03-02", "cto", "bb", TxKind.buy, "4", eur("400")),
+            tx("2026-03-04", "cto", "bb", TxKind.sell, "4", eur("388")),
+        ).associateBy { it.id }
+        val book = Book(accounts = accounts, assets = assets, txs = txs, config = mapOf("currency" to "EUR"))
+        val ex = d("2026-03-04")
+        val market = MarketData(
+            dividends = mapOf("aa" to listOf(DividendEvent(ex, 2.0)), "bb" to listOf(DividendEvent(ex, 3.0))),
+        )
+        val series = SeriesBuilder(book, market, "EUR").build(d("2026-03-01"), d("2026-03-05"))
+        val coupons = series.flows.filter { it.date == ex && it.amount < 0 && it.amount > -50 }.map { it.amount }
+        assertEquals(listOf(-20.0, -12.0), coupons.sorted()) // aa 10 x 2, bb 4 x 3
+    }
+
+    /**
      * A fee whose (account, asset) pair does not resolve - a custody or account charge naming no
      * asset, or an orphaned reference left behind by an asset-del - belongs to the ENVELOPE: it is
      * capital that entered and bought nothing, and it weighs on the whole account (Go `series.go`

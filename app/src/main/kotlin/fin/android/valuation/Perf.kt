@@ -409,7 +409,12 @@ internal class SeriesBuilder(
         var ti = 0
         var d = from
         while (!d.isAfter(to)) {
-            // Apply every transaction up to and including day d, one calendar day at a time
+            // The ex-date's coupons first: a dividend belongs to the shares held at the PREVIOUS
+            // close, so a share bought on the ex-date (without its coupon) collects none and a
+            // share sold that day still collects it (Go D53). On `from` itself nothing is
+            // collected, so the records dated before it need not be replayed yet.
+            w.applyDividends(d, from.isBefore(d), flows)
+            // Then every transaction up to and including day d, one calendar day at a time
             // (applyDay owns the order inside a day). Transactions strictly after `from` are
             // collected as flows.
             while (ti < txs.size && !d.isBefore(txs[ti].date)) {
@@ -418,7 +423,6 @@ internal class SeriesBuilder(
                 while (ti < txs.size && txs[ti].date == day) ti++
                 w.applyDay(txs.subList(start, ti), from.isBefore(day), flows)
             }
-            w.applyDividends(d, from.isBefore(d), flows)
             points += PricePoint(d, w.valueAt(d))
             d = d.plusDays(1)
         }

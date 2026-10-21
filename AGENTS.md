@@ -367,11 +367,6 @@ empty spell and any ex-date trade. Port these, each with its test, then delete t
 Go tests named below live in `../finador/internal/{perf,portfolio}/*_test.go`; dates are
 calendar-daily points, `p(date, value)`, flows `f(date, amount)` (+ in, - out).
 
-4. **Coupons go to the previous close's holders (D53), `SeriesBuilder.build`.** Call
-   `w.applyDividends(d, from.isBefore(d), flows)` BEFORE the day's transaction loop, not after.
-   Case: EUR account, assets `aa`, `bb`, ex-date 03-04 paying 2 and 3; `aa` buy 10 for 1000 on
-   03-02 and buy 5 for 490 on 03-04; `bb` buy 4 for 400 on 03-02 and sell 4 for 388 on 03-04;
-   series 03-01..03-05: coupon flows on 03-04 are -20 (aa) and -12 (bb).
 5. **A manual dividend silences its envelope only (D53), `manualDividendAssets`.** Key it by
    `(account, asset)` (Go `manualDividendPairs`) and test `(p.accId to p.asset.id)` in
    `applyDividends`. Case: accounts `cto`, `pea`, asset `vt`, ex 03-04 paying 1, both buy 10 for
