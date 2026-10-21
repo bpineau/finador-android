@@ -635,15 +635,45 @@ class PerfTest {
     }
 
     /**
-     * Window starting before any holding (V0 = 0): XIRR is undefined (needs a
-     * positive opening value), the rest of the metrics still compute. Mirrors the
-     * realistic guard in `periodRow` (pts[0].Value > 0).
+     * Go TestReportInceptionIsTheFirstHolding (D52): a scope's series starts with the book's first
+     * record, so a line bought later arrives with zeros in front. The track record starts with the
+     * first holding: 500 empty days, then sixty days of a ramp bought on 2026-05-16, measured since
+     * 2026-05-16 (60 days, no CAGR, no risk figures, TWR 0.06). The flow that bought it is part of
+     * the first value: it must not reach XIRR a second time.
      */
-    @Test fun metricsZeroOpeningValueXirrNull() {
+    @Test fun inceptionIsTheFirstHolding() {
+        val start = d("2025-01-01")
+        val pts = mutableListOf<PricePoint>()
+        for (i in 0 until 500) pts += PricePoint(start.plusDays(i.toLong()), 0.0)
+        val bought = start.plusDays(500)
+        assertEquals(d("2026-05-16"), bought)
+        for (i in 0..60) pts += PricePoint(bought.plusDays(i.toLong()), 100.0 + 0.1 * i + (i % 3))
+        val evalTo = bought.plusDays(60)
+        val flows = listOf(Flow(bought, 100.0))
+
+        val m = Perf.compute(pts, flows, start, evalTo, 0.0)
+        assertEquals(bought, m.from)
+        assertNull("60 days annualized", m.cagr)
+        assertNull(m.volatility); assertNull(m.sharpe); assertNull(m.sortino)
+        assertEquals(0.06, m.twr!!, 1e-9)
+        // 100 in on 05-16, 106 out on 07-15: the buy flow is inside the first value.
+        assertEquals(1.06.pow(365.25 / 60) - 1, m.xirr!!, xirrTol)
+    }
+
+    /**
+     * A window opening before any holding (V0 = 0) measures from the first holding (Go D52): the
+     * figures are those of the window that opens on that day, XIRR included (it needs a positive
+     * opening value, which the zeros in front used to deny it).
+     */
+    @Test fun metricsZeroOpeningValueStartsAtTheFirstHolding() {
         val (book, market) = valuationBook()
         val m = Perf.metrics(book, market, referenceCcy = "EUR", from = d("2025-06-14"), to = d("2026-06-14"))
-        assertNull("XIRR undefined when V0 ≤ 0", m.xirr)
-        assertNotNull(m.twr)
+        val held = Perf.metrics(book, market, referenceCcy = "EUR", from = d("2026-01-01"), to = d("2026-06-14"))
+        assertEquals(d("2026-01-01"), m.from) // the property statement, the book's first holding
+        assertNotNull(m.xirr)
+        assertEquals(held.twr!!, m.twr!!, 1e-12)
+        assertEquals(held.xirr!!, m.xirr!!, 1e-12)
+        assertEquals(held.maxDrawdown!!, m.maxDrawdown!!, 1e-12)
     }
 
     /** risk-free rate read from book.config["risk-free"]: "2.4%" → 0.024. */

@@ -44,7 +44,8 @@ object Perf {
     /**
      * Builds the daily value series of the whole book in [referenceCcy] (defaults
      * to `book.config["currency"]` then "EUR") over `[from, to]`, then derives the
-     * performance figures, mirroring the Go formulas. [riskFree] is the annualized
+     * performance figures, mirroring the Go formulas; they are measured from the first day the
+     * book holds anything, which [PerfMetrics.from] reports (see [compute]). [riskFree] is the annualized
      * risk-free rate; when 0 (the default) and `book.config["risk-free"]` is set,
      * that value is used instead.
      */
@@ -84,13 +85,26 @@ object Perf {
     private const val MIN_DAYS_FOR_RISK = 90
     private const val MIN_DAYS_FOR_CAGR = 365
 
+    /**
+     * The figures of [allPoints] over `[from, to]`, measured from the first point the scope holds
+     * anything at (Go `perf.Held`, D52): a series starts with the BOOK's first record, and the
+     * zeros in front of a line bought later would otherwise date its inception early and annualize
+     * a few weeks' return over them. The flows dated at or before that first point are part of its
+     * value, so they reach neither XIRR nor any other figure a second time. The returned
+     * [PerfMetrics.from] is that first point's date. A series that never holds anything is
+     * measured whole.
+     */
     internal fun compute(
-        points: List<PricePoint>,
-        flows: List<Flow>,
-        from: LocalDate,
+        allPoints: List<PricePoint>,
+        allFlows: List<Flow>,
+        windowFrom: LocalDate,
         to: LocalDate,
         rf: Double,
     ): PerfMetrics {
+        val first = allPoints.indexOfFirst { it.close != 0.0 }
+        val points = if (first > 0) allPoints.subList(first, allPoints.size) else allPoints
+        val from = if (first > 0) points[0].date else windowFrom
+        val flows = if (first > 0) allFlows.filter { it.date.isAfter(from) } else allFlows
         if (points.size < 2) {
             return PerfMetrics(from, to, null, null, null, null, null, null, null)
         }

@@ -367,12 +367,6 @@ empty spell and any ex-date trade. Port these, each with its test, then delete t
 Go tests named below live in `../finador/internal/{perf,portfolio}/*_test.go`; dates are
 calendar-daily points, `p(date, value)`, flows `f(date, amount)` (+ in, - out).
 
-3. **Track record starts at the first holding (D52), `Perf.compute`.** Drop the points before the
-   first non-zero value, and the flows dated at or before the new first point (they are part of its
-   value: they must not reach XIRR or a gain twice); `PerfMetrics.from` and `days` start there.
-   Case (Go `TestReportInceptionIsTheFirstHolding`): 500 zero points from 2025-01-01, then from
-   2026-05-16 sixty-one points `100 + 0.1*i + (i % 3)`, `f(2026-05-16, 100)`, to 2026-07-15: since
-   2026-05-16, 60 days, no CAGR and no risk figures, TWR 0.06.
 4. **Coupons go to the previous close's holders (D53), `SeriesBuilder.build`.** Call
    `w.applyDividends(d, from.isBefore(d), flows)` BEFORE the day's transaction loop, not after.
    Case: EUR account, assets `aa`, `bb`, ex-date 03-04 paying 2 and 3; `aa` buy 10 for 1000 on
