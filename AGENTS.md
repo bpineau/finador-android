@@ -367,11 +367,6 @@ empty spell and any ex-date trade. Port these, each with its test, then delete t
 Go tests named below live in `../finador/internal/{perf,portfolio}/*_test.go`; dates are
 calendar-daily points, `p(date, value)`, flows `f(date, amount)` (+ in, - out).
 
-5. **A manual dividend silences its envelope only (D53), `manualDividendAssets`.** Key it by
-   `(account, asset)` (Go `manualDividendPairs`) and test `(p.accId to p.asset.id)` in
-   `applyDividends`. Case: accounts `cto`, `pea`, asset `vt`, ex 03-04 paying 1, both buy 10 for
-   1000 on 03-02, a manual dividend of 10 in `cto` on 03-10; series 03-01..03-12: exactly one coupon
-   per envelope, -10 on 03-10 (cto) and -10 on 03-04 (pea), total -20.
 6. **Month windows (D54): nothing to port.** `LocalDate.minusMonths` already clamps like EDATE,
    which Go now matches (`1m` from 2026-03-31 is 2026-02-28, from 2028-03-31 is 2028-02-29, `1y`
    from 2028-02-29 is 2027-02-28); a test in `Gains` pinning those keeps it so.

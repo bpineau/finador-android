@@ -476,6 +476,36 @@ class PerfTest {
     }
 
     /**
+     * Go TestSeriesManualDividendSilencesOnlyItsEnvelope (D53): a dividend typed by hand (a broker
+     * statement booking its coupon, paid later) replaces the automatic ones of ITS (account, asset)
+     * pair only. The same fund held in another envelope keeps its automatic coupons; silencing them
+     * made every ex-date there read as a price fall with no income against it.
+     */
+    @Test fun manualDividendSilencesOnlyItsEnvelope() {
+        nextSeq = 0
+        val accounts = mapOf(
+            "cto" to Account("cto", "cto", "EUR", TaxRule.None),
+            "pea" to Account("pea", "pea", "EUR", TaxRule.None),
+        )
+        val assets = mapOf("vt" to Asset("vt", AssetKind.SECURITY, "World", ccy = "EUR", group = "g"))
+        val txs = listOf(
+            tx("2026-03-02", "cto", "vt", TxKind.buy, "10", eur("1000")),
+            tx("2026-03-02", "pea", "vt", TxKind.buy, "10", eur("1000")),
+            tx("2026-03-10", "cto", "vt", TxKind.dividend, amount = eur("10")),
+        ).associateBy { it.id }
+        val book = Book(accounts = accounts, assets = assets, txs = txs, config = mapOf("currency" to "EUR"))
+        val market = MarketData(dividends = mapOf("vt" to listOf(DividendEvent(d("2026-03-04"), 1.0))))
+        val series = SeriesBuilder(book, market, "EUR").build(d("2026-03-01"), d("2026-03-12"))
+        val coupons = series.flows.filter { it.amount < 0 }
+        assertEquals("one coupon per envelope, never twice", 2, coupons.size)
+        assertEquals(d("2026-03-04"), coupons[0].date) // pea, automatic
+        assertEquals(-10.0, coupons[0].amount, 1e-9)
+        assertEquals(d("2026-03-10"), coupons[1].date) // cto, by hand
+        assertEquals(-10.0, coupons[1].amount, 1e-9)
+        assertEquals(-20.0, coupons.sumOf { it.amount }, 1e-9)
+    }
+
+    /**
      * A fee whose (account, asset) pair does not resolve - a custody or account charge naming no
      * asset, or an orphaned reference left behind by an asset-del - belongs to the ENVELOPE: it is
      * capital that entered and bought nothing, and it weighs on the whole account (Go `series.go`

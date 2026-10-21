@@ -443,9 +443,16 @@ internal class SeriesBuilder(
 
     private fun toRef(amount: Double, from: String, at: LocalDate): Double = convert(amount, from, ccy, at)
 
-    /** Yahoo-known distributions for assets without any manual Dividend tx. */
-    private val manualDividendAssets: Set<String?> =
-        book.txs.values.filter { it.kind == TxKind.dividend && it.asset != null }.map { it.asset }.toHashSet()
+    /**
+     * The (account, asset) pairs carrying at least one manual Dividend tx: those take no automatic
+     * (Yahoo-known) distribution, every other pair does. Keyed by the PAIR, not the asset (Go
+     * `manualDividendPairs`, D53): a coupon booked by hand in one envelope says nothing about the
+     * same fund held in another, which would otherwise see each ex-date as a fall with no income.
+     */
+    private val manualDividendPairs: Set<Pair<String, String>> =
+        book.txs.values.mapNotNullTo(HashSet()) { t ->
+            if (t.kind == TxKind.dividend && t.asset != null) t.account to t.asset else null
+        }
 
     private inner class PairState(val accId: String, val asset: Asset) {
         /**
@@ -645,7 +652,7 @@ internal class SeriesBuilder(
          */
         fun applyDividends(d: LocalDate, collect: Boolean, flows: MutableList<Flow>) {
             for (p in pairs.values) {
-                if (p.qty <= 0 || p.asset.id in manualDividendAssets) continue
+                if (p.qty <= 0 || (p.accId to p.asset.id) in manualDividendPairs) continue
                 val withholding = p.asset.withholding ?: 0.0
                 for (ev in dividends[p.asset.id] ?: emptyList()) {
                     if (ev.exDate != d) continue
