@@ -367,9 +367,6 @@ empty spell and any ex-date trade. Port these, each with its test, then delete t
 Go tests named below live in `../finador/internal/{perf,portfolio}/*_test.go`; dates are
 calendar-daily points, `p(date, value)`, flows `f(date, amount)` (+ in, - out).
 
-6. **Month windows (D54): nothing to port.** `LocalDate.minusMonths` already clamps like EDATE,
-   which Go now matches (`1m` from 2026-03-31 is 2026-02-28, from 2028-03-31 is 2028-02-29, `1y`
-   from 2028-02-29 is 2027-02-28); a test in `Gains` pinning those keeps it so.
 7. **FX crosses dated on their own session (D55), `market/Yahoo.kt` + `CacheSidecar.kt`.** A cross
    (`...=X`) still reads its bars on the UTC calendar, a session off every winter day and every
    summer Friday. Port pofo's `crossSessionDay`: read the timestamp in `exchangeTimezoneName`

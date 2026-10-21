@@ -106,9 +106,11 @@ object Gains {
      * Period windows, in display order: label → the day `then` is computed from the anchor.
      * Shared by the portfolio table and the per-asset detail page. The value at `then` is the
      * comparison BASE, so YTD starts at Dec 31 of last year (mirrors Go `perf.PeriodRange`:
-     * Jan 1 would silently drop the year's first session).
+     * Jan 1 would silently drop the year's first session). A month or year back clamps to the
+     * shorter month's last day, like EDATE and Go's `metrics.StandardWindows` (D54): `1m` from
+     * Mar 31 is Feb 28 (29), never Mar 3; `LocalDate.minusMonths` does exactly that.
      */
-    private fun windows(today: LocalDate): List<Pair<String, LocalDate>> = listOf(
+    internal fun windows(today: LocalDate): List<Pair<String, LocalDate>> = listOf(
         "1d" to today.minusDays(1),
         "3d" to today.minusDays(3),
         "5d" to today.minusDays(5),

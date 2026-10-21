@@ -123,6 +123,20 @@ class GainsTest {
         assertEquals(100.0, period(report, "7d").absolute, 1e-2)
     }
 
+    // ---- month windows clamp like EDATE (Go D54, metrics.StandardWindows) ----
+
+    /**
+     * A month back from the 31st is the shorter month's last day, never the 3rd of the same month
+     * (Go's former `AddDate` quirk, gone with D54). Pins the Go cases.
+     */
+    @Test fun monthWindowsClampToTheShorterMonth() {
+        fun then(today: String, label: String) = Gains.windows(d(today)).toMap().getValue(label)
+        assertEquals(d("2026-02-28"), then("2026-03-31", "1m"))
+        assertEquals(d("2028-02-29"), then("2028-03-31", "1m"))
+        assertEquals(d("2027-02-28"), then("2028-02-29", "1y"))
+        assertEquals(d("2026-02-28"), then("2026-08-31", "6m"))
+    }
+
     // ---- YTD base: Dec 31 of last year (mirrors Go perf.PeriodRange) ----
 
     /**
