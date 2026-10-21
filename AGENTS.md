@@ -367,13 +367,6 @@ empty spell and any ex-date trade. Port these, each with its test, then delete t
 Go tests named below live in `../finador/internal/{perf,portfolio}/*_test.go`; dates are
 calendar-daily points, `p(date, value)`, flows `f(date, amount)` (+ in, - out).
 
-2. **Drawdown on the index (D49), `Perf.compute`/`maxDrawdown`.** Measure `maxDrawdown` on
-   `Perf.flowGrowth(...).index` (landed with item 1), never on the values. Case: `p(06-01,100)
-   p(06-02,110) p(06-03,55) p(06-04,49.5)`, `f(06-03,-55)`: depth -0.10 (peak 06-03, trough
-   06-04). The three no-flow drawdown tests keep -0.25, -0.20, -0.5. Also: sold, empty, bought
-   back `p(03-02,1000) p(03-03,0) p(03-04,0) p(03-05,500) p(03-06,550)`, `f(03-03,-1100)
-   f(03-05,500)`: drawdown 0; and Go `TestSeriesTWRSaneWhenAWholeLineIsSoldOnADownDay` (PerfTest's
-   `downDaySaleBook`): max drawdown `105/110-1`.
 3. **Track record starts at the first holding (D52), `Perf.compute`.** Drop the points before the
    first non-zero value, and the flows dated at or before the new first point (they are part of its
    value: they must not reach XIRR or a gain twice); `PerfMetrics.from` and `days` start there.

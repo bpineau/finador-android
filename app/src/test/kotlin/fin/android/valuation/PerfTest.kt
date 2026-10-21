@@ -220,13 +220,13 @@ class PerfTest {
             p("2026-01-01", 100.0), p("2026-02-01", 120.0), p("2026-03-01", 90.0),
             p("2026-04-01", 100.0), p("2026-05-01", 125.0),
         )
-        assertEquals(-0.25, Perf.maxDrawdown(pts), tol)
+        assertEquals(-0.25, Perf.maxDrawdown(pts, emptyList()), tol)
     }
 
     /** TestMaxDrawdownNotRecovered: 100 → 80 → −20 %. */
     @Test fun maxDrawdownNotRecovered() {
         val pts = listOf(p("2026-01-01", 100.0), p("2026-02-01", 80.0))
-        assertEquals(-0.20, Perf.maxDrawdown(pts), tol)
+        assertEquals(-0.20, Perf.maxDrawdown(pts, emptyList()), tol)
     }
 
     /** TestMaxDrawdownReanchorsOnExactRetouch: retouching 120 re-anchors the peak,
@@ -237,7 +237,37 @@ class PerfTest {
             p("2026-01-01", 100.0), p("2026-02-01", 120.0), p("2026-03-01", 90.0),
             p("2026-04-01", 120.0), p("2026-05-01", 60.0), p("2026-06-01", 121.0),
         )
-        assertEquals(-0.5, Perf.maxDrawdown(pts), tol)
+        assertEquals(-0.5, Perf.maxDrawdown(pts, emptyList()), tol)
+    }
+
+    /**
+     * TestMaxDrawdownIgnoresWithdrawals (Go D49): a withdrawal lowers the value and loses nothing.
+     * Half withdrawn on 06-03 with the rest flat, then -10 %: the drawdown is that -10 % (peak 06-03,
+     * trough 06-04), never the -50 % the value shows.
+     */
+    @Test fun maxDrawdownIgnoresWithdrawals() {
+        val pts = listOf(p("2026-06-01", 100.0), p("2026-06-02", 110.0), p("2026-06-03", 55.0), p("2026-06-04", 49.5))
+        val flows = listOf(f("2026-06-03", -55.0))
+        val m = Perf.compute(pts, flows, d("2026-06-01"), d("2026-06-04"), 0.0)
+        assertEquals(-0.10, m.maxDrawdown!!, 1e-9)
+    }
+
+    /** TestTWRResumesAfterAnEmptySpell's drawdown: a sale and a re-entry are no fall (D49). */
+    @Test fun maxDrawdownAcrossAnEmptySpell() {
+        val pts = listOf(
+            p("2026-03-02", 1000.0), p("2026-03-03", 0.0), p("2026-03-04", 0.0),
+            p("2026-03-05", 500.0), p("2026-03-06", 550.0),
+        )
+        val flows = listOf(f("2026-03-03", -1100.0), f("2026-03-05", 500.0))
+        val m = Perf.compute(pts, flows, d("2026-03-02"), d("2026-03-06"), 0.0)
+        assertEquals(0.0, m.maxDrawdown!!, 1e-9)
+    }
+
+    /** Go TestSeriesTWRSaneWhenAWholeLineIsSoldOnADownDay's drawdown: the 110 -> 105 day, not -100 %. */
+    @Test fun seriesDrawdownWhenAWholeLineIsSoldOnADownDay() {
+        val (book, market) = downDaySaleBook()
+        val m = Perf.metrics(book, market, referenceCcy = "EUR", from = d("2026-03-02"), to = d("2026-03-06"))
+        assertEquals(105.0 / 110 - 1, m.maxDrawdown!!, 1e-9)
     }
 
     // ---- compute() assembly: degenerate & full ----

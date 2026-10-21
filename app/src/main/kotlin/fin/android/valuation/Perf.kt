@@ -109,7 +109,7 @@ object Perf {
             sortino = sortino(returns, rf)
         }
         val cagr = if (days >= MIN_DAYS_FOR_CAGR) cagr(twr, days) else null
-        val maxDd = maxDrawdown(points) + 0.0 // + 0.0 folds a possible -0.0 into 0.0
+        val maxDd = maxDrawdown(points, flows) + 0.0 // + 0.0 folds a possible -0.0 into 0.0
 
         return PerfMetrics(
             from = from,
@@ -333,16 +333,19 @@ object Perf {
     }
 
     /**
-     * Worst peak-to-trough loss of the series (negative; −0.25 = −25 %). A value
-     * that regains exactly the peak re-anchors the peak: a drawdown must not
-     * straddle a full recovery. Mirrors the Go `MaxDrawdown.Depth`.
+     * Worst peak-to-trough loss of the series (negative; −0.25 = −25 %), measured on its
+     * flow-neutral growth ([flowGrowth]'s index), never on the value: a withdrawal or a sale
+     * lowers the value and loses nothing, so it is never a drawdown (Go D49). A level that regains
+     * exactly the peak re-anchors the peak: a drawdown must not straddle a full recovery. Mirrors
+     * the Go `perf.MaxDrawdown(points, flows).Depth`.
      */
-    internal fun maxDrawdown(points: List<PricePoint>): Double {
+    internal fun maxDrawdown(points: List<PricePoint>, flows: List<Flow>): Double {
         if (points.isEmpty()) return 0.0
+        val index = flowGrowth(points, flows).index
         var depth = 0.0
-        var peak = points[0].close
-        for (i in 1 until points.size) {
-            val v = points[i].close
+        var peak = index[0]
+        for (i in 1 until index.size) {
+            val v = index[i]
             if (v >= peak) {
                 peak = v
                 continue
