@@ -71,6 +71,51 @@ class PerfTest {
         assertEquals(0.10, Perf.twr(pts, flows), tol)
     }
 
+    /**
+     * TestTWROutflowLeavesAtTheClose (Go D50): a sale is valued at the day's close, so the money it
+     * takes out leaves at the END of its day. 10 shares, 100 -> 110 -> sold at the 105 close: the
+     * holder made +5 %. Booked at the start of the day, the outflow left a base of the day's loss
+     * and a value of 0, a -100 % day that zeroed the whole TWR for good.
+     */
+    @Test fun twrOutflowLeavesAtTheClose() {
+        val pts = listOf(p("2026-03-02", 1000.0), p("2026-03-03", 1100.0), p("2026-03-04", 0.0), p("2026-03-05", 0.0))
+        val flows = listOf(f("2026-03-04", -1050.0))
+        assertEquals(0.05, Perf.twr(pts, flows), tol)
+
+        // Half sold at the same 105 close: the kept half reads the same day.
+        val half = listOf(p("2026-03-02", 1000.0), p("2026-03-03", 1100.0), p("2026-03-04", 525.0))
+        assertEquals(0.05, Perf.twr(half, listOf(f("2026-03-04", -525.0))), tol)
+
+        val rs = Perf.dailyReturns(pts, flows)
+        assertEquals("the day after the sale has nothing left to earn on", 2, rs.size)
+        assertEquals(105.0 / 110 - 1, rs[1], 1e-9)
+    }
+
+    /**
+     * TestTWRCostOnAnEmptyScopeIsNoReturn (Go D52): a cost booked on a day the scope holds nothing
+     * has no capital to be a return of. Its factor was 0/fee, a -100 % day; such a day is no return
+     * at all (the money still shows in the gain: (0 - 1000) - (-1100 + 2) = 98).
+     */
+    @Test fun twrCostOnAnEmptyScopeIsNoReturn() {
+        val pts = listOf(p("2026-03-02", 1000.0), p("2026-03-03", 0.0), p("2026-03-04", 0.0), p("2026-03-05", 0.0))
+        val flows = listOf(f("2026-03-03", -1100.0), f("2026-03-05", 2.0)) // sold at +10 %, a fee two days later
+        assertEquals(0.10, Perf.twr(pts, flows), 1e-9)
+    }
+
+    /**
+     * TestTWRResumesAfterAnEmptySpell (Go D52, D54): a line sold, held at zero for a day, then
+     * bought again. The empty day is no return and the track record resumes on the new money.
+     */
+    @Test fun twrResumesAfterAnEmptySpell() {
+        val pts = listOf(
+            p("2026-03-02", 1000.0), p("2026-03-03", 0.0), p("2026-03-04", 0.0),
+            p("2026-03-05", 500.0), p("2026-03-06", 550.0),
+        )
+        val flows = listOf(f("2026-03-03", -1100.0), f("2026-03-05", 500.0)) // sold at +10 %, bought back
+        assertEquals(1.1 * 1.1 - 1, Perf.twr(pts, flows), 1e-9)
+        assertEquals("sale day, re-entry day (flat), last day", 3, Perf.dailyReturns(pts, flows).size)
+    }
+
     // ---- DailyReturns (perf_test.go: TestDailyReturns*) ----
 
     /** TestDailyReturnsWeekdaysOnly: Fri (+2 %) and Mon (104/102−1) kept; Sat/Sun dropped. */
@@ -250,6 +295,36 @@ class PerfTest {
         assertEquals(1000.0, series.flows[0].amount, 1e-2)
         // Everything flat at market → TWR ~0, not the +50 % the cost→market gap would fabricate.
         assertEquals(0.0, Perf.twr(series.points, series.flows), tol)
+    }
+
+    /**
+     * Go TestSeriesTWRSaneWhenAWholeLineIsSoldOnADownDay (D50): bought 10 at 100, the close rises to
+     * 110, the whole line is sold at the 105 close. The sale flow is the shares' market value at that
+     * close (-1050) and leaves at the end of the day: TWR +5 %, not -100 %.
+     */
+    @Test fun seriesTwrSaneWhenAWholeLineIsSoldOnADownDay() {
+        val (book, market) = downDaySaleBook()
+        val m = Perf.metrics(book, market, referenceCcy = "EUR", from = d("2026-03-02"), to = d("2026-03-06"))
+        assertEquals(0.05, m.twr!!, 1e-9)
+    }
+
+    private fun downDaySaleBook(): Pair<Book, MarketData> {
+        nextSeq = 0
+        val accounts = mapOf("cto" to Account("cto", "CTO Meridia", "EUR", TaxRule.None))
+        val assets = mapOf("cw8" to Asset("cw8", AssetKind.SECURITY, "World", ticker = "CW8.PA", ccy = "EUR", group = "g"))
+        val txs = listOf(
+            tx("2026-03-02", "cto", "cw8", TxKind.buy, "10", eur("1000")),
+            tx("2026-03-04", "cto", "cw8", TxKind.sell, "10", eur("1050")),
+        ).associateBy { it.id }
+        val book = Book(accounts = accounts, assets = assets, txs = txs, config = mapOf("currency" to "EUR"))
+        val market = MarketData(
+            prices = mapOf(
+                "cw8" to PriceSeries(
+                    listOf(PricePoint(d("2026-03-02"), 100.0), PricePoint(d("2026-03-03"), 110.0), PricePoint(d("2026-03-04"), 105.0)),
+                ),
+            ),
+        )
+        return book to market
     }
 
     /**

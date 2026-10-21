@@ -148,46 +148,113 @@ object Perf {
     // ---- pure math (perf.go) ----
 
     /**
-     * TWR chain-links daily returns r_t = V_t / (V_{t−1} + F_t) − 1, neutralizing
-     * external flows. Flows are booked at the start of their day, so a same-day
-     * contribution earns that day and belongs in the return's base; dividing by
-     * V_{t−1} alone would charge a large flow's first-day P/L against the tiny
-     * pre-flow value and detonate the chain. Days with a non-positive base
-     * (V_{t−1} + F_t) are skipped. Mirrors Go pofo/metrics.TWR (v0.1.1).
+     * The flow-neutral growth of a value series: [index] starts at 1 and says what one unit held
+     * from the first point became, contributions and withdrawals neutralized; [live] says, per
+     * point, whether that day's growth was measured or held flat for want of a base (`live[0]` is
+     * false).
      */
-    internal fun twr(points: List<PricePoint>, flows: List<Flow>): Double {
-        val byDay = flowsByDay(flows)
-        var total = 1.0
-        for (i in 1 until points.size) {
-            val base = points[i - 1].close + (byDay[points[i].date] ?: 0.0)
-            if (base <= 0) continue
-            total *= points[i].close / base
+    internal class FlowGrowth(val index: DoubleArray, val live: BooleanArray)
+
+    /**
+     * Chain-links the flow-neutral daily growth of [points] into a [FlowGrowth], exactly pofo's
+     * `metrics.flowGrowth` (v0.2.88), which the Go reference delegates to (D50, D52, D54).
+     *
+     * The flows of a day are netted and the net is booked by its direction. Money coming in is
+     * booked at the START of the day, r = V_t/(V_{t-1}+F_t): it earns that day, and a large
+     * contribution never has its first-day move charged to a tiny pre-flow value. Money going out
+     * is booked at the CLOSE, r = (V_t-F_t)/V_{t-1} with F_t negative: a sale is valued at the
+     * day's close, so the shares earned the day before they left. Booked at the start instead, a
+     * whole line sold on a down day read as a -100 % day that zeroed everything after it.
+     *
+     * A day with nothing to earn on, a non-positive base or a scope that holds nothing before nor
+     * after (a fee posted once the account is empty), keeps the index flat and is not live. Between
+     * two flows the index is the value times a constant scale rather than a running product, so a
+     * flowless stretch reads exactly the value's ratios and an exact return to a peak stays exact.
+     */
+    internal fun flowGrowth(points: List<PricePoint>, flows: List<Flow>): FlowGrowth {
+        val n = points.size
+        val index = DoubleArray(n)
+        val live = BooleanArray(n)
+        if (n == 0) return FlowGrowth(index, live)
+        val byDay = flowsByDay(points, flows)
+        index[0] = 1.0
+        var scale = if (points[0].close > 0) 1 / points[0].close else 0.0 // index per unit of value
+        for (i in 1 until n) {
+            val v = points[i].close
+            val prev = points[i - 1].close
+            val flow = byDay[points[i].date] ?: 0.0
+            if (flow == 0.0 && scale > 0 && v > 0 && prev > 0) {
+                index[i] = scale * v
+                live[i] = true
+                continue // the scale holds until the next flow
+            }
+            index[i] = index[i - 1]
+            var num = v
+            var base = prev + flow // money in: at the start of the day
+            if (flow < 0) {
+                num = v - flow // money out: at the close
+                base = prev
+            }
+            if (base > 0 && (prev > 0 || v > 0)) {
+                index[i] *= num / base
+                live[i] = true
+            }
+            scale = if (v > 0) index[i] / v else 0.0
         }
-        return total - 1
+        return FlowGrowth(index, live)
     }
 
     /**
-     * Flow-adjusted weekday returns of a calendar-daily series: V_t/(V_{t−1}+F_t)−1,
-     * the same start-of-day flow convention as [twr]. Week-ends are forward-filled
-     * flats and dropped (≈252 returns a year, annualized with √252). Days with a
-     * non-positive base (V_{t−1} + F_t) are skipped.
+     * Time-weighted total return: the last point of [flowGrowth]'s index less one, so external
+     * flows are neutralized and the result measures the strategy, not the saver. 0 for fewer than
+     * two points. Mirrors Go `perf.TWR` (pofo `metrics.TWR`).
+     */
+    internal fun twr(points: List<PricePoint>, flows: List<Flow>): Double {
+        if (points.size < 2) return 0.0
+        return flowGrowth(points, flows).index.last() - 1
+    }
+
+    /**
+     * Flow-adjusted weekday returns of a calendar-daily series, read on [flowGrowth]'s index.
+     * Saturday and Sunday points are folded into the next weekday's return (forward-filled flats
+     * would dilute the volatility; ≈252 returns a year, annualized with √252). A day that is not
+     * live yields no return. Mirrors Go `perf.DailyReturns` (pofo `metrics.FlowReturns`).
      */
     internal fun dailyReturns(points: List<PricePoint>, flows: List<Flow>): List<Double> {
-        val byDay = flowsByDay(flows)
+        val g = flowGrowth(points, flows)
         val out = mutableListOf<Double>()
+        var last = 0
         for (i in 1 until points.size) {
-            val base = points[i - 1].close + (byDay[points[i].date] ?: 0.0)
-            if (base <= 0) continue
             val wd = points[i].date.dayOfWeek
             if (wd == DayOfWeek.SATURDAY || wd == DayOfWeek.SUNDAY) continue
-            out += points[i].close / base - 1
+            // A return runs from the last weekday point, so a weekend folded into Monday counts
+            // as the one trading period it is.
+            val from = last
+            last = i
+            if (!g.live[i] || !(g.index[from] > 0)) continue
+            out += g.index[i] / g.index[from] - 1
         }
         return out
     }
 
-    private fun flowsByDay(flows: List<Flow>): Map<LocalDate, Double> {
+    /**
+     * Flow amounts summed per point date, each flow on the first point dated at or after it (pofo
+     * `flowsByDay`); a flow past the last point is dropped. [points] are ascending.
+     */
+    private fun flowsByDay(points: List<PricePoint>, flows: List<Flow>): Map<LocalDate, Double> {
         val byDay = HashMap<LocalDate, Double>()
-        for (f in flows) byDay[f.date] = (byDay[f.date] ?: 0.0) + f.amount
+        for (f in flows) {
+            var lo = 0
+            var hi = points.size
+            while (lo < hi) {
+                val mid = (lo + hi) ushr 1
+                if (points[mid].date.isBefore(f.date)) lo = mid + 1 else hi = mid
+            }
+            if (lo < points.size) {
+                val day = points[lo].date
+                byDay[day] = (byDay[day] ?: 0.0) + f.amount
+            }
+        }
         return byDay
     }
 

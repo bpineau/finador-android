@@ -367,32 +367,13 @@ empty spell and any ex-date trade. Port these, each with its test, then delete t
 Go tests named below live in `../finador/internal/{perf,portfolio}/*_test.go`; dates are
 calendar-daily points, `p(date, value)`, flows `f(date, amount)` (+ in, - out).
 
-1. **Flow index (D50, D52), `valuation/Perf.kt`.** Replace the bodies of `twr` and `dailyReturns`
-   with one `flowGrowth(points, flows): (index, live)` that both read, exactly pofo's `flowGrowth`:
-   `byDay` = flows summed per date; `index[0] = 1`, `live[0] = false`,
-   `scale = if (v0 > 0) 1/v0 else 0`; for each `i >= 1` with `v`, `prev`, `F = byDay[date] ?: 0`:
-   if `F == 0 && scale > 0 && v > 0 && prev > 0` then `index[i] = scale*v`, live, next. Else
-   `index[i] = index[i-1]`; money in (`F >= 0`): `num = v, base = prev + F` (start of day); money out
-   (`F < 0`): `num = v - F, base = prev` (at the close); if `base > 0 && (prev > 0 || v > 0)` then
-   `index[i] *= num/base`, live; then `scale = if (v > 0) index[i]/v else 0`.
-   `twr = index.last() - 1`. `dailyReturns`: skip Saturday/Sunday points; each weekday point `i`
-   returns `index[i]/index[last] - 1` from the previous weekday point `last` (starting at 0, moved
-   to `i` whether or not `i` returned), only when `live[i] && index[last] > 0` (a weekend folds
-   into Monday).
-   Cases: whole line sold `p(03-02,1000) p(03-03,1100) p(03-04,0) p(03-05,0)`, `f(03-04,-1050)`:
-   TWR 0.05, 2 daily returns, the second `105/110-1`; half sold `p(..,1000) p(..,1100) p(03-04,525)`,
-   `f(03-04,-525)`: TWR 0.05; cost on an empty scope `p(03-02,1000) p(03-03,0) p(03-04,0)
-   p(03-05,0)`, `f(03-03,-1100) f(03-05,2)`: TWR 0.10, inception gain 98; sold, empty, bought back
-   `p(03-02,1000) p(03-03,0) p(03-04,0) p(03-05,500) p(03-06,550)`, `f(03-03,-1100) f(03-05,500)`:
-   TWR `1.1*1.1-1`, 3 daily returns, drawdown 0. The four existing inflow tests (`0.155`,
-   `317931.29/318100-1`, `0.10`, `0.10`) keep their numbers. Series level (Go
-   `TestSeriesTWRSaneWhenAWholeLineIsSoldOnADownDay`): EUR account, asset closes 03-02 100,
-   03-03 110, 03-04 105, buy 10 for 1000 on 03-02, sell 10 for 1050 on 03-04, book series to 03-06:
-   TWR +5 %, max drawdown `105/110-1`.
 2. **Drawdown on the index (D49), `Perf.compute`/`maxDrawdown`.** Measure `maxDrawdown` on
-   `flowGrowth(...).index`, never on the values. Case: `p(06-01,100) p(06-02,110) p(06-03,55)
-   p(06-04,49.5)`, `f(06-03,-55)`: depth -0.10 (peak 06-03, trough 06-04). The three no-flow
-   drawdown tests keep -0.25, -0.20, -0.5.
+   `Perf.flowGrowth(...).index` (landed with item 1), never on the values. Case: `p(06-01,100)
+   p(06-02,110) p(06-03,55) p(06-04,49.5)`, `f(06-03,-55)`: depth -0.10 (peak 06-03, trough
+   06-04). The three no-flow drawdown tests keep -0.25, -0.20, -0.5. Also: sold, empty, bought
+   back `p(03-02,1000) p(03-03,0) p(03-04,0) p(03-05,500) p(03-06,550)`, `f(03-03,-1100)
+   f(03-05,500)`: drawdown 0; and Go `TestSeriesTWRSaneWhenAWholeLineIsSoldOnADownDay` (PerfTest's
+   `downDaySaleBook`): max drawdown `105/110-1`.
 3. **Track record starts at the first holding (D52), `Perf.compute`.** Drop the points before the
    first non-zero value, and the flows dated at or before the new first point (they are part of its
    value: they must not reach XIRR or a gain twice); `PerfMetrics.from` and `days` start there.
