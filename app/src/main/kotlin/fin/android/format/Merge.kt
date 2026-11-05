@@ -14,7 +14,8 @@ data class Conflict(
  * Reconciles two copies of the same ledger that diverged on two devices. Distinct entities union
  * with no loss; concurrent edits of one entity resolve last-writer-wins by ts; a true tie (same
  * entity, equal ts, different payload) is handed to [resolve], which returns the index to keep.
- * The result is re-sealed as a fresh chained log, each winner's original ts preserved.
+ * The result is re-sealed as a fresh chained log, each winner's original ts preserved and a
+ * delete kept as its tombstone, so merging a stale copy again cannot resurrect it.
  */
 internal object Merge {
     private data class Tagged(val env: Envelope, val fromOther: Boolean)
@@ -51,7 +52,9 @@ internal object Merge {
                     distinct[idx]
                 }
             }
-            if (!isTombstone(winner.env.k)) winners.add(winner.env)
+            // A tombstone winner is kept too: dropping it would forget the delete, and the next
+            // merge with a copy that still holds the entity would bring it back (FORMAT.md 6.5).
+            winners.add(winner.env)
         }
         winners.sortBy { Rfc3339.instant(it.ts) } // stable, preserves each record's own ts
 
@@ -67,9 +70,6 @@ internal object Merge {
         "config" -> "config"
         else -> k
     }
-
-    private fun isTombstone(k: String): Boolean =
-        k == "acct-del" || k == "asset-del" || k == "tx-del" || k == "label-del"
 
     private fun entityId(env: Envelope): String {
         val field = if (classOf(env.k) == "config") "key" else "id"

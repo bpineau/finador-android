@@ -74,6 +74,18 @@ class MergeTest {
         assertEquals(2, merged.book.txs.size)
     }
 
+    @Test
+    fun tombstoneSurvivesARepeatedMergeWithAStaleCopy() {
+        val base = base()
+        val del = base.append(
+            listOf(Envelope("tx-del", "2099-01-01T00:00:00Z", wireJson.encodeToJsonElement(IdRefDto.serializer(), IdRefDto(buyId)).jsonObject)),
+        )
+        val once = del.merge(base)
+        val twice = once.merge(base)
+        assertFalse(twice.book.txs.containsKey(buyId))
+        assertFalse(base.merge(twice).book.txs.containsKey(buyId))
+    }
+
     @Test(expected = IllegalArgumentException::class)
     fun refusesDifferentLedgers() {
         Ledger.create("pw").merge(Ledger.create("pw"))
