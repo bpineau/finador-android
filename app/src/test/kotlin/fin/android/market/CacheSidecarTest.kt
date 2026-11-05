@@ -27,6 +27,7 @@ class CacheSidecarTest {
             "asset-1" to PriceSeries(
                 listOf(PricePoint(d("2024-01-20"), 450.0), PricePoint(d("2024-01-22"), 455.5)),
                 fetchedAt = d("2024-01-23"),
+                quote = "CW8.PA|FR0000000000|EUR",
             ),
         ),
         fx = mapOf(

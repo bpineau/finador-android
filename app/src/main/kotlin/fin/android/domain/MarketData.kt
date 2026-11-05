@@ -18,12 +18,17 @@ data class PricePoint(val date: LocalDate, val close: Double)
  * source. Only a fund published with a lag ever carries one (see `market/Nowcast.kt`). The estimate
  * is recomputed at every refresh and NEVER stored: [withoutEstimates] is the door every persisting
  * consumer walks through, and the cache sidecar walks through it for all of them.
+ *
+ * [quote] is the instrument the series was fetched for ([Asset.quoteKey]). An asset whose ticker,
+ * ISIN or currency changed since, here or on another device, no longer owns these numbers: the
+ * refresh drops them. Null in a cache written before the field existed (adopted at the next fetch).
  */
 data class PriceSeries(
     val points: List<PricePoint> = emptyList(),
     val fetchedAt: LocalDate? = null,
     val estimatedFrom: LocalDate? = null,
     val estimateProxy: String? = null,
+    val quote: String? = null,
 ) {
     /** The last close at or before [d] (forward-fill), with its date; null if none or empty. */
     fun at(d: LocalDate): Pair<Double, LocalDate>? {

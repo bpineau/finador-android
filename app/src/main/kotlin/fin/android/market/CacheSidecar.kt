@@ -95,10 +95,12 @@ private data class PricePointDto(
 private data class PriceSeriesDto(
     val points: List<PricePointDto> = emptyList(),
     val fetchedAt: String? = null,
+    val quote: String? = null,
 ) {
-    fun toDomain() = PriceSeries(points.map { it.toDomain() }, fetchedAt?.let { LocalDate.parse(it) })
+    fun toDomain() = PriceSeries(points.map { it.toDomain() }, fetchedAt?.let { LocalDate.parse(it) }, quote = quote)
     companion object {
-        fun from(s: PriceSeries) = PriceSeriesDto(s.points.map { PricePointDto.from(it) }, s.fetchedAt?.toString())
+        fun from(s: PriceSeries) =
+            PriceSeriesDto(s.points.map { PricePointDto.from(it) }, s.fetchedAt?.toString(), s.quote)
     }
 }
 

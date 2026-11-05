@@ -23,6 +23,13 @@ data class Asset(
     val withholding: Double? = null,
 )
 
+/**
+ * The instrument an asset's quotes are fetched for: ticker, ISIN and currency, joined as Go's
+ * `Asset.QuoteKey` joins them. A cached series fetched under another key belongs to another
+ * instrument (see [PriceSeries.quote]).
+ */
+fun Asset.quoteKey(): String = "${ticker.orEmpty()}|${isin.orEmpty()}|$ccy"
+
 data class Tx(
     val id: String,
     val date: LocalDate,

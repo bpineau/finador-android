@@ -219,6 +219,43 @@ class QuotesTest {
         assertEquals(1.5, out.dividends["aa"]!![0].amount, 0.0)
     }
 
+    /**
+     * A series fetched for another instrument (the ticker, ISIN or currency was edited here or on
+     * the desktop) holds numbers that are not this asset's, maybe in another currency: the refresh
+     * drops it with its dividends and refetches the whole history, stamping the new key. A legacy
+     * series without a key is adopted. Mirrors Go's `internal/market/refresh.go`.
+     */
+    @Test fun aSeriesFetchedForAnotherInstrumentIsDropped() {
+        val provider = FakeProvider(DailyData(currency = "USD", closes = listOf(PricePoint(d("2026-06-02"), 110.0))))
+        val stale = PriceSeries(
+            listOf(PricePoint(d("2025-12-01"), 8900.0), PricePoint(d("2026-06-01"), 9000.0)),
+            fetchedAt = d("2026-06-01"), quote = "OLD||JPY",
+        )
+        val existing = MarketData(
+            prices = mapOf("aa" to stale),
+            dividends = mapOf("aa" to listOf(DividendEvent(d("2026-01-01"), 50.0))),
+        )
+        val refresh = Quotes.refreshDetailed(
+            book(), existing, from = d("2026-01-01"), now = d("2026-06-03"),
+            multi = MultiSource(listOf(provider)), yahoo = yahoo(),
+        )
+        val out = refresh.market
+        assertEquals(listOf(110.0), out.prices["aa"]!!.points.map { it.close })
+        assertEquals("AA||USD", out.prices["aa"]!!.quote)
+        assertNull("the old instrument's dividends go too", out.dividends["aa"])
+        assertEquals("refetched from the floor, not from the stale last close", d("2026-01-01"), provider.from.single())
+        assertTrue(refresh.warnings.any { it.contains("cached quotes dropped") })
+
+        // A series cached before the key existed is adopted, not dropped.
+        val legacy = MarketData(prices = mapOf("aa" to stale.copy(points = listOf(PricePoint(d("2026-06-01"), 100.0)), quote = null)))
+        val adopted = Quotes.refresh(
+            book(), legacy, from = d("2026-01-01"), now = d("2026-06-03"),
+            multi = MultiSource(listOf(provider)), yahoo = yahoo(),
+        )
+        assertEquals(listOf(100.0, 110.0), adopted.prices["aa"]!!.points.map { it.close })
+        assertEquals("AA||USD", adopted.prices["aa"]!!.quote)
+    }
+
     @Test fun failedProviderKeepsExistingSeries() {
         val provider = object : Provider {
             override val name = "down"

@@ -7,6 +7,7 @@ import fin.android.domain.MarketData
 import fin.android.domain.PricePoint
 import fin.android.domain.PriceSeries
 import fin.android.domain.TxKind
+import fin.android.domain.quoteKey
 import java.math.BigDecimal
 import java.math.MathContext
 import java.math.RoundingMode
@@ -157,6 +158,17 @@ object Quotes {
             } else {
                 asset.ticker?.let { spotTargets[asset.id] = it to asset.ccy }
             }
+            // A series fetched for another instrument (the ticker, ISIN or currency was edited,
+            // maybe on another device) holds numbers that are not this asset's, possibly in another
+            // currency: drop them and fetch afresh (mirrors Go's refresh).
+            val key = asset.quoteKey()
+            val old = prices[asset.id]?.quote
+            if (old != null && old != key) {
+                prices.remove(asset.id)
+                dividends.remove(asset.id)
+                warnings += "${asset.ticker ?: asset.isin}: ticker, ISIN or currency changed - " +
+                    "cached quotes dropped, history fetched again"
+            }
             var daily = multi.daily(Ref(asset.ticker, asset.isin), fetchFrom(prices[asset.id], from)) ?: continue
             // The declared currency is the contract here exactly as it is on the spot pass below: a
             // series served in another currency (an FT twin listing) would be merged into a series
@@ -194,7 +206,7 @@ object Quotes {
                 cached = null
                 daily = full
             }
-            prices[asset.id] = (cached ?: PriceSeries()).merge(daily.closes).copy(fetchedAt = now)
+            prices[asset.id] = (cached ?: PriceSeries()).merge(daily.closes).copy(fetchedAt = now, quote = key)
             if (daily.dividends.isNotEmpty()) {
                 // Upsert by ex-date (mirror Go's mergeDividends): an incremental fetch returns only a
                 // recent window, so overwriting would drop previously-cached historical dividends.
