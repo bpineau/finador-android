@@ -53,8 +53,8 @@ setup` prints those two steps for you if you run it on Linux with nothing instal
 | `make doctor` / `make setup` | check / install everything the build needs (JDK, SDK, platform, build-tools, licences). |
 | the Java **toolchain** in `app/build.gradle.kts` | pins the JDK the build runs on (21), independently of what is on your PATH. |
 
-What the app is built with, all pinned: **JDK 21**, Gradle **9.7.1**, Android Gradle Plugin
-**9.4.1**, Kotlin **2.4.20**, Compose BOM **2026.09.00**, `compileSdk`/`targetSdk` **37**,
+What the app is built with, all pinned: **JDK 21**, Gradle **9.8.2**, Android Gradle Plugin
+**9.5.1**, Kotlin **2.4.21**, Compose BOM **2026.09.00**, `compileSdk`/`targetSdk` **37**,
 `minSdk` **26**.
 
 ---
