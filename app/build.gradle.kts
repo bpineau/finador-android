@@ -70,8 +70,8 @@ android {
     // run in both places to mean anything (see `net/Tls.kt`). It ships in neither APK, debug or
     // release: `src/probe` is not part of `main`.
     sourceSets {
-        getByName("test").kotlin.srcDir("src/probe/kotlin")
-        getByName("androidTest").kotlin.srcDir("src/probe/kotlin")
+        getByName("test").kotlin.directories.add("src/probe/kotlin")
+        getByName("androidTest").kotlin.directories.add("src/probe/kotlin")
     }
 }
 

@@ -48,6 +48,11 @@ the wrapper pins Gradle and `libs.versions.toml` pins AGP, so nothing moves with
 AGP's compatibility table (`https://developer.android.com/build/releases/gradle-plugin`) is the one
 page to read before bumping either.
 
+The wrapper pins Gradle 9.9.1 and its official distribution SHA-256. AGP 9.5.1 requires
+Gradle 9.6.0 or newer, so this stays within the documented toolchain order without changing
+the SDK or Kotlin compiler. See the [Gradle release notes](https://docs.gradle.org/9.9.1/release-notes.html)
+and [distribution checksums](https://gradle.org/release-checksums/).
+
 **Kotlin**, the **Compose compiler plugin** and the **serialization plugin** all come from the same
 `kotlin` version in `libs.versions.toml`: bump the three together or the build fails with a plugin
 mismatch. Since Kotlin 2.0 the Compose compiler ships with Kotlin itself, so there is no separate
