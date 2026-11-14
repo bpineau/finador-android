@@ -96,12 +96,17 @@ class AppRepository(
         var created = false
         runCatching {
             val sync = container.buildSync(cfg, token.trim())
+            val wc = container.workingCopy(cfg)
             // A repository the token cannot see answers 404 to the file fetch as well, which would
             // read as "no ledger yet" and start an empty one beside the real one (Go `remote login`).
-            try { sync.checkAccess() } catch (e: RemoteError.Offline) { /* checked on the next sync */ }
-            try { sync.pullIfStale() } catch (e: RemoteError.Offline) { /* offline first run - create locally */ }
+            try { sync.checkAccess() } catch (e: RemoteError.Offline) {
+                if (!wc.exists()) throw e
+            }
+            // Without a local copy, only a confirmed missing remote file permits creation.
+            // A failed lookup could hide an existing ledger with a different immutable file id.
+            // pullIfStale already tolerates offline access when a working copy exists.
+            sync.pullIfStale()
 
-            val wc = container.workingCopy(cfg)
             if (!wc.exists()) {
                 wc.parentFile?.mkdirs()
                 created = true

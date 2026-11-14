@@ -335,8 +335,12 @@ Each of these cost real debugging once. Symptom, cause, what to do.
   clean. Missing state with an existing copy is also dirty. Legacy valid state without a fingerprint
   retains its flag semantics until its next fetch or push.
 - **A reconnect failed or the branch changed.** Failed onboarding never deletes a working copy or
-  its backup that existed before it, and verifies the passphrase before replacing saved settings or
-  secrets. The empty ledger an attempt started itself IS discarded (`AppContainer.discardCheckout`):
+  its backup that existed before it. First connection requires online repository access and a
+  successful file lookup: only a confirmed missing file permits creating a ledger. Never create
+  one after a transport failure, since its new file id cannot merge with an existing remote.
+  Reconnecting an existing working copy still works offline. Onboarding verifies the passphrase
+  before replacing saved settings or secrets. The empty ledger an attempt started itself IS discarded
+  (`AppContainer.discardCheckout`):
   kept, it is dirty, sealed with that passphrase and refuses every retry typed with another one.
   Onboarding first calls `Backend.checkAccess` (Go `CheckAccess`): GitHub answers 404 to the file
   of a repository the token cannot see, which would otherwise read as "no ledger yet" and start an

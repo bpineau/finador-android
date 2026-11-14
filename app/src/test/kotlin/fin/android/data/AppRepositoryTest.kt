@@ -246,6 +246,60 @@ class AppRepositoryTest {
         } finally { dir.deleteRecursively() }
     }
 
+    @Test fun firstConnectionRequiresAConfirmedRemoteFileLookup() = runBlocking {
+        for (accessOffline in listOf(false, true)) {
+            val dir = Files.createTempDirectory("repository-first-offline").toFile()
+            try {
+                val original = ledger().toBytes()
+                var offline = true
+                val remote = object : Backend {
+                    override fun checkAccess() {
+                        if (accessOffline && offline) throw RemoteError.Offline("synthetic offline")
+                    }
+                    override fun fetch(): Fetched {
+                        if (offline) throw RemoteError.Offline("synthetic offline")
+                        return Fetched(original, "1")
+                    }
+                    override fun push(data: ByteArray, base: Version?, message: String): Version =
+                        error("an existing remote must not be replaced during connection")
+                    override fun describe() = "synthetic existing remote"
+                }
+                val secrets = InMemorySecretStore()
+                val container = AppContainer(dir, File(dir, "cache"), secrets) { _, _ -> remote }
+                val repo = AppRepository(container, clock)
+                val result = repo.onboard("synthetic-owner", "ledger-store", "portfolio.fin", "master", "token", pass)
+                assertTrue("A failed lookup must not create an unrelated ledger: $result", result.isFailure)
+                assertFalse(container.workingCopy(cfg).exists())
+                assertFalse(container.loadConfig().isGithub)
+                assertNull(secrets.getPassphrase())
+                offline = false
+                assertTrue(repo.onboard("synthetic-owner", "ledger-store", "portfolio.fin", "master", "token", pass).isSuccess)
+                assertArrayEquals(original, container.workingCopy(cfg).readBytes())
+                assertEquals(1, repo.currentBook()!!.txs.size)
+            } finally { dir.deleteRecursively() }
+        }
+    }
+
+    @Test fun existingCopyCanStillReconnectAndAcceptWritesOffline() = runBlocking {
+        val dir = Files.createTempDirectory("repository-reconnect-offline").toFile()
+        try {
+            val remote = Remote(ledger().toBytes())
+            val backend = object : Backend by remote {
+                override fun checkAccess() {
+                    if (remote.offline) throw RemoteError.Offline("synthetic offline")
+                }
+            }
+            val container = AppContainer(dir, File(dir, "cache"), InMemorySecretStore()) { _, _ -> backend }
+            val repo = AppRepository(container, clock)
+            assertTrue(repo.onboard("synthetic-owner", "ledger-store", "portfolio.fin", "master", "token", pass).isSuccess)
+            remote.offline = true
+            assertTrue(repo.onboard("synthetic-owner", "ledger-store", "portfolio.fin", "master", "token", pass).isSuccess)
+            assertTrue(repo.addTransaction(day, "account", null, TxKind.deposit, BigDecimal.ZERO,
+                BigDecimal.TEN, "USD", null).isSuccess)
+            assertEquals(2, repo.currentBook()!!.txs.size)
+        } finally { dir.deleteRecursively() }
+    }
+
     @Test fun repositoryTheTokenCannotSeeNeverStartsAnEmptyLedger() = runBlocking {
         val dir = Files.createTempDirectory("repository-invisible").toFile()
         try {

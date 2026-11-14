@@ -102,7 +102,9 @@ adb exec-out screencap -p > shot.png
 
 **First launch** asks for a private GitHub repo and a fine-grained PAT (GitHub -> Settings ->
 Developer settings -> Personal access tokens -> Fine-grained; *Repository access* = that one repo;
-*Permissions -> Contents: Read and write*), plus a passphrase. After that it is biometric unlock.
+*Permissions -> Contents: Read and write*), plus a passphrase. The first connection needs network
+access to open the existing ledger or confirm that a new one is needed. Once connected, the local
+copy remains readable and writable offline. Subsequent launches use biometric unlock.
 
 ---
 
