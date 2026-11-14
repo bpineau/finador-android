@@ -170,6 +170,8 @@ is about 6 MB. The two options that would remove the dependency outright are bot
 
 **KEEP**, with the scope written into `crypto/Argon2.kt`'s doc comment. Bouncy Castle is pure Java
 (no `.so`), has shipped continuously since 2000, and releases on a predictable quarterly cadence.
+The current pin is 1.87. An upgrade must preserve the Argon2id vectors and the bidirectional
+Go/Android ledger tests; the KDF parameters and file-format version do not change with the library.
 
 ---
 
