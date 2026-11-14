@@ -30,7 +30,8 @@ have() { command -v "$1" >/dev/null 2>&1; }
 # 1. The JDK
 # ---------------------------------------------------------------------------
 say "JDK ${JDK}"
-if [ -x "${JAVA_HOME:-}/bin/java" ] &&
+JAVA_HOME="$("$ROOT/scripts/environment.sh" java)"
+if [ -n "$JAVA_HOME" ] && [ -x "$JAVA_HOME/bin/java" ] &&
    "${JAVA_HOME}/bin/java" -version 2>&1 | head -1 | grep -q "\"${JDK}[.\"]"; then
   echo "already here: $JAVA_HOME"
 elif JH="$(/usr/libexec/java_home -v "$JDK" 2>/dev/null)" && [ -n "$JH" ]; then
@@ -59,13 +60,7 @@ export JAVA_HOME
 # 2. The Android SDK command-line tools
 # ---------------------------------------------------------------------------
 say "Android SDK"
-if [ -z "${ANDROID_HOME:-}" ] && [ -n "${ANDROID_SDK_ROOT:-}" ]; then
-  ANDROID_HOME="$ANDROID_SDK_ROOT"
-fi
-if [ -z "${ANDROID_HOME:-}" ] && have brew; then
-  ANDROID_HOME="$(brew --prefix)/share/android-commandlinetools"
-fi
-: "${ANDROID_HOME:=${HOME}/Android/Sdk}"
+ANDROID_HOME="$("$ROOT/scripts/environment.sh" sdk)"
 
 SDKMANAGER="${ANDROID_HOME}/cmdline-tools/latest/bin/sdkmanager"
 if [ -x "$SDKMANAGER" ]; then
@@ -159,7 +154,10 @@ if [ "$WANT_EMULATOR" = "1" ]; then
     { echo "emulator: installing"; sdk_install "emulator"; }
 
   IMAGE="system-images;android-${COMPILE_SDK}.0;google_apis;${ABI}"
-  if [ -d "${ANDROID_HOME}/system-images/android-${COMPILE_SDK}.0" ]; then
+  if [ -f "${ANDROID_HOME}/system-images/android-${COMPILE_SDK}.0/google_apis/${ABI}/system.img" ]; then
+    echo "$IMAGE: already here"
+  elif [ -f "${ANDROID_HOME}/system-images/android-${COMPILE_SDK}/google_apis/${ABI}/system.img" ]; then
+    IMAGE="system-images;android-${COMPILE_SDK};google_apis;${ABI}"
     echo "$IMAGE: already here"
   else
     echo "$IMAGE: installing (~1.5 GB)"
@@ -170,7 +168,8 @@ if [ "$WANT_EMULATOR" = "1" ]; then
   fi
 
   AVD="test${COMPILE_SDK}"
-  if [ -f "${HOME}/.android/avd/${AVD}.ini" ]; then
+  AVD_HOME="${ANDROID_AVD_HOME:-$HOME/.android/avd}"
+  if [ -f "${AVD_HOME}/${AVD}.ini" ]; then
     echo "AVD ${AVD}: already here"
   else
     echo "AVD ${AVD}: creating"
@@ -185,7 +184,7 @@ fi
 # ---------------------------------------------------------------------------
 say "local.properties"
 if [ -f local.properties ]; then
-  echo "already here: $(cat local.properties)"
+  echo "already here: sdk.dir=$(sed -n 's/^sdk.dir=//p' local.properties)"
 else
   echo "sdk.dir=${ANDROID_HOME}" > local.properties
   echo "written: sdk.dir=${ANDROID_HOME}   (git-ignored, machine-local)"

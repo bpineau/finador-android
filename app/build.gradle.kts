@@ -65,6 +65,10 @@ android {
         buildConfig = true // BuildConfig.VERSION_NAME is shown in Settings
     }
 
+    lint {
+        warningsAsErrors = true
+    }
+
     // The live provider probe (`market/LiveProbe.kt`) is compiled into BOTH test source sets rather
     // than duplicated: the host JVM and a device do not share a TLS stack, so the same body has to
     // run in both places to mean anything (see `net/Tls.kt`). It ships in neither APK, debug or
@@ -75,9 +79,9 @@ android {
     }
 }
 
-// The JDK the build RUNS on, pinned here instead of inherited from whatever the laptop happens to
-// have on its PATH: Gradle picks an installed JDK 21 for javac, kotlinc and the forked test JVM, so
-// two machines compile the same bytecode. `make doctor` checks that such a JDK exists and
+// The compilation/test JDK: Gradle picks an installed JDK 21 for javac, kotlinc and the forked
+// test JVM. Make's environment discovery selects the Gradle daemon runtime separately; the
+// toolchain language version does not pin the JDK vendor or patch. `make doctor` checks it and
 // `make setup` installs it (Homebrew's `temurin@21`). Auto-provisioning is deliberately OFF (see
 // `gradle.properties`): the only way to turn it on is a third-party resolver plugin that downloads
 // JDKs from a third-party API at build time, which is one more moving part than this project wants
@@ -90,6 +94,7 @@ java {
 
 kotlin {
     compilerOptions {
+        allWarningsAsErrors.set(true)
         // The BYTECODE level, a different question from the JDK above: Android's D8 reads Java 17
         // class files. Keep it in step with `compileOptions`, or Gradle fails the build with an
         // inconsistent-JVM-target error.
@@ -114,7 +119,8 @@ dependencies {
     // (ContextCompat.getMainExecutor) and data/SecretStore.kt (SharedPreferences.edit) all use it,
     // and it would otherwise arrive only as a transitive of Compose.
     implementation(libs.androidx.core.ktx)
-    implementation(libs.androidx.navigation.compose)
+    implementation(libs.androidx.navigation3.runtime)
+    implementation(libs.androidx.navigation3.ui)
     implementation(libs.androidx.lifecycle.viewmodel.compose)
     implementation(libs.androidx.lifecycle.runtime.compose)
     implementation(libs.kotlinx.coroutines.android)

@@ -106,9 +106,9 @@ and it outranks features. When in doubt, do less.
 ### (f) A feature that adds yearly upkeep must earn it.
 
 - DO prefer the version of a feature that adds no permission, no background work, no service, no
-  reflection and no library. Today the app declares one permission (`INTERNET`), one activity, no
-  service, no receiver, no background work and no reflection; that is why most behaviour-change rows
-  answer "no".
+  reflection and no library. Application code declares INTERNET and one activity, without a
+  service, receiver or background work. AndroidX contributes biometric permissions, Startup and
+  ProfileInstaller components to the merged manifest; inspect it on upgrades (maintainability §8).
 - DO NOT ship a feature whose upkeep is not written down. If it needs a yearly check, it belongs in
   `docs/maintainability.md` §9 with the others, or it does not ship.
 
@@ -168,7 +168,7 @@ why the Makefile prints the summary line itself.
 4. Never claim a result you did not run.
 
 **Emulator.** `make setup-emulator` creates the AVD named after `compileSdk` (`test37` today);
-`make emulator` boots it headless and waits, `make run` installs and launches, `make emulator-kill`
+`make emulator` reuses or boots that AVD headless with a bounded wait, `make run` installs and launches, `make emulator-kill`
 stops it. The AVDs hold no configured state, so the app lands on **Onboarding**: the smoke test
 verifies boot plus first screen, not an unlocked portfolio. Crashes: `adb logcat -d -s
 AndroidRuntime:E`.
@@ -177,7 +177,7 @@ AndroidRuntime:E`.
 rationale lives in commit messages: there is no separate decision log, so write the why there.
 Do NOT tag by hand: a `v*` tag is created by `make gh-release`, which is a real publication (it runs
 `make test` and `make crossimpl`, builds the R8-minified release APK, **verifies its signature with
-`apksigner`**, tags, pushes and creates the GitHub release with the APK attached). It refuses to
+`apksigner` and its 16 KB ZIP alignment with `zipalign`**, tags, pushes and creates the GitHub release with the APK attached). It refuses to
 publish a debug-signed APK, since that key is public and cannot upgrade an installed app
 (`DEBUG_APK=1` does it deliberately, named `-debug`). Two cheap probes first: `make check-signing`
 (is a real key configured here? prints no secret) and `make gh-release-dry-run` (everything except
@@ -417,9 +417,13 @@ Each of these cost real debugging once. Symptom, cause, what to do.
 - **Dependency verification** (`gradle/verification-metadata.xml`) is deliberately NOT adopted;
   the reasoning, with the measured size of the file it would add, is `docs/maintainability.md` §13.
   What IS pinned: the Gradle distribution's SHA-256 and every dependency version exactly.
-- **`androidx.biometric` cannot be dropped** without raising `minSdk` to 30, a product decision
-  (`docs/maintainability.md` §4). Same for the `@ExperimentalMaterial3Api` opt-ins (§12) and
-  navigation-compose (§3): all three examined, all three kept, with reasons.
+- **Stable `androidx.biometric` stays** for authentication down to minSdk 26. Current Core makes
+  its old fingerprint helper a no-op, so API 26/27 use the system credential fallback. Revisit
+  Biometric 1.4 when stable; do not add a beta or raise minSdk just to remove FragmentActivity
+  (`docs/maintainability.md` §4). Material3 opt-ins retain documented fallbacks (§12).
+- **Navigation 3 owns rendering and predictive back.** NavigationState owns eleven typed routes
+  and three tab stacks, saved through its concrete serializer. Keep inactive tab state decorators
+  alive; test tab/detail back, rotation and process restoration when changing it (§3).
 - The *data* lives in a separate private repository; this code repository is public.
 
 ## 9. Definition of done

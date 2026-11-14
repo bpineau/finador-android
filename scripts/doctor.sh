@@ -15,8 +15,8 @@ JDK="$(sed -n 's/.*JavaLanguageVersion.of(\([0-9]*\)).*/\1/p' app/build.gradle.k
 COMPILE_SDK="$(sed -n 's/.*compileSdk = \([0-9]*\).*/\1/p' app/build.gradle.kts)"
 GRADLE_VERSION="$(sed -n 's/.*gradle-\([0-9.]*\)-bin\.zip.*/\1/p' gradle/wrapper/gradle-wrapper.properties)"
 
-JAVA_HOME="${JAVA_HOME:-}"
-ANDROID_HOME="${ANDROID_HOME:-${ANDROID_SDK_ROOT:-}}"
+JAVA_HOME="$("$ROOT/scripts/environment.sh" java)"
+ANDROID_HOME="$("$ROOT/scripts/environment.sh" sdk)"
 
 missing=0
 
@@ -45,17 +45,17 @@ else
   note "Homebrew" "not a macOS host: install the JDK and the SDK with your package manager"
 fi
 
-if [ -x "${JAVA_HOME}/bin/java" ]; then
+if [ -n "$JAVA_HOME" ] && [ -x "$JAVA_HOME/bin/java" ]; then
   java_v="$("${JAVA_HOME}/bin/java" -version 2>&1 | head -1 | sed 's/.*"\(.*\)".*/\1/')"
   java_vendor="$("${JAVA_HOME}/bin/java" -version 2>&1 | sed -n '2s/ (build.*//p')"
   case "$java_v" in
     "${JDK}"|"${JDK}".*) ok "JDK ${JDK}" "$java_v ${java_vendor:-} ($JAVA_HOME)" ;;
     *) gone "JDK ${JDK}" "found $java_v at $JAVA_HOME, the build wants ${JDK}" \
-            "brew install --cask temurin@${JDK}" ;;
+            "make setup (or install JDK ${JDK} with your package manager and set JAVA_HOME)" ;;
   esac
 else
   gone "JDK ${JDK}" "no java at ${JAVA_HOME:-<JAVA_HOME unset>}" \
-       "brew install --cask temurin@${JDK}   # then: make doctor"
+       "make setup (or install JDK ${JDK} with your package manager and set JAVA_HOME)"
 fi
 
 if [ -d "${ANDROID_HOME}/cmdline-tools" ] || [ -d "${ANDROID_HOME}/platforms" ]; then
@@ -130,7 +130,7 @@ else
   absent "system images" "none" "make setup-emulator   # ~1.5 GB"
 fi
 
-avds="$(ls "${HOME}"/.android/avd/*.ini 2>/dev/null | xargs -n1 basename 2>/dev/null | sed 's/\.ini$//' | tr '\n' ' ')"
+avds="$(ls "${ANDROID_AVD_HOME:-$HOME/.android/avd}"/*.ini 2>/dev/null | xargs -n1 basename 2>/dev/null | sed 's/\.ini$//' | tr '\n' ' ')"
 if [ -n "$avds" ]; then
   ok "AVDs" "$avds"
 else
@@ -175,6 +175,13 @@ if [ -x "$apksigner" ]; then
   ok "apksigner" "$apksigner"
 else
   absent "apksigner" "comes with the build-tools" "make setup"
+fi
+
+zipalign="$(dirname "$apksigner")/zipalign"
+if [ -x "$zipalign" ]; then
+  ok "zipalign" "$zipalign"
+else
+  absent "zipalign" "required for the release APK's 16 KB ZIP alignment check" "make setup"
 fi
 
 # ---------------------------------------------------------------------------

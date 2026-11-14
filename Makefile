@@ -8,24 +8,9 @@
 JDK := $(shell sed -n 's/.*JavaLanguageVersion.of(\([0-9]*\)).*/\1/p' app/build.gradle.kts)
 COMPILE_SDK := $(shell sed -n 's/.*compileSdk = \([0-9]*\).*/\1/p' app/build.gradle.kts)
 
-# The JDK: whatever the shell exports, else the Homebrew/Temurin location, else ask macOS.
-# (`?=` is lazy, so the /usr/libexec call only happens when JAVA_HOME is unset AND the path below
-# does not exist.)
-TEMURIN := /Library/Java/JavaVirtualMachines/temurin-$(JDK).jdk/Contents/Home
-ifneq ($(wildcard $(TEMURIN)),)
-JAVA_HOME ?= $(TEMURIN)
-else
-JAVA_HOME ?= $(shell /usr/libexec/java_home -v $(JDK) 2>/dev/null)
-endif
-
-# The SDK: ANDROID_HOME, else the deprecated-but-common ANDROID_SDK_ROOT, else the first standard
-# location that exists (Homebrew on Apple Silicon, on Intel, Android Studio's macOS and Linux
-# defaults), else the Homebrew path so the error message names something actionable.
-ANDROID_HOME ?= $(or $(ANDROID_SDK_ROOT),$(firstword $(wildcard \
-	/opt/homebrew/share/android-commandlinetools \
-	/usr/local/share/android-commandlinetools \
-	$(HOME)/Library/Android/sdk \
-	$(HOME)/Android/Sdk)),/opt/homebrew/share/android-commandlinetools)
+# Setup, doctor and make use the same environment discovery, including Linux's JDK on PATH.
+JAVA_HOME ?= $(shell scripts/environment.sh java)
+ANDROID_HOME ?= $(shell scripts/environment.sh sdk)
 
 export JAVA_HOME ANDROID_HOME
 
@@ -37,6 +22,7 @@ AVD ?= test$(COMPILE_SDK)
 
 RELEASE_APK := app/build/outputs/apk/release/app-release.apk
 APKSIGNER = $$(ls -d "$(ANDROID_HOME)"/build-tools/* 2>/dev/null | sort -V | tail -1)/apksigner
+ZIPALIGN = $$(ls -d "$(ANDROID_HOME)"/build-tools/* 2>/dev/null | sort -V | tail -1)/zipalign
 # The app version is read from the build file (single source of truth); lazy so it is
 # evaluated when a target runs, after any bump commit.
 VERSION = $(shell sed -n 's/.*versionName = "\(.*\)".*/\1/p' app/build.gradle.kts)
@@ -78,7 +64,7 @@ setup-emulator: ## Same, plus the emulator, a system image for the build's compi
 # Two file tests, no subprocess beyond one shell: enough to turn "Gradle exploded in 400 lines"
 # into "run make doctor". Anything subtler belongs in `make doctor`, which is opt-in.
 preflight:
-	@test -x "$(JAVA_HOME)/bin/java" || { \
+	@test -n "$(JAVA_HOME)" && test -x "$(JAVA_HOME)/bin/java" || { \
 	  echo "ERROR: no JDK $(JDK) at '$(JAVA_HOME)' - run 'make doctor' (or 'make setup')"; exit 1; }
 	@test -d "$(ANDROID_HOME)/cmdline-tools" -o -d "$(ANDROID_HOME)/platforms" || { \
 	  echo "ERROR: no Android SDK at '$(ANDROID_HOME)' - run 'make doctor' (or 'make setup')"; exit 1; }
@@ -101,7 +87,7 @@ install: preflight ## Build and install the debug APK on the connected device/em
 run: install ## Install, then (re)launch the app
 	$(ADB) shell am start -n fin.android/.ui.MainActivity
 
-reinstall: ## Uninstall then install the debug APK (fixes the signature mismatch after a release smoke)
+reinstall: preflight ## Uninstall then install the debug APK (fixes the signature mismatch after a release smoke)
 	-$(ADB) uninstall fin.android
 	$(GRADLE) installDebug
 
@@ -150,6 +136,8 @@ release-apk: check-signing release ## Build, signature-verify and stage the inst
 	  exit 1; \
 	}
 	$(APKSIGNER) verify --verbose --print-certs $(RELEASE_APK)
+	@test -x "$(ZIPALIGN)" || { echo "ERROR: zipalign missing - run 'make setup'"; exit 1; }
+	$(ZIPALIGN) -c -P 16 4 $(RELEASE_APK)
 	@if $(APKSIGNER) verify --print-certs $(RELEASE_APK) | grep -q "CN=Android Debug"; then \
 	  if [ -z "$(DEBUG_APK)" ]; then \
 	    echo "ERROR: the built APK is DEBUG-signed - refusing to name it a release."; \
@@ -238,15 +226,10 @@ crossimpl: preflight ## Cross-implementation gate against the Go reference (buil
 	scripts/crossimpl.sh
 
 emulator: ## Boot the headless test emulator and wait until it is ready (override the AVD with AVD=name)
-	@test -d "$(HOME)/.android/avd/$(AVD).avd" || { \
-	  echo "ERROR: no AVD named '$(AVD)' - run 'make setup-emulator' (or pass AVD=<name>)"; exit 1; }
-	$(EMULATOR) -avd $(AVD) -no-window -no-audio -no-boot-anim >/dev/null 2>&1 &
-	$(ADB) wait-for-device
-	until [ "$$($(ADB) shell getprop sys.boot_completed 2>/dev/null | tr -d '\r')" = "1" ]; do sleep 2; done
-	@echo "emulator ready"
+	@scripts/emulator.sh "$(AVD)"
 
 emulator-kill: ## Shut the emulator down
 	$(ADB) emu kill
 
-clean: ## Delete build outputs
+clean: preflight ## Delete build outputs
 	$(GRADLE) clean

@@ -45,13 +45,13 @@ setup` prints those two steps for you if you run it on Linux with nothing instal
 
 | Piece | What it guarantees |
 |---|---|
-| `./gradlew` (the wrapper) | downloads **Gradle 9.7.1** and checks its SHA-256 before running. Never `brew install gradle`. |
+| `./gradlew` (the wrapper) | downloads **Gradle 9.9.1** and checks its SHA-256 before running. Never `brew install gradle`. |
 | `gradle/libs.versions.toml` | the one list of dependencies, each at an **exact** version: no `+`, no ranges, no snapshots. |
 | a version-catalog bump + `make test build lint crossimpl` | how a dependency is upgraded and proven. |
 | `make test` | the unit suite on the host JVM, no device needed (the engine layers are pure Kotlin). |
 | `make build` | the debug APK. |
 | `make doctor` / `make setup` | check / install everything the build needs (JDK, SDK, platform, build-tools, licences). |
-| the Java **toolchain** in `app/build.gradle.kts` | pins the JDK the build runs on (21), independently of what is on your PATH. |
+| the Java **toolchain** in `app/build.gradle.kts` | pins compilation and tests to JDK 21; shared discovery selects the Gradle daemon JDK. Vendor and patch releases remain package-manager choices. |
 
 What the app is built with, all pinned: **JDK 21**, Gradle **9.9.1**, Android Gradle Plugin
 **9.5.1**, Kotlin **2.4.21**, Compose BOM **2026.09.00**, `compileSdk`/`targetSdk` **37**,
@@ -112,13 +112,16 @@ copy remains readable and writable offline. Subsequent launches use biometric un
 
 ```sh
 make setup-emulator       # one-time: emulator + an API 37 system image + the AVD (~1.5 GB)
-make emulator             # boots it headless and waits until it is ready
+make emulator             # boots it headless, with a 180-second startup limit
 make run                  # install + launch on it
 make emulator-kill        # stop it
 ```
 
 The AVD is named after the build's `compileSdk` (`test37` today); override with
-`make emulator AVD=other`. A visible window instead of headless:
+`make emulator AVD=other`. Setup checks the exact Google APIs image for the host ABI. Startup
+reuses that AVD if it is already running, prints the emulator log on failure, and accepts
+`EMULATOR_BOOT_TIMEOUT=300 make emulator` on slower hosts. If multiple devices are connected,
+use the printed serial with `ANDROID_SERIAL=emulator-5554 make run`. A visible window instead of headless:
 `$ANDROID_HOME/emulator/emulator -avd test37` in its own terminal.
 
 ---
@@ -172,7 +175,7 @@ IP and the same minute. `net/Tls.kt` holds that measurement. The device probe is
 `gh-release`, because it needs a booted emulator and the live internet; run it by hand first.
 
 `gh-release` runs `make test` and `make crossimpl`, builds the R8-minified release APK,
-verifies its signature with `apksigner`, stages it as
+verifies its signature with `apksigner` and its 16 KB ZIP alignment with `zipalign`, stages it as
 `app/build/dist/finador-android-v<version>.apk` and attaches it to the GitHub release. Re-running is
 safe: an existing tag at `HEAD` is reused, an existing release has its asset replaced.
 
@@ -211,9 +214,10 @@ one; a failure then names its own cause.
   targets, i.e. the moment a user gets a new phone.
 - `developer.android.com/about/versions/<N>/behavior-changes-<N>` - applies once `targetSdk` is N.
 
-Answer them row by row and write the answers down: `docs/maintainability.md` §8 is last year's
-table and the template for the next one. Most rows are "no": this app declares one permission
-(`INTERNET`), one activity, no service, no receiver, no background work and no reflection.
+Answer them row by row and write the answers down: `docs/maintainability.md` section 8 records
+the current API audit and the template for the next one. Most rows are "no": application code
+declares INTERNET and one activity, without services, receivers or background work. Also inspect
+the merged manifest: AndroidX adds biometric permissions, Startup and ProfileInstaller components.
 
 ### What proves it
 
@@ -253,8 +257,8 @@ Three questions, in this order:
 
 1. **Does it apply to an app that only targets the new level, or to every app?** "All apps" means a
    user's new phone changes behaviour under you, whatever you do. Those are the urgent ones.
-2. **What is the removal date?** Android deprecations usually announce a version where the API stops
-   working, often two releases later. That date is the deadline, not the notice.
+2. **What changes, and when?** Read the specific notice: deprecation alone does not promise a
+   removal date. A no-op, target-SDK restriction or documented removal needs its own action date.
 3. **Is the replacement available at `minSdk` 26?** Often it is not (see `androidx.biometric` in
    `docs/maintainability.md` §4), and then the choice is "keep the old API" or "raise `minSdk` and
    drop old phones" - a product decision, to be written down, not a mechanical fix.

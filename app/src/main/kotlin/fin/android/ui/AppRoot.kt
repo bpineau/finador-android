@@ -4,6 +4,7 @@ import androidx.compose.animation.AnimatedContentTransitionScope.SlideDirection
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
+import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -29,45 +30,30 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.key
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.Saver
+import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.unit.dp
 import androidx.fragment.app.FragmentActivity
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
-import androidx.navigation.NavDestination.Companion.hierarchy
-import androidx.navigation.NavGraph.Companion.findStartDestination
-import androidx.navigation.NavType
-import androidx.navigation.compose.NavHost
-import androidx.navigation.compose.composable
-import androidx.navigation.compose.currentBackStackEntryAsState
-import androidx.navigation.compose.rememberNavController
-import androidx.navigation.navArgument
+import androidx.navigation3.runtime.entryProvider
+import androidx.navigation3.runtime.rememberDecoratedNavEntries
+import androidx.navigation3.runtime.rememberSaveableStateHolderNavEntryDecorator
+import androidx.navigation3.ui.NavDisplay
 import fin.android.data.AppState
-
-object Routes {
-    const val PORTFOLIO = "portfolio"
-    const val GAINS = "gains"
-    const val SETTINGS = "settings"
-    const val TX_ENTRY = "txentry"
-    const val ASSET = "asset/{assetId}"
-    const val ACCOUNTS = "accounts"
-    const val ACCOUNT_NEW = "account/new"
-    const val ACCOUNT_EDIT = "account/{accountId}/edit"
-    const val ASSETS = "assets"
-    const val ASSET_NEW = "asset/new"
-    const val ASSET_EDIT = "asset/{assetId}/edit"
-    fun asset(assetId: String) = "asset/$assetId"
-    fun accountEdit(accountId: String) = "account/$accountId/edit"
-    fun assetEdit(assetId: String) = "asset/$assetId/edit"
-}
+import kotlinx.serialization.json.Json
 
 /** Top-level sections reachable from the bottom NavigationBar. */
-private enum class TopLevel(val route: String, val label: String, val icon: ImageVector) {
-    Portfolio(Routes.PORTFOLIO, "Portfolio", FinIcons.PieChart),
-    Gains(Routes.GAINS, "Gains", FinIcons.TrendingUp),
-    Settings(Routes.SETTINGS, "Settings", FinIcons.Settings),
+private enum class TopLevel(val section: Section, val label: String, val icon: ImageVector) {
+    Portfolio(Section.PORTFOLIO, "Portfolio", FinIcons.PieChart),
+    Gains(Section.GAINS, "Gains", FinIcons.TrendingUp),
+    Settings(Section.SETTINGS, "Settings", FinIcons.Settings),
 }
 
 /**
@@ -75,7 +61,7 @@ private enum class TopLevel(val route: String, val label: String, val icon: Imag
  * Material 3's NavigationBar, whose fixed 80dp height clips the icons when forced shorter.
  */
 @Composable
-private fun CompactBottomBar(isSelected: (String) -> Boolean, onSelect: (String) -> Unit) {
+private fun CompactBottomBar(isSelected: (Section) -> Boolean, onSelect: (Section) -> Unit) {
     Surface(color = MaterialTheme.colorScheme.surface, tonalElevation = 3.dp) {
         Row(
             modifier = Modifier
@@ -86,7 +72,7 @@ private fun CompactBottomBar(isSelected: (String) -> Boolean, onSelect: (String)
             verticalAlignment = Alignment.CenterVertically,
         ) {
             TopLevel.entries.forEach { item ->
-                val tint = if (isSelected(item.route)) {
+                val tint = if (isSelected(item.section)) {
                     MaterialTheme.colorScheme.primary
                 } else {
                     MaterialTheme.colorScheme.onSurfaceVariant
@@ -95,7 +81,7 @@ private fun CompactBottomBar(isSelected: (String) -> Boolean, onSelect: (String)
                     modifier = Modifier
                         .weight(1f)
                         .fillMaxHeight()
-                        .clickable { onSelect(item.route) },
+                        .clickable { onSelect(item.section) },
                     horizontalAlignment = Alignment.CenterHorizontally,
                     verticalArrangement = Arrangement.Center,
                 ) {
@@ -140,33 +126,63 @@ fun AppRoot(vm: AppViewModel, activity: FragmentActivity) {
 
 @Composable
 private fun ReadyNav(vm: AppViewModel, ready: AppState.Ready, snackbar: SnackbarHostState) {
-    val nav = rememberNavController()
-    val backStack by nav.currentBackStackEntryAsState()
-    val currentRoute = backStack?.destination?.route
-    // The bottom bar + FAB belong only to the three top-level sections; detail/entry push over them.
-    val onTopLevel = TopLevel.entries.any { it.route == currentRoute }
+    var nav by rememberSaveable(stateSaver = navigationSaver) { mutableStateOf(NavigationState()) }
+    val navigate: (Route) -> Unit = { nav = nav.navigate(it) }
+    val back = { nav = nav.back() }
+    val provider = entryProvider<Route> {
+        entry<Route.Portfolio> {
+            PortfolioScreen(vm, ready, onAssetClick = { navigate(Route.Asset(it)) })
+        }
+        entry<Route.Gains> {
+            GainsScreen(vm, ready, onAssetClick = { navigate(Route.Asset(it)) })
+        }
+        entry<Route.Settings> {
+            SettingsScreen(vm, ready,
+                onManageAccounts = { navigate(Route.Accounts) },
+                onManageAssets = { navigate(Route.Assets) })
+        }
+        entry<Route.Accounts> {
+            AccountListScreen(vm, ready, onAdd = { navigate(Route.NewAccount) },
+                onEdit = { navigate(Route.EditAccount(it)) }, onBack = back)
+        }
+        entry<Route.NewAccount> { AccountEditorScreen(vm, ready, accountId = null, onDone = back) }
+        entry<Route.EditAccount> { AccountEditorScreen(vm, ready, accountId = it.accountId, onDone = back) }
+        entry<Route.Assets> {
+            AssetListScreen(vm, ready, onAdd = { navigate(Route.NewAsset) },
+                onEdit = { navigate(Route.EditAsset(it)) }, onBack = back)
+        }
+        entry<Route.NewAsset> { AssetEditorScreen(vm, ready, assetId = null, onDone = back) }
+        entry<Route.EditAsset> { AssetEditorScreen(vm, ready, assetId = it.assetId, onDone = back) }
+        entry<Route.Asset> { AssetDetailScreen(vm, assetId = it.assetId, onBack = back) }
+        entry<Route.Transaction> { TxEntryScreen(vm, ready, onDone = back) }
+    }
+    // Decorate inactive stacks too: their saved screen state must outlive a tab switch.
+    val entries = Section.entries.associateWith { section ->
+        key(section) {
+            rememberDecoratedNavEntries(
+                backStack = nav.stacks.getValue(section),
+                entryDecorators = listOf(rememberSaveableStateHolderNavEntryDecorator<Route>()),
+                entryProvider = provider,
+            )
+        }
+    }
+    val displayed = if (nav.selected == Section.PORTFOLIO) entries.getValue(Section.PORTFOLIO)
+        else entries.getValue(Section.PORTFOLIO) + entries.getValue(nav.selected)
 
     Scaffold(
         snackbarHost = { SnackbarHost(snackbar) },
         bottomBar = {
-            if (onTopLevel) {
+            if (nav.onTopLevel) {
                 CompactBottomBar(
-                    isSelected = { route -> backStack?.destination?.hierarchy?.any { it.route == route } == true },
-                    onSelect = { route ->
-                        nav.navigate(route) {
-                            // Single top-level back stack: switching tabs doesn't grow it.
-                            popUpTo(nav.graph.findStartDestination().id) { saveState = true }
-                            launchSingleTop = true
-                            restoreState = true
-                        }
-                    },
+                    isSelected = { it == nav.selected },
+                    onSelect = { navigate(it.route) },
                 )
             }
         },
         floatingActionButton = {
-            if (onTopLevel) {
+            if (nav.onTopLevel) {
                 FloatingActionButton(
-                    onClick = { nav.navigate(Routes.TX_ENTRY) },
+                    onClick = { navigate(Route.Transaction) },
                     containerColor = MaterialTheme.colorScheme.primary,
                     contentColor = MaterialTheme.colorScheme.onPrimary,
                 ) {
@@ -175,102 +191,29 @@ private fun ReadyNav(vm: AppViewModel, ready: AppState.Ready, snackbar: Snackbar
             }
         },
     ) { scaffoldPadding ->
-        NavHost(
-            navController = nav,
-            startDestination = Routes.PORTFOLIO,
+        NavDisplay(
+            entries = displayed,
+            onBack = back,
             modifier = Modifier.padding(scaffoldPadding).fillMaxSize(),
             // Short, crisp directional slides (push forward / pop back).
-            enterTransition = { slideIntoContainer(SlideDirection.Start, tween(170)) + fadeIn(tween(110)) },
-            exitTransition = { slideOutOfContainer(SlideDirection.Start, tween(170)) + fadeOut(tween(110)) },
-            popEnterTransition = { slideIntoContainer(SlideDirection.End, tween(170)) + fadeIn(tween(110)) },
-            popExitTransition = { slideOutOfContainer(SlideDirection.End, tween(170)) + fadeOut(tween(110)) },
-        ) {
-            composable(Routes.PORTFOLIO) {
-                PortfolioScreen(
-                    vm = vm,
-                    ready = ready,
-                    onAssetClick = { id -> nav.navigate(Routes.asset(id)) },
-                )
-            }
-            composable(Routes.GAINS) {
-                GainsScreen(
-                    vm = vm,
-                    ready = ready,
-                    onAssetClick = { id -> nav.navigate(Routes.asset(id)) },
-                )
-            }
-            composable(Routes.SETTINGS) {
-                SettingsScreen(
-                    vm = vm,
-                    ready = ready,
-                    onManageAccounts = { nav.navigate(Routes.ACCOUNTS) },
-                    onManageAssets = { nav.navigate(Routes.ASSETS) },
-                )
-            }
-            composable(Routes.ACCOUNTS) {
-                AccountListScreen(
-                    vm = vm,
-                    ready = ready,
-                    onAdd = { nav.navigate(Routes.ACCOUNT_NEW) },
-                    onEdit = { id -> nav.navigate(Routes.accountEdit(id)) },
-                    onBack = { nav.popBackStack() },
-                )
-            }
-            composable(Routes.ACCOUNT_NEW) {
-                AccountEditorScreen(vm = vm, ready = ready, accountId = null, onDone = { nav.popBackStack() })
-            }
-            composable(
-                Routes.ACCOUNT_EDIT,
-                arguments = listOf(navArgument("accountId") { type = NavType.StringType }),
-            ) { entry ->
-                AccountEditorScreen(
-                    vm = vm,
-                    ready = ready,
-                    accountId = entry.arguments?.getString("accountId"),
-                    onDone = { nav.popBackStack() },
-                )
-            }
-            composable(Routes.ASSETS) {
-                AssetListScreen(
-                    vm = vm,
-                    ready = ready,
-                    onAdd = { nav.navigate(Routes.ASSET_NEW) },
-                    onEdit = { id -> nav.navigate(Routes.assetEdit(id)) },
-                    onBack = { nav.popBackStack() },
-                )
-            }
-            composable(Routes.ASSET_NEW) {
-                AssetEditorScreen(vm = vm, ready = ready, assetId = null, onDone = { nav.popBackStack() })
-            }
-            composable(
-                Routes.ASSET_EDIT,
-                arguments = listOf(navArgument("assetId") { type = NavType.StringType }),
-            ) { entry ->
-                AssetEditorScreen(
-                    vm = vm,
-                    ready = ready,
-                    assetId = entry.arguments?.getString("assetId"),
-                    onDone = { nav.popBackStack() },
-                )
-            }
-            composable(
-                Routes.ASSET,
-                arguments = listOf(navArgument("assetId") { type = NavType.StringType }),
-            ) { entry ->
-                val assetId = entry.arguments?.getString("assetId").orEmpty()
-                AssetDetailScreen(
-                    vm = vm,
-                    assetId = assetId,
-                    onBack = { nav.popBackStack() },
-                )
-            }
-            composable(Routes.TX_ENTRY) {
-                TxEntryScreen(
-                    vm = vm,
-                    ready = ready,
-                    onDone = { nav.popBackStack() },
-                )
-            }
-        }
+            transitionSpec = {
+                (slideIntoContainer(SlideDirection.Start, tween(170)) + fadeIn(tween(110))) togetherWith
+                    (slideOutOfContainer(SlideDirection.Start, tween(170)) + fadeOut(tween(110)))
+            },
+            popTransitionSpec = {
+                (slideIntoContainer(SlideDirection.End, tween(170)) + fadeIn(tween(110))) togetherWith
+                    (slideOutOfContainer(SlideDirection.End, tween(170)) + fadeOut(tween(110)))
+            },
+            predictivePopTransitionSpec = {
+                (slideIntoContainer(SlideDirection.End, tween(170)) + fadeIn(tween(110))) togetherWith
+                    (slideOutOfContainer(SlideDirection.End, tween(170)) + fadeOut(tween(110)))
+            },
+        )
     }
 }
+
+// A concrete sealed serializer avoids reflective discovery of open NavKey implementations.
+private val navigationSaver = Saver<NavigationState, String>(
+    save = { Json.encodeToString(it) },
+    restore = { runCatching { Json.decodeFromString<NavigationState>(it) }.getOrNull() },
+)
