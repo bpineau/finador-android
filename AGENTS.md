@@ -219,6 +219,14 @@ Inside `market/`, the pieces that are not obvious:
 one price, and NEVER `Perf` or the period/history figures (Go decisions D36/D38: no override in
 `perf` or `chart`).
 
+Asset details show the price chart, the period table, then a zero-based performance chart with
+1w / 1m / 1y / Max ranges. `ui/AssetChartData.kt` projects the existing table's price/FX returns:
+1w uses 7d, and short-window endpoints match the corresponding table row even when the cutoff's
+FX rate changed on a day without an asset quote. `AssetDetail.periodEnd` supplies the same closing
+date as the table; future bars and off-hours prints never enter the performance chart. Max starts
+at the first available converted close. Missing short-window history is reported, never silently
+replaced with Max. Both charts share `ui/AssetCharts.kt`'s Canvas, with no chart library.
+
 **Data flow.** `MainActivity` -> `AppRoot` renders `AppViewModel.state: StateFlow<AppState>`
 (Loading / Onboarding / Locked / Ready). `AppRepository` is the only mutator: it opens the ledger via
 `Sync` (working copy in `filesDir/checkout`), values it (`Valuator` / `Gains` / `Perf`) and emits

@@ -1,15 +1,10 @@
 package fin.android.ui
 
-import androidx.compose.foundation.Canvas
-import androidx.compose.foundation.background
-import androidx.compose.foundation.clickable
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
@@ -25,17 +20,10 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.remember
-import androidx.compose.runtime.saveable.rememberSaveable
-import androidx.compose.runtime.setValue
-import java.time.LocalDate
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.clip
-import androidx.compose.ui.geometry.Offset
-import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
@@ -46,12 +34,14 @@ import fin.android.valuation.AssetPeriodGain
 /**
  * Per-asset detail page: a simplified, price/FX-move view of one held security. Shows the holding,
  * the current value in the reference currency, a small price sparkline, and a period %/absolute
- * table. Pushed full-screen over the bottom bar with an icon back button.
+ * table, followed by a zero-based performance chart. Pushed full-screen over the bottom bar
+ * with an icon back button.
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun AssetDetailScreen(vm: AppViewModel, assetId: String, onBack: () -> Unit) {
-    val detail = remember(assetId) { vm.assetDetail(assetId) }
+    val state by vm.state.collectAsStateWithLifecycle()
+    val detail = remember(assetId, state) { vm.assetDetail(assetId) }
 
     Scaffold(
         topBar = {
@@ -93,15 +83,16 @@ fun AssetDetailScreen(vm: AppViewModel, assetId: String, onBack: () -> Unit) {
             if (detail.kind == "property") {
                 if (detail.valuations.isNotEmpty()) ValuationsCard(detail)
             } else {
-                Sparkline(detail)
+                AssetPriceChart(detail)
                 PeriodsCard(detail)
+                AssetPerformanceChart(detail)
             }
         }
     }
 }
 
 @Composable
-private fun DetailCard(content: @Composable androidx.compose.foundation.layout.ColumnScope.() -> Unit) {
+internal fun DetailCard(content: @Composable androidx.compose.foundation.layout.ColumnScope.() -> Unit) {
     Card(
         modifier = Modifier.fillMaxWidth(),
         colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant),
@@ -182,93 +173,6 @@ private fun ValuationsCard(d: AssetDetail) {
         d.valuations.sortedByDescending { it.date }.forEach { v ->
             DetailRow(v.date.toString(), "${formatAmount(v.amount)} ${v.ccy}")
         }
-    }
-}
-
-/** Time ranges offered above the price sparkline; cutoff is relative to the latest point. */
-private enum class ChartRange(val label: String) {
-    M1("1m"), M6("6m"), Y1("1y"), MAX("Max");
-
-    fun cutoff(anchor: LocalDate): LocalDate? = when (this) {
-        M1 -> anchor.minusMonths(1)
-        M6 -> anchor.minusMonths(6)
-        Y1 -> anchor.minusYears(1)
-        MAX -> null
-    }
-}
-
-/** Discreet inline range picker: small accent pills, the selected one in a filled accent chip. */
-@Composable
-private fun RangeChips(selected: Int, onSelect: (Int) -> Unit) {
-    Row(horizontalArrangement = Arrangement.spacedBy(2.dp), verticalAlignment = Alignment.CenterVertically) {
-        ChartRange.entries.forEachIndexed { i, r ->
-            val isSelected = i == selected
-            Text(
-                r.label,
-                style = MaterialTheme.typography.labelMedium,
-                fontWeight = if (isSelected) FontWeight.SemiBold else FontWeight.Normal,
-                color = if (isSelected) MaterialTheme.colorScheme.onSecondaryContainer
-                else MaterialTheme.colorScheme.onSurfaceVariant,
-                modifier = Modifier
-                    .clip(RoundedCornerShape(50))
-                    .then(if (isSelected) Modifier.background(MaterialTheme.colorScheme.secondaryContainer) else Modifier)
-                    .clickable { onSelect(i) }
-                    .padding(horizontal = 10.dp, vertical = 4.dp),
-            )
-        }
-    }
-}
-
-@Composable
-private fun Sparkline(d: AssetDetail) {
-    val all = d.priceHistory
-    if (all.size < 2) return // defensive: nothing meaningful to draw
-    val lineColor = MaterialTheme.colorScheme.primary
-
-    var rangeOrdinal by rememberSaveable { mutableIntStateOf(ChartRange.M6.ordinal) }
-    val range = ChartRange.entries[rangeOrdinal]
-    val anchor = all.last().date
-    val pts = remember(rangeOrdinal, all) {
-        val cutoff = range.cutoff(anchor)
-        val filtered = if (cutoff == null) all else all.filter { !it.date.isBefore(cutoff) }
-        if (filtered.size >= 2) filtered else all // fall back to the full series if a range is too short
-    }
-
-    DetailCard {
-        Row(
-            Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.SpaceBetween,
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            Text(
-                "Price (${d.referenceCcy})",
-                style = MaterialTheme.typography.labelMedium,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
-            RangeChips(rangeOrdinal) { rangeOrdinal = it }
-        }
-        Canvas(modifier = Modifier.fillMaxWidth().height(120.dp)) {
-            val closes = pts.map { it.close }
-            val min = closes.min()
-            val max = closes.max()
-            val span = (max - min).takeIf { it > 0.0 } ?: 1.0
-            val w = size.width
-            val h = size.height
-            val dx = if (pts.size > 1) w / (pts.size - 1) else 0f
-            var prev: Offset? = null
-            pts.forEachIndexed { i, p ->
-                val x = dx * i
-                val y = (h - ((p.close - min) / span * h)).toFloat()
-                val cur = Offset(x, y)
-                prev?.let { drawLine(color = lineColor, start = it, end = cur, strokeWidth = 4f, cap = StrokeCap.Round) }
-                prev = cur
-            }
-        }
-        Text(
-            "${pts.first().date} → ${pts.last().date} · ${pts.size} pts",
-            style = MaterialTheme.typography.labelSmall,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-        )
     }
 }
 

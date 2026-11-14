@@ -64,6 +64,7 @@ data class AssetDetail(
     val accounts: List<String>, // account names holding it
     val periods: List<AssetPeriodGain>, // 1d,3d,5d,7d,1m,6m,1y,YTD
     val priceHistory: List<PricePoint>, // full ref-ccy price history, for the sparkline + range selector
+    val periodEnd: LocalDate? = null, // last close used by the period table, never an off-hours print
     // Cost basis (average-cost), in the reference currency. Populated for gains-taxed envelopes;
     // null for value-taxed / untaxed accounts where the engine tracks no basis.
     val costBasis: Double? = null, // total cost basis / purchase value, ref ccy
@@ -376,7 +377,7 @@ object Gains {
             priceEstimated = override == null && priceAt != null && series.isEstimatedAt(priceAt.second),
             priceProxy = if (override == null) series?.estimateProxy else null,
             accounts = positions.map { it.accountName }.distinct(),
-            periods = periods, priceHistory = priceHistory,
+            periods = periods, priceHistory = priceHistory, periodEnd = anchor,
             costBasis = costBasis,
             avgBuyPrice = costBasis?.let { it / qty },
             unrealized = costBasis?.let { value - it },
