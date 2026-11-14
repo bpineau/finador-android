@@ -27,9 +27,9 @@ import java.time.ZoneOffset
  * 1. **The host moved.** This provider used to call `tools.morningstar.fr`, whose name stopped
  *    resolving in 2026 (its CNAME target lost its address record, for everyone). `lt.morningstar.com`
  *    is what the Go reference uses and what answers today.
- * 2. **There are two view tokens, and they are not interchangeable.** [TIMESERIES_TOKEN] is the one
- *    embedded in the public chart pages, [SCREENER_TOKEN] the one the fund-search pages use; the
- *    timeseries token is refused by the screener.
+ * 2. **One view token serves both calls.** [TOKEN], the one embedded in the public chart pages,
+ *    is accepted by the screener too. The screener once had its own (`klr5zyak8x`), which answers
+ *    401 since Morningstar retired the national sites that embedded it: do not bring it back.
  * 3. **The id carries a suffix.** The timeseries service reads its `id` as a bracket-separated
  *    tuple and answers an EMPTY array, with HTTP 200, for a bare exchange-traded id. Only the
  *    presence of the two trailing fields matters, not their content, and appending [ID_SUFFIX] to
@@ -64,7 +64,7 @@ class Morningstar(
      */
     private fun search(query: String): Hit? {
         val url = Http.url(
-            "$base/api/rest.svc/$SCREENER_TOKEN/security/screener",
+            "$base/api/rest.svc/$TOKEN/security/screener",
             "page" to "1",
             "pageSize" to "10",
             "outputType" to "json",
@@ -86,7 +86,7 @@ class Morningstar(
     /** Downloads the daily NAV series for a Morningstar id (COMPACTJSON: `[[epochMillis, value], …]`). */
     private fun fetchNav(hit: Hit, from: LocalDate): DailyData? {
         val url = Http.url(
-            "$base/api/rest.svc/timeseries_price/$TIMESERIES_TOKEN",
+            "$base/api/rest.svc/timeseries_price/$TOKEN",
             "id" to hit.secId + ID_SUFFIX,
             "idtype" to "Morningstar",
             "frequency" to "daily",
@@ -144,11 +144,8 @@ class Morningstar(
     )
 
     companion object {
-        /** The view id embedded in Morningstar's public chart pages; stable for years. */
-        private const val TIMESERIES_TOKEN = "ok91jeenoo"
-
-        /** The view id of the screener behind the fund-search pages. A second, independent token. */
-        private const val SCREENER_TOKEN = "klr5zyak8x"
+        /** The view id embedded in Morningstar's public chart pages; stable for years, serves both calls. */
+        private const val TOKEN = "ok91jeenoo"
 
         /** Open-end funds and exchange-traded ones, searched together. */
         private const val UNIVERSES = "FOALL\$\$ALL|ETALL\$\$ALL"

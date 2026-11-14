@@ -742,9 +742,11 @@ and the provider here is now a port of it:
 
 Three things to know before touching it, all of them in the file's own doc comment:
 
-- **Two view tokens, not interchangeable.** `ok91jeenoo` belongs to the public chart pages and
-  serves the timeseries; `klr5zyak8x` belongs to the fund-search pages and serves the screener. The
-  timeseries token is refused by the screener.
+- **One view token serves both calls.** `ok91jeenoo`, from the public chart pages, is accepted by
+  the timeseries and the screener. The screener once had its own, `klr5zyak8x`, embedded in the
+  national fund-search pages; since those sites redirect to `global.morningstar.com` (behind an
+  anti-bot challenge) it answers HTTP 401 with an empty body. A 401 on the screener is the first
+  thing to check this way, before suspecting the client.
 - **The id carries a `]2]1]` suffix.** The timeseries service reads its `id` as a bracket-separated
   tuple and answers an **empty array with HTTP 200** for a bare exchange-traded id. Losing that
   suffix is what once silently emptied this source in the Go reference.

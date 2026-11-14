@@ -41,7 +41,7 @@ class MorningstarTest {
         assertEquals(103.0, data.closes[1].close, 0.0)
 
         val screenerReq = server.takeRequest()
-        assertTrue(screenerReq.path.startsWith("/api/rest.svc/klr5zyak8x/security/screener?"))
+        assertTrue(screenerReq.path.startsWith("/api/rest.svc/ok91jeenoo/security/screener?"))
         assertTrue(screenerReq.path.contains("term=FR0000000000"))
         // Both universes, escaped: a share class sits in exactly one of them.
         assertTrue(screenerReq.path.contains("universeIds=FOALL%24%24ALL%7CETALL%24%24ALL"))
