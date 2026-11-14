@@ -85,6 +85,22 @@ class QuotesTest {
 
     private fun d(s: String) = LocalDate.parse(s)
 
+    @Test fun refreshDropsQuotesAfterIdentifiersAreRemovedOrKindChangesEvenIfFetchFails() {
+        val original = Asset("a", AssetKind.SECURITY, "Synthetic Fund", ticker = "GTWR", ccy = "USD")
+        val day = d("2026-06-01")
+        val existing = MarketData(
+            prices = mapOf("a" to PriceSeries(listOf(PricePoint(day, 50.0)), quote = "GTWR||USD")),
+            dividends = mapOf("a" to listOf(DividendEvent(day, 2.0))),
+        )
+        for (changed in listOf(original.copy(ticker = null), original.copy(kind = AssetKind.PROPERTY),
+            original.copy(ticker = "OTHER"), original.copy(isin = "SYNTHETIC"), original.copy(ccy = "EUR"))) {
+            val refreshed = Quotes.refresh(Book(assets = mapOf("a" to changed)), existing, day, day,
+                referenceCcy = "USD", multi = MultiSource(emptyList()), yahoo = yahoo())
+            assertNull(changed.toString(), refreshed.prices["a"])
+            assertNull(changed.toString(), refreshed.dividends["a"])
+        }
+    }
+
     private fun book() = Book(
         accounts = mapOf("cto" to Account("cto", "CTO", "EUR", TaxRule.None)),
         assets = mapOf(

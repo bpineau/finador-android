@@ -86,6 +86,26 @@ data class MarketData(
     val fx: Map<String, PriceSeries> = emptyMap(),
     val dividends: Map<String, List<DividendEvent>> = emptyMap(),
 ) {
+    /** Asset ids whose cached instrument no longer matches the book, including a known edit. */
+    fun invalidatedAssets(book: Book, previous: Book? = null): Set<String> {
+        val ids = prices.keys + dividends.keys + previous?.assets.orEmpty().keys
+        return ids.filterTo(mutableSetOf()) { id ->
+            if (id.startsWith("proxy:")) return@filterTo false
+            val asset = book.assets[id]
+            val old = previous?.assets?.get(id)
+            asset == null || asset.kind != AssetKind.SECURITY ||
+                (asset.ticker.isNullOrBlank() && asset.isin.isNullOrBlank()) ||
+                (prices[id]?.quote?.let { it != asset.quoteKey() } == true) ||
+                (old != null && (old.kind != asset.kind || old.quoteKey() != asset.quoteKey()))
+        }
+    }
+
+    /** Removes prices and distributions together; FX and reserved proxy series stay reusable. */
+    fun withoutAssets(ids: Set<String>): MarketData = if (ids.isEmpty()) this else copy(
+        prices = prices - ids,
+        dividends = dividends - ids,
+    )
+
     /**
      * The same data with every nowcast tail dropped (see [PriceSeries.withoutEstimates]). What
      * persists must be what a source published: an estimate is cheap to recompute and would

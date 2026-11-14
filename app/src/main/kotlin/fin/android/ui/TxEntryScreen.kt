@@ -33,6 +33,7 @@ import fin.android.data.AppState
 import fin.android.domain.Account
 import fin.android.domain.Asset
 import fin.android.domain.TxKind
+import fin.android.domain.TransactionRules
 import java.math.BigDecimal
 import java.time.LocalDate
 import java.time.format.DateTimeFormatter
@@ -164,7 +165,7 @@ fun TxEntryScreen(vm: AppViewModel, ready: AppState.Ready, onDone: () -> Unit) {
             Spacer(Modifier.height(8.dp))
             Button(
                 onClick = {
-                    error = validate(account, kind, asset, dateText, qty, amount, ccy)
+                    error = validateTransaction(account, kind, asset, dateText, qty, amount, ccy)
                     if (error != null) return@Button
                     val acc = account!!
                     val parsedDate = LocalDate.parse(dateText.trim(), DateTimeFormatter.ISO_LOCAL_DATE)
@@ -200,7 +201,7 @@ fun TxEntryScreen(vm: AppViewModel, ready: AppState.Ready, onDone: () -> Unit) {
     }
 }
 
-private fun validate(
+internal fun validateTransaction(
     account: Account?,
     kind: TxKind,
     asset: Asset?,
@@ -213,10 +214,12 @@ private fun validate(
     if (kind in needsAsset && asset == null) return "Pick an asset for ${kind.name}"
     runCatching { LocalDate.parse(dateText.trim(), DateTimeFormatter.ISO_LOCAL_DATE) }
         .getOrElse { return "Date must be yyyy-MM-dd" }
-    if (kind == TxKind.buy || kind == TxKind.sell) {
-        if (qty.trim().toBigDecimalOrNull() == null) return "Quantity must be a number"
-    }
-    if (amount.trim().toBigDecimalOrNull() == null) return "Amount must be a number"
+    val parsedQty = if (kind == TxKind.buy || kind == TxKind.sell) {
+        qty.trim().toBigDecimalOrNull() ?: return "Quantity must be a number"
+    } else BigDecimal.ZERO
+    val parsedAmount = amount.trim().toBigDecimalOrNull() ?: return "Amount must be a number"
+    runCatching { TransactionRules.checkValues(kind, asset?.id, parsedQty, parsedAmount) }
+        .exceptionOrNull()?.let { return it.message }
     if (ccy.isBlank()) return "Currency required"
     return null
 }

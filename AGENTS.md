@@ -330,6 +330,31 @@ Each of these cost real debugging once. Symptom, cause, what to do.
   has never seen. `Sync.mutate` merges the fetched remote INTO it rather than writing the remote
   bytes over it, and `pullIfStale` skips the pull entirely while dirty, since that path has no
   passphrase to merge with. Asserted by `remote/SyncTest`'s two "unpushed local change" tests.
+  Dirty is persisted BEFORE changed or recovered ledger bytes are installed. `SyncState.synced`
+  fingerprints the exact bytes fetched or pushed; a mismatch is dirty even if a saved flag says
+  clean. Missing state with an existing copy is also dirty. Legacy valid state without a fingerprint
+  retains its flag semantics until its next fetch or push.
+- **A reconnect failed or the branch changed.** Failed onboarding never deletes a working copy or
+  its backup, and verifies the passphrase before replacing saved settings or secrets. Checkout names
+  include branch, separated unambiguously from path. `data/CheckoutPaths.kt` migrates old names only
+  for the branch in the previously saved configuration, before reconfiguration or Forget clears it;
+  backup and state move before the ledger, so an interrupted migration resumes safely.
+  `RemoteConfig.checkoutLayoutVersion` records completed migration and marks every newly selected
+  configuration as current. Only a version-0 saved configuration can identify a legacy owner: an
+  unknown or retained legacy copy must stay untouched across later selections, reloads and restarts.
+- **An edited asset still shows its old instrument's value.** Reconcile prices, dividends and
+  off-hours prints before valuing a changed book, including a synced book and removal of identifiers.
+  A known change of ticker, ISIN, currency or kind invalidates even a legacy unmarked cache. A failed
+  replacement fetch never restores those quotes. Market-cache persistence is regenerable and must
+  never make a committed ledger operation look unsuccessful.
+- **A saved statement silently counts for nothing.** New and edited transactions reject negative
+  quantities/amounts, trades with zero quantity, and trades/dividends without an asset. Zero amounts
+  remain valid (including free shares). A security statement needs positive buy/sell quantity in that
+  account at its date, including same-day buys, as Go `CheckSecurityStatement` requires. Editing a
+  transaction excludes its previous version from that check. Reading old files stays unchanged.
+- **Truncated settings prevent startup.** Remote configuration is atomic and keeps a last good
+  backup. An unreadable current file recovers it; if both are unreadable, onboarding opens without
+  deleting local ledgers or secrets. Forget removes both configuration files after checkout migration.
 - **Period gains read ~0 on a freshly synced device.** The market cache is per-device and NOT synced
   (it is regenerable). There are no prices until `refreshQuotes` runs. Statement-valued assets
   (property, cash) have no market performance at all, by design.

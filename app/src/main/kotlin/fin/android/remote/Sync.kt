@@ -2,6 +2,8 @@ package fin.android.remote
 
 import fin.android.format.Conflict
 import fin.android.format.Ledger
+import fin.android.crypto.Bytes
+import fin.android.crypto.Hashes
 import fin.android.storage.AtomicFile
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
@@ -21,6 +23,8 @@ data class SyncState(
      * working; cleared by the next successful fetch or push.
      */
     val authError: String? = null,
+    /** SHA-256 of the exact bytes last fetched or pushed; absent in older state files. */
+    val synced: String? = null,
 )
 
 /** Outcome of a mutate/sync, for UI feedback. */
@@ -44,17 +48,20 @@ class Sync(
      * An unreadable state file used to throw out of here, and every path in this class starts by
      * calling it: one short write (a process killed mid-`writeText`, which is why [saveState] is
      * atomic now) made the unlock itself fail, for ever, since nothing rewrites the file until a
-     * sync runs. Absent, the file simply means "nothing synced yet"; UNREADABLE, it must mean
-     * DIRTY: the flag it lost is the one that stops a pull from overwriting records the remote has
+     * sync runs. Absent with a local copy, or UNREADABLE, it must mean DIRTY: the flag it lost is
+     * the one that stops a pull from overwriting records the remote has
      * never seen, and a needless merge costs one push where a needless pull costs the data.
      */
     fun state(): SyncState {
-        if (!stateFile.exists()) return SyncState()
-        return try {
+        if (!stateFile.exists()) return SyncState(dirty = workingCopy.exists())
+        val saved = try {
             json.decodeFromString(SyncState.serializer(), stateFile.readText())
         } catch (_: Exception) {
             SyncState(dirty = true)
         }
+        val changed = saved.synced != null && workingCopy.exists() &&
+            runCatching { digest(workingCopy.readBytes()) != saved.synced }.getOrDefault(true)
+        return if (changed) saved.copy(dirty = true) else saved
     }
 
     private fun saveState(s: SyncState) =
@@ -70,7 +77,7 @@ class Sync(
      */
     fun pullIfStale() {
         val st = state()
-        val sinceLastPull = st.lastPull?.let { Duration.between(Instant.parse(it), now()) }
+        val sinceLastPull = st.lastPull?.let { runCatching { Duration.between(Instant.parse(it), now()) }.getOrNull() }
         // Fresh only within [0, readPullAfter): a future lastPull (clock skew / restored backup) is
         // treated as stale rather than suppressing pulls forever.
         val fresh = workingCopy.exists() && sinceLastPull != null &&
@@ -80,7 +87,8 @@ class Sync(
         try {
             val f = backend.fetch()
             writeCopy(f.data)
-            saveState(st.copy(sha = f.version, lastPull = now().toString(), authError = null))
+            saveState(st.copy(sha = f.version, lastPull = now().toString(), dirty = false,
+                synced = digest(f.data), authError = null))
         } catch (e: RemoteError.Missing) {
             // No remote file yet - keep whatever local copy exists (possibly none).
         } catch (e: RemoteError.Offline) {
@@ -117,8 +125,8 @@ class Sync(
             } catch (_: Exception) {
                 throw e // the backup is no better: report the working copy's own failure
             }
-            AtomicFile.write(workingCopy, bak.readBytes())
             saveState(state().copy(dirty = true))
+            AtomicFile.write(workingCopy, bak.readBytes())
             recovered
         }
     }
@@ -143,9 +151,11 @@ class Sync(
             if (st.dirty && workingCopy.exists()) {
                 val merged = Ledger.open(workingCopy.readBytes(), passphrase)
                     .merge(Ledger.open(f.data, passphrase), resolve)
+                saveState(st.copy(dirty = true))
                 writeCopy(merged.toBytes())
             } else {
                 writeCopy(f.data)
+                st = st.copy(dirty = false, synced = digest(f.data))
             }
             st = st.copy(sha = f.version, lastPull = now().toString(), authError = null)
             saveState(st)
@@ -160,6 +170,8 @@ class Sync(
         require(workingCopy.exists()) { "no local copy to mutate and remote unavailable" }
         var local = fn(Ledger.open(workingCopy.readBytes(), passphrase))
         var bytes = local.toBytes() // serialize once; re-derived only after a merge
+        st = st.copy(dirty = true)
+        saveState(st) // the dirty guard must survive interruption BEFORE publishing new bytes
         writeCopy(bytes)
 
         /** The change is written locally but could not reach the remote: keep it dirty.
@@ -172,7 +184,8 @@ class Sync(
         repeat(MAX_PUSH_TRIES) {
             try {
                 val newSha = backend.push(bytes, st.sha, message)
-                saveState(st.copy(sha = newSha, lastPull = now().toString(), dirty = false, authError = null))
+                saveState(st.copy(sha = newSha, lastPull = now().toString(), dirty = false,
+                    synced = digest(bytes), authError = null))
                 return SyncOutcome(pushed = true, dirty = false, message = "synced")
             } catch (e: RemoteError.Conflict) {
                 // Going offline (or losing auth) mid-reconcile must still honor the dirty guarantee.
@@ -215,14 +228,16 @@ class Sync(
         if (!st.dirty) {
             if (fetched != null) {
                 writeCopy(fetched.data)
-                saveState(st.copy(sha = fetched.version, lastPull = now().toString()))
+                saveState(st.copy(sha = fetched.version, lastPull = now().toString(), synced = digest(fetched.data)))
             } else if (workingCopy.exists()) {
                 // remote missing but we have a local copy → first push (guard offline like elsewhere)
                 try {
-                    val newSha = backend.push(workingCopy.readBytes(), null, "finador-android: initial push")
-                    saveState(st.copy(sha = newSha, lastPull = now().toString()))
+                    val bytes = workingCopy.readBytes()
+                    saveState(st.copy(dirty = true))
+                    val newSha = backend.push(bytes, null, "finador-android: initial push")
+                    saveState(st.copy(sha = newSha, lastPull = now().toString(), synced = digest(bytes)))
                 } catch (e: RemoteError.Offline) {
-                    return SyncOutcome(pushed = false, dirty = false, message = "offline")
+                    return SyncOutcome(pushed = false, dirty = true, message = "offline")
                 }
             }
             return SyncOutcome(pushed = false, dirty = false, message = "up to date")
@@ -233,12 +248,15 @@ class Sync(
         if (fetched != null) {
             local = local.merge(Ledger.open(fetched.data, passphrase), resolve)
             st = st.copy(sha = fetched.version)
+        } else {
+            st = st.copy(sha = null)
         }
         val bytes = local.toBytes()
+        saveState(st.copy(dirty = true))
         writeCopy(bytes)
         return try {
             val newSha = backend.push(bytes, st.sha, "finador-android: sync")
-            saveState(st.copy(sha = newSha, lastPull = now().toString(), dirty = false))
+            saveState(st.copy(sha = newSha, lastPull = now().toString(), dirty = false, synced = digest(bytes)))
             SyncOutcome(pushed = true, dirty = false, message = "synced")
         } catch (e: RemoteError.Offline) {
             saveState(st.copy(dirty = true))
@@ -260,5 +278,6 @@ class Sync(
     companion object {
         private const val MAX_PUSH_TRIES = 3
         private val json = Json { ignoreUnknownKeys = true; encodeDefaults = true }
+        private fun digest(data: ByteArray): String = Bytes.toHex(Hashes.sha256(data))
     }
 }

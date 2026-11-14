@@ -9,6 +9,7 @@ import fin.android.domain.AssetRules
 import fin.android.domain.Book
 import fin.android.domain.Money
 import fin.android.domain.TxKind
+import fin.android.domain.TransactionRules
 import kotlinx.serialization.json.jsonObject
 import java.math.BigDecimal
 import java.security.SecureRandom
@@ -44,6 +45,7 @@ class Ledger internal constructor(
         note: String? = null,
         importHash: String? = null,
     ): Ledger {
+        checkTransaction(date, account, asset, kind, qty, amount)
         val dto = txDto(Ids.newId(), date, account, asset, kind, qty, amount, note)
             .copy(importHash = importHash?.ifBlank { null })
         return append(listOf(txEnvelope("tx", dto)))
@@ -59,6 +61,7 @@ class Ledger internal constructor(
         amount: Money,
         note: String? = null,
     ): Ledger {
+        checkTransaction(date, account, asset, kind, qty, amount, replacing = id)
         // An edit is not a re-import: carry the existing import fingerprint through,
         // or a re-imported statement would duplicate the corrected transaction.
         val dto = txDto(id, date, account, asset, kind, qty, amount, note)
@@ -123,6 +126,15 @@ class Ledger internal constructor(
     internal fun append(envs: List<Envelope>): Ledger {
         val newEntries = Writer.append(header, keys, entries, envs)
         return Ledger(header, keys, newEntries, Replay.fold(newEntries))
+    }
+
+    private fun checkTransaction(
+        date: LocalDate, account: String, asset: String?, kind: TxKind,
+        qty: BigDecimal, amount: Money, replacing: String? = null,
+    ) {
+        TransactionRules.checkValues(kind, asset, qty, amount.amount)
+        if (asset != null) require(book.assets.containsKey(asset)) { "Unknown asset: $asset" }
+        if (kind == TxKind.statement) TransactionRules.checkSecurityStatement(book, account, asset, date, replacing)
     }
 
     private fun txDto(

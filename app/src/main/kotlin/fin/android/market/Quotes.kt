@@ -135,9 +135,12 @@ object Quotes {
         val refCcy = referenceCcy?.trim()?.uppercase()?.ifBlank { null } ?: book.config["currency"] ?: "EUR"
         // Yesterday's estimates go first: a nowcast stands on the proxy of the moment, never on
         // itself, and the published NAV it stood in for may well have landed since.
-        val prices = LinkedHashMap((existing?.prices ?: emptyMap()).mapValues { it.value.withoutEstimates() })
-        val fx = LinkedHashMap(existing?.fx ?: emptyMap())
-        val dividends = LinkedHashMap(existing?.dividends ?: emptyMap())
+        val cachedMarket = existing ?: MarketData()
+        val invalidated = cachedMarket.invalidatedAssets(book)
+        val usable = cachedMarket.withoutAssets(invalidated)
+        val prices = LinkedHashMap(usable.prices.mapValues { it.value.withoutEstimates() })
+        val fx = LinkedHashMap(usable.fx)
+        val dividends = LinkedHashMap(usable.dividends)
         val currencies = linkedSetOf<String>()
         val warnings = mutableListOf<String>()
 
@@ -162,10 +165,7 @@ object Quotes {
             // maybe on another device) holds numbers that are not this asset's, possibly in another
             // currency: drop them and fetch afresh (mirrors Go's refresh).
             val key = asset.quoteKey()
-            val old = prices[asset.id]?.quote
-            if (old != null && old != key) {
-                prices.remove(asset.id)
-                dividends.remove(asset.id)
+            if (asset.id in invalidated) {
                 warnings += "${asset.ticker ?: asset.isin}: ticker, ISIN or currency changed - " +
                     "cached quotes dropped, history fetched again"
             }

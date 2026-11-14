@@ -24,6 +24,7 @@ private class FakeBackend : Backend {
     var offline = false
     var auth = false // true = the token is rejected (401/403)
     var conflictNext = false
+    var beforePush: (() -> Unit)? = null
 
     override fun fetch(): Fetched {
         if (offline) throw RemoteError.Offline("offline")
@@ -33,6 +34,7 @@ private class FakeBackend : Backend {
     }
 
     override fun push(data: ByteArray, base: Version?, message: String): Version {
+        beforePush?.invoke()
         if (offline) throw RemoteError.Offline("offline")
         if (auth) throw RemoteError.Auth("token rejected (HTTP 401)")
         if (conflictNext) { conflictNext = false; throw RemoteError.Conflict() }
@@ -100,6 +102,7 @@ class SyncTest {
     fun authWithLocalCopyReadsLocallyAndRecordsError() {
         val be = FakeBackend().apply { auth = true }
         wc.writeBytes(emptyLedgerBytes())
+        st.writeText("""{"sha":"1","dirty":false}""") // legacy clean copy, due for a pull
         val ledger = sync(be).openForRead(pw) // must NOT throw: local copy is readable
         assertEquals(0, ledger.book.txs.size)
         assertNotNull("authError recorded for the re-login banner", sync(be).state().authError)
@@ -250,5 +253,55 @@ class SyncTest {
         val out = sync(be).mutate(pw, "add") { addDeposit(it) }
         assertTrue(out.pushed)
         assertEquals(1, Ledger.open(be.data!!, pw).book.txs.size) // local change survived the merge
+    }
+
+    @Test fun interruptedPushKeepsTheSavedTransactionDirty() {
+        val be = FakeBackend().apply { data = emptyLedgerBytes(); version = 1 }
+        sync(be).openForRead(pw)
+        be.beforePush = { throw IllegalStateException("interrupted push") }
+        assertTrue(runCatching { sync(be).mutate(pw, "add", fn = ::addDeposit) }.isFailure)
+        assertTrue("dirty must be on disk before the push", sync(be).state().dirty)
+        be.beforePush = null
+        sync(be).sync(pw)
+        assertEquals(1, Ledger.open(wc.readBytes(), pw).book.txs.size)
+        assertEquals(1, Ledger.open(be.data!!, pw).book.txs.size)
+    }
+
+    @Test fun changedBytesOverrideCleanStateOnEveryAccessPath() {
+        for (access in listOf("read", "mutate", "sync")) {
+            wc.delete(); st.delete()
+            val be = FakeBackend().apply { data = emptyLedgerBytes(); version = 1 }
+            val original = sync(be).openForRead(pw)
+            wc.writeBytes(addDeposit(original).toBytes()) // save landed without a state update
+            assertTrue("$access detects bytes the remote never received", sync(be).state().dirty)
+            when (access) {
+                "read" -> Sync(be, wc, st, Duration.ZERO).pullIfStale()
+                "mutate" -> sync(be).mutate(pw, "withdraw", fn = ::addWithdraw)
+                else -> sync(be).sync(pw)
+            }
+            assertEquals(access, if (access == "mutate") 2 else 1, Ledger.open(wc.readBytes(), pw).book.txs.size)
+        }
+    }
+
+    @Test fun successfulPushFingerprintsOnlyTheBytesSent() {
+        val be = FakeBackend().apply { data = emptyLedgerBytes(); version = 1 }
+        sync(be).openForRead(pw)
+        be.beforePush = {
+            wc.writeBytes(addWithdraw(Ledger.open(wc.readBytes(), pw)).toBytes())
+        }
+        sync(be).mutate(pw, "add", fn = ::addDeposit)
+        assertTrue("a later local save is still unpushed", sync(be).state().dirty)
+        be.beforePush = null
+        sync(be).sync(pw)
+        assertEquals(2, Ledger.open(be.data!!, pw).book.txs.size)
+    }
+
+    @Test fun missingStateCannotAuthorizeOverwritingAnExistingCopy() {
+        val base = emptyLedgerBytes()
+        val be = FakeBackend().apply { data = base; version = 1 }
+        wc.writeBytes(addDeposit(Ledger.open(base, pw)).toBytes())
+        sync(be).pullIfStale()
+        assertEquals(1, Ledger.open(wc.readBytes(), pw).book.txs.size)
+        assertTrue(sync(be).state().dirty)
     }
 }

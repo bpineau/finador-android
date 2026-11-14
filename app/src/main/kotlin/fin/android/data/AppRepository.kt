@@ -24,6 +24,7 @@ import fin.android.remote.RemoteError
 import fin.android.remote.Sync
 import fin.android.remote.SyncOutcome
 import fin.android.remote.SyncState
+import fin.android.storage.AtomicFile
 import fin.android.valuation.AssetDetail
 import fin.android.valuation.Gains
 import fin.android.valuation.Perf
@@ -47,10 +48,13 @@ import java.time.LocalDate
  *
  * [clock] is the one source of "now" every valuation and every quote validity is read against; it
  * is injectable so a test can place the app inside a given trading session.
+ * [yahoo] and [sources] keep one provider session and allow exercising refreshes against local HTTP.
  */
 class AppRepository(
     private val container: AppContainer,
     private val clock: Clock = Clock.systemDefaultZone(),
+    private val yahoo: Yahoo = Yahoo(),
+    private val sources: MultiSource = MultiSource(listOf(Airfund(), yahoo, Ft(), Morningstar())),
 ) {
     private val _state = MutableStateFlow<AppState>(AppState.Loading)
     val state: StateFlow<AppState> = _state.asStateFlow()
@@ -62,12 +66,6 @@ class AppRepository(
     // The off-hours prints of the last refresh, keyed by asset id: never stored, never merged into
     // [market], and re-observed (or cleared) by every refresh. Empty unless the setting is on.
     private var offHours: Map<String, Quotes.OffHoursPrint> = emptyMap()
-
-    // One provider chain for the whole session, not one per refresh: Yahoo's quote API needs a
-    // cookie + crumb pair, and rebuilding the provider would re-buy it (two requests) on every
-    // press. Only ever touched under [mutex].
-    private val yahoo = Yahoo()
-    private val sources = MultiSource(listOf(Airfund(), yahoo, Ft(), Morningstar()))
 
     // Serializes every mutation of the shared ledger/market/config (the UI can launch e.g. sync and
     // a quote refresh concurrently). Not reentrant - a locked method must call the *Locked helpers,
@@ -92,28 +90,29 @@ class AppRepository(
             readPullAfter = "1h",
         )
         runCatching {
-            container.saveConfig(cfg)
-            container.secretStore.putPat(token.trim())
-            container.secretStore.putPassphrase(pass)
-
             val sync = container.buildSync(cfg, token.trim())
             try { sync.pullIfStale() } catch (e: RemoteError.Offline) { /* offline first run - create locally */ }
 
             val wc = container.workingCopy(cfg)
             if (!wc.exists()) {
                 wc.parentFile?.mkdirs()
-                wc.writeBytes(Ledger.create(pass).toBytes())
+                AtomicFile.write(wc, Ledger.create(pass).toBytes())
                 sync.sync(pass) // first push; auth/permission errors surface here, not swallowed
+                sync.state().authError?.let { error(it) }
             }
-            unlockInternal(cfg, pass)
+            // Authenticate before changing saved settings/secrets. A failed reconnect retains all
+            // existing working bytes and backups, including records never pushed to GitHub.
+            val opened = sync.openForRead(pass)
+            container.saveConfig(cfg)
+            container.secretStore.putPat(token.trim())
+            container.secretStore.putPassphrase(pass)
+            installOpened(opened, pass, sync.state())
         }.onFailure {
-            // A failed first connect must not strand the user on a Locked screen with saved-but-bad
-            // settings: roll back everything so the app returns to the editable onboarding form.
-            container.workingCopy(cfg).delete()
-            container.clearConfig()
-            container.secretStore.purge()
             passphrase = null
             ledger = null
+            market = MarketData()
+            offHours = emptyMap()
+            _state.value = AppState.Onboarding
         }
     }
 
@@ -132,6 +131,7 @@ class AppRepository(
     /** Quote refresh without taking the lock - call only from an already-locked method. */
     private suspend fun refreshQuotesLocked(): List<String> {
         val l = ledger ?: return emptyList()
+        reconcileMarket(l.book)
         val warnings = runCatching {
             val cfg = container.loadConfig()
             val from = LocalDate.now(clock).minusYears(2)
@@ -252,7 +252,15 @@ class AppRepository(
         return runCatching {
             val sync = container.buildSync(cfg, token)
             val outcome = op(sync, pass)
-            ledger = Ledger.open(container.workingCopy(cfg).readBytes(), pass)
+            val opened = Ledger.open(container.workingCopy(cfg).readBytes(), pass)
+            reconcileMarket(opened.book, ledger?.book)
+            ledger = opened
+            val cache = container.marketCacheFile(opened.fileId)
+            runCatching { CacheSidecar.write(cache, opened.cacheKey, market) }.onFailure {
+                // The ledger has already been committed: a regenerable cache failure must not
+                // invite retrying the same transaction. Discard old instrument data best-effort.
+                cache.delete()
+            }
             emitReady(sync.state(), outcome.message, refreshing = false)
             outcome
         }
@@ -278,10 +286,23 @@ class AppRepository(
         val token = container.secretStore.getPat() ?: error("no token")
         val sync = container.buildSync(cfg, token)
         val opened = sync.openForRead(pass)
+        installOpened(opened, pass, sync.state())
+    }
+
+    private fun installOpened(opened: Ledger, pass: String, syncState: SyncState) {
         passphrase = pass
         ledger = opened
         market = CacheSidecar.read(container.marketCacheFile(opened.fileId), opened.cacheKey) ?: MarketData()
-        emitReady(sync.state(), message = null, refreshing = true) // quotes refreshed asynchronously next
+        offHours = emptyMap()
+        reconcileMarket(opened.book)
+        emitReady(syncState, message = null, refreshing = true) // quotes refreshed asynchronously next
+    }
+
+    /** Invalidate before any valuation, even when fetching the replacement instrument fails. */
+    private fun reconcileMarket(book: Book, previous: Book? = null) {
+        val ids = market.invalidatedAssets(book, previous)
+        market = market.withoutAssets(ids)
+        offHours = offHours - ids
     }
 
     private fun currentSyncState(): SyncState {

@@ -308,4 +308,4 @@ Makefile                       # every command (`make help`)
 - **`docs/maintainability.md`** - the dependency ledger: what each library is for, who maintains it,
   what would break if it died, and what the yearly upkeep really costs.
 - The file format and sync model are specified on the finador side: `../finador/docs/FORMAT.md` and
-  `../finador/docs/superpowers/specs/2026-06-13-github-remote-data-design.md`.
+  `../finador/docs/design/2026-06-13-github-remote-data-design.md`.
