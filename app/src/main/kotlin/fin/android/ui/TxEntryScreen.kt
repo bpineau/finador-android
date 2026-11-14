@@ -48,10 +48,12 @@ fun TxEntryScreen(vm: AppViewModel, ready: AppState.Ready, onDone: () -> Unit) {
     val accounts = remember(book) { book.accounts.values.toList() }
     val assets = remember(book) { book.assets.values.toList() }
 
-    var account by remember { mutableStateOf(accounts.firstOrNull()) }
-    var kind by remember { mutableStateOf(TxKind.buy) }
-    var asset by remember { mutableStateOf<Asset?>(null) }
-    // Text fields survive config changes (rotation) so an in-progress entry isn't lost.
+    var accountId by rememberSaveable { mutableStateOf(accounts.firstOrNull()?.id) }
+    var kind by rememberSaveable { mutableStateOf(TxKind.buy) }
+    var selectedAssetId by rememberSaveable { mutableStateOf<String?>(null) }
+    val account = accountId?.let { book.accounts[it] }
+    val asset = selectedAssetId?.let { book.assets[it] }
+    // Keep selections and text together across recreation, without saving stale domain objects.
     var dateText by rememberSaveable { mutableStateOf(LocalDate.now().toString()) }
     var qty by rememberSaveable { mutableStateOf("") }
     var amount by rememberSaveable { mutableStateOf("") }
@@ -90,7 +92,7 @@ fun TxEntryScreen(vm: AppViewModel, ready: AppState.Ready, onDone: () -> Unit) {
                 selected = account,
                 optionLabel = { it.name },
                 onSelected = {
-                    account = it
+                    accountId = it.id
                     if (!ccyTouched) ccy = it.ccy // don't clobber a currency the user typed
                 },
             )
@@ -109,7 +111,7 @@ fun TxEntryScreen(vm: AppViewModel, ready: AppState.Ready, onDone: () -> Unit) {
                     options = assets,
                     selected = asset,
                     optionLabel = { it.name },
-                    onSelected = { asset = it },
+                    onSelected = { selectedAssetId = it.id },
                     placeholder = "Select asset",
                 )
             }

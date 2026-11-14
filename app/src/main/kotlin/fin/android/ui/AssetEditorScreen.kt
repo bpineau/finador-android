@@ -52,7 +52,7 @@ fun AssetEditorScreen(vm: AppViewModel, ready: AppState.Ready, assetId: String?,
     val existing = assetId?.let { ready.book.assets[it] }
 
     var name by rememberSaveable { mutableStateOf(existing?.name ?: "") }
-    var kindOption by remember {
+    var kindOption by rememberSaveable {
         mutableStateOf(
             when (existing?.kind) {
                 AssetKind.PROPERTY -> KindOption.Property

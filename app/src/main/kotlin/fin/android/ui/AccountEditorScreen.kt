@@ -50,7 +50,7 @@ fun AccountEditorScreen(vm: AppViewModel, ready: AppState.Ready, accountId: Stri
 
     var name by rememberSaveable { mutableStateOf(existing?.name ?: "") }
     var ccy by rememberSaveable { mutableStateOf(existing?.ccy ?: "EUR") }
-    var taxMode by remember {
+    var taxMode by rememberSaveable {
         mutableStateOf(
             when (existing?.tax) {
                 is TaxRule.Gains -> TaxMode.Gains
