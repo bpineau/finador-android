@@ -66,6 +66,11 @@ would mean hand-writing a parser for every one of the fifteen files that use it
 `remote/{RemoteConfig,Sync,GitHubBackend}.kt`, plus two tests). More code, more bugs, on the exact
 path where a parsing mistake corrupts a ledger. KEEP.
 
+The runtime is pinned to 1.13.0, compatible with the pinned Kotlin 2.4.21 compiler.
+This restores the serializer exception behavior changed in 1.12.0; authenticated malformed
+ledger payloads must still map to the reader's corruption error. The wire representation stays
+covered by the format vectors and the cross-implementation gate.
+
 **kotlinx-coroutines-android** supplies `Dispatchers.Main` on Android. Used in exactly two files
 (`data/AppRepository.kt`, `ui/AppViewModel.kt`); the rest of the coroutine machinery arrives
 transitively with Compose and lifecycle, which are themselves built on coroutines. Removing the
