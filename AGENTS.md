@@ -335,7 +335,13 @@ Each of these cost real debugging once. Symptom, cause, what to do.
   clean. Missing state with an existing copy is also dirty. Legacy valid state without a fingerprint
   retains its flag semantics until its next fetch or push.
 - **A reconnect failed or the branch changed.** Failed onboarding never deletes a working copy or
-  its backup, and verifies the passphrase before replacing saved settings or secrets. Checkout names
+  its backup that existed before it, and verifies the passphrase before replacing saved settings or
+  secrets. The empty ledger an attempt started itself IS discarded (`AppContainer.discardCheckout`):
+  kept, it is dirty, sealed with that passphrase and refuses every retry typed with another one.
+  Onboarding first calls `Backend.checkAccess` (Go `CheckAccess`): GitHub answers 404 to the file
+  of a repository the token cannot see, which would otherwise read as "no ledger yet" and start an
+  empty one beside the real one, never to merge (different file ids). For the same reason a 404 on
+  push is `RemoteError.Auth`, not `Offline`. Checkout names
   include branch, separated unambiguously from path. `data/CheckoutPaths.kt` migrates old names only
   for the branch in the previously saved configuration, before reconfiguration or Forget clears it;
   backup and state move before the ledger, so an interrupted migration resumes safely.

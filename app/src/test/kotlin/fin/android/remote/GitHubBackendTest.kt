@@ -69,4 +69,27 @@ class GitHubBackendTest {
         assertThrows(RemoteError.Offline::class.java) { backend().fetch() }
         assertEquals(2, server.requestCount) // initial + one retry
     }
+
+    @Test
+    fun checkAccessReadsTheRepositoryMetadata() {
+        server.enqueue(FakeHttpServer.FakeResponse().setResponseCode(200).setBody("{}"))
+        backend().checkAccess()
+        val req = server.takeRequest()
+        assertEquals("GET", req.method)
+        assertEquals("/repos/o/r", req.path)
+    }
+
+    @Test
+    fun checkAccessTreatsAnInvisibleRepositoryAsAuth() {
+        for (code in listOf(401, 403, 404)) {
+            server.enqueue(FakeHttpServer.FakeResponse().setResponseCode(code).setBody("{}"))
+            assertThrows(RemoteError.Auth::class.java) { backend().checkAccess() }
+        }
+    }
+
+    @Test
+    fun pushToMissingRepositoryOrBranchIsAuthNotOffline() {
+        server.enqueue(FakeHttpServer.FakeResponse().setResponseCode(404).setBody("{}"))
+        assertThrows(RemoteError.Auth::class.java) { backend().push("d".toByteArray(), null, "m") }
+    }
 }

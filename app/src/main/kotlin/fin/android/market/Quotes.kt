@@ -1,5 +1,6 @@
 package fin.android.market
 
+import fin.android.domain.Asset
 import fin.android.domain.AssetKind
 import fin.android.domain.Book
 import fin.android.domain.DividendEvent
@@ -67,6 +68,13 @@ object Quotes {
      */
     fun current(offHours: Map<String, OffHoursPrint>, now: Instant): Map<String, OffHoursPrint> =
         offHours.filterValues { it.currentAt(now) }
+
+    /**
+     * What the holder is told when [asset]'s cached series belonged to another instrument and was
+     * dropped. The repository discards such series before valuing, so it reports them itself.
+     */
+    fun instrumentChangedWarning(asset: Asset): String =
+        "${asset.ticker ?: asset.isin}: ticker, ISIN or currency changed - cached quotes dropped, history fetched again"
 
     /**
      * What a refresh observed: the [market] to store (exactly what a plain [refresh] produces),
@@ -166,8 +174,7 @@ object Quotes {
             // currency: drop them and fetch afresh (mirrors Go's refresh).
             val key = asset.quoteKey()
             if (asset.id in invalidated) {
-                warnings += "${asset.ticker ?: asset.isin}: ticker, ISIN or currency changed - " +
-                    "cached quotes dropped, history fetched again"
+                warnings += instrumentChangedWarning(asset)
             }
             var daily = multi.daily(Ref(asset.ticker, asset.isin), fetchFrom(prices[asset.id], from)) ?: continue
             // The declared currency is the contract here exactly as it is on the spot pass below: a

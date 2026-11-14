@@ -47,8 +47,19 @@ class AppContainer internal constructor(
     }
     fun clearConfig() {
         loadConfig() // Forget must retain the known branch ownership of any legacy local edits
-        configFile.delete()
+        // Backup first: [RemoteConfig.load] restores a lone backup, so the other order, interrupted,
+        // would bring the forgotten settings back.
         AtomicFile.backupOf(configFile).delete()
+        configFile.delete()
+    }
+
+    /** Deletes the checkout of [cfg]: working copy, sync state and their backups. */
+    fun discardCheckout(cfg: RemoteConfig) {
+        val gh = requireNotNull(cfg.github)
+        for (f in listOf(checkouts.workingCopy(gh), checkouts.state(gh))) {
+            f.delete()
+            AtomicFile.backupOf(f).delete()
+        }
     }
 
     fun buildSync(cfg: RemoteConfig, token: String): Sync {

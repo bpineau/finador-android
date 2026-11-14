@@ -42,6 +42,11 @@ private class FakeBackend : Backend {
         this.data = data; version++; return version.toString()
     }
 
+    override fun checkAccess() {
+        if (offline) throw RemoteError.Offline("offline")
+        if (auth) throw RemoteError.Auth("token rejected (HTTP 401)")
+    }
+
     override fun describe() = "fake"
 }
 

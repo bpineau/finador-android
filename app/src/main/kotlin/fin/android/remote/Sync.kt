@@ -67,6 +67,9 @@ class Sync(
     private fun saveState(s: SyncState) =
         AtomicFile.writeText(stateFile, json.encodeToString(SyncState.serializer(), s))
 
+    /** [Backend.checkAccess]; touches neither the working copy nor the state. */
+    fun checkAccess() = backend.checkAccess()
+
     /**
      * Pulls into the working copy if online and stale (missing copy, past readPullAfter).
      *

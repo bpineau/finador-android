@@ -67,6 +67,10 @@ class AppRepository(
     // [market], and re-observed (or cleared) by every refresh. Empty unless the setting is on.
     private var offHours: Map<String, Quotes.OffHoursPrint> = emptyMap()
 
+    // Assets whose cached series [reconcileMarket] dropped because the instrument changed. Purged
+    // before valuing, so [Quotes] never sees them; the next successful refresh says so instead.
+    private var requoted: Set<String> = emptySet()
+
     // Serializes every mutation of the shared ledger/market/config (the UI can launch e.g. sync and
     // a quote refresh concurrently). Not reentrant - a locked method must call the *Locked helpers,
     // never another public (locked) method.
@@ -89,13 +93,18 @@ class AppRepository(
             github = GithubConfig(owner.trim(), repo.trim(), path.trim().ifBlank { "portfolio.fin" }, branch.trim().ifBlank { "master" }),
             readPullAfter = "1h",
         )
+        var created = false
         runCatching {
             val sync = container.buildSync(cfg, token.trim())
+            // A repository the token cannot see answers 404 to the file fetch as well, which would
+            // read as "no ledger yet" and start an empty one beside the real one (Go `remote login`).
+            try { sync.checkAccess() } catch (e: RemoteError.Offline) { /* checked on the next sync */ }
             try { sync.pullIfStale() } catch (e: RemoteError.Offline) { /* offline first run - create locally */ }
 
             val wc = container.workingCopy(cfg)
             if (!wc.exists()) {
                 wc.parentFile?.mkdirs()
+                created = true
                 AtomicFile.write(wc, Ledger.create(pass).toBytes())
                 sync.sync(pass) // first push; auth/permission errors surface here, not swallowed
                 sync.state().authError?.let { error(it) }
@@ -108,10 +117,15 @@ class AppRepository(
             container.secretStore.putPassphrase(pass)
             installOpened(opened, pass, sync.state())
         }.onFailure {
+            // An empty ledger this attempt started holds nothing, yet it is dirty and sealed with
+            // this passphrase: kept, it would refuse every retry typed with another one. A copy
+            // that existed before is never touched.
+            if (created) container.discardCheckout(cfg)
             passphrase = null
             ledger = null
             market = MarketData()
             offHours = emptyMap()
+            requoted = emptySet()
             _state.value = AppState.Onboarding
         }
     }
@@ -145,7 +159,9 @@ class AppRepository(
             market = refreshed.market
             offHours = refreshed.offHours
             CacheSidecar.write(container.marketCacheFile(l.fileId), l.cacheKey, refreshed.market)
-            refreshed.warnings
+            val changed = requoted.mapNotNull { l.book.assets[it] }.map(Quotes::instrumentChangedWarning)
+            requoted = emptySet()
+            changed + refreshed.warnings
         }.getOrDefault(emptyList())
         emitReady(currentSyncState(), message = warnings.firstOrNull(), refreshing = false)
         return warnings
@@ -277,6 +293,7 @@ class AppRepository(
         ledger = null
         market = MarketData()
         offHours = emptyMap()
+        requoted = emptySet()
         _state.value = AppState.Onboarding
     }
 
@@ -294,6 +311,7 @@ class AppRepository(
         ledger = opened
         market = CacheSidecar.read(container.marketCacheFile(opened.fileId), opened.cacheKey) ?: MarketData()
         offHours = emptyMap()
+        requoted = emptySet()
         reconcileMarket(opened.book)
         emitReady(syncState, message = null, refreshing = true) // quotes refreshed asynchronously next
     }
@@ -301,6 +319,13 @@ class AppRepository(
     /** Invalidate before any valuation, even when fetching the replacement instrument fails. */
     private fun reconcileMarket(book: Book, previous: Book? = null) {
         val ids = market.invalidatedAssets(book, previous)
+        // Only a security still quoted had a series to lose to another instrument; a removed or
+        // statement-valued asset leaves nothing to tell the holder about.
+        requoted += ids.filter { id ->
+            val asset = book.assets[id]
+            (id in market.prices || id in market.dividends) && asset != null &&
+                asset.kind == AssetKind.SECURITY && !(asset.ticker.isNullOrBlank() && asset.isin.isNullOrBlank())
+        }
         market = market.withoutAssets(ids)
         offHours = offHours - ids
     }

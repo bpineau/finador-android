@@ -52,6 +52,7 @@ class AppRepositoryTest {
             this.data = data
             return "1"
         }
+        override fun checkAccess() {}
         override fun describe() = "synthetic remote"
     }
     private fun ledger() = Ledger.create(pass, t = 1, m = 8)
@@ -210,6 +211,79 @@ class AppRepositoryTest {
             repo.refreshQuotes()
             assertEquals(100.0, (repo.state.value as AppState.Ready).valuation.gross, 0.0)
             assertTrue((repo.state.value as AppState.Ready).offHours.isEmpty())
+        } finally { server.shutdown(); dir.deleteRecursively() }
+    }
+
+    /** A remote file that does not exist yet, behind a token that may or may not write. */
+    private class NewRemote : Backend {
+        var visible = true
+        var canWrite = false
+        var data: ByteArray? = null
+        override fun checkAccess() { if (!visible) throw RemoteError.Auth("synthetic: repository not visible") }
+        override fun fetch(): Fetched = data?.let { Fetched(it, "1") } ?: throw RemoteError.Missing()
+        override fun push(data: ByteArray, base: Version?, message: String): Version {
+            if (!canWrite) throw RemoteError.Auth("synthetic: read-only token")
+            this.data = data
+            return "1"
+        }
+        override fun describe() = "synthetic new remote"
+    }
+
+    @Test fun failedFirstPushLeavesNothingThatRefusesAnotherPassphrase() = runBlocking {
+        val dir = Files.createTempDirectory("repository-first-push").toFile()
+        try {
+            val remote = NewRemote()
+            val secrets = InMemorySecretStore()
+            val container = AppContainer(dir, File(dir, "cache"), secrets) { _, _ -> remote }
+            val repo = AppRepository(container, clock)
+            assertTrue(repo.onboard("synthetic-owner", "ledger-store", "portfolio.fin", "master", "token", "first").isFailure)
+            assertFalse(container.workingCopy(cfg).exists())
+            assertNull(secrets.getPassphrase())
+            remote.canWrite = true
+            val retry = repo.onboard("synthetic-owner", "ledger-store", "portfolio.fin", "master", "token", pass)
+            assertTrue(retry.toString(), retry.isSuccess)
+            assertEquals(0, Ledger.open(remote.data!!, pass).book.txs.size)
+        } finally { dir.deleteRecursively() }
+    }
+
+    @Test fun repositoryTheTokenCannotSeeNeverStartsAnEmptyLedger() = runBlocking {
+        val dir = Files.createTempDirectory("repository-invisible").toFile()
+        try {
+            val remote = NewRemote().apply { visible = false; canWrite = true }
+            val container = AppContainer(dir, File(dir, "cache"), InMemorySecretStore()) { _, _ -> remote }
+            val repo = AppRepository(container, clock)
+            assertTrue(repo.onboard("synthetic-owner", "ledger-store", "portfolio.fin", "master", "token", pass).isFailure)
+            assertFalse(container.workingCopy(cfg).exists())
+            assertNull(remote.data)
+            assertFalse(container.loadConfig().isGithub)
+        } finally { dir.deleteRecursively() }
+    }
+
+    @Test fun changedInstrumentIsReportedOnceByTheNextRefresh() = runBlocking {
+        val dir = Files.createTempDirectory("repository-requoted").toFile()
+        val server = FakeHttpServer().apply {
+            dispatcher = object : FakeHttpServer.Dispatcher {
+                override fun dispatch(request: FakeHttpServer.FakeRequest) =
+                    FakeHttpServer.FakeResponse().setResponseCode(404)
+            }
+            start()
+        }
+        try {
+            val provider = object : Provider {
+                override val name = "synthetic"
+                override fun daily(ref: Ref, from: LocalDate): DailyData = DailyData("USD", listOf(PricePoint(day, 50.0)))
+            }
+            val container = AppContainer(dir, File(dir, "cache"), InMemorySecretStore()) { _, _ -> Remote(ledger().toBytes()) }
+            val repo = AppRepository(container, clock,
+                Yahoo(server.url("/").trimEnd('/'), server.url("/cookie")), MultiSource(listOf(provider)))
+            assertTrue(repo.onboard("synthetic-owner", "ledger-store", "portfolio.fin", "master", "token", pass).isSuccess)
+            val changed = "ticker, ISIN or currency changed"
+            assertTrue(repo.refreshQuotes().none { changed in it })
+            assertTrue(repo.editAsset("asset", AssetKind.SECURITY, "Synthetic Fund", "OTHER", null,
+                emptyList(), "USD", null, null).isSuccess)
+            val warnings = repo.refreshQuotes()
+            assertTrue(warnings.toString(), warnings.first().startsWith("OTHER: $changed"))
+            assertTrue(repo.refreshQuotes().none { changed in it })
         } finally { server.shutdown(); dir.deleteRecursively() }
     }
 }

@@ -44,7 +44,21 @@ class GitHubBackend(
             200, 201 -> return json.decodeFromString(PutResponse.serializer(), body).content.sha
             409, 422 -> throw RemoteError.Conflict()
             401, 403 -> throw RemoteError.Auth(authMessage(code))
+            // Not transient: a missing repository or branch, or one the token cannot see. Read as
+            // offline, the write would wait for a retry that can never succeed.
+            404 -> throw RemoteError.Auth("GitHub repository or branch not found, or the token cannot see it (HTTP 404)")
             else -> throw RemoteError.Offline("GitHub push failed (HTTP $code)")
+        }
+    }
+
+    /** The repository metadata, which any token able to read its contents may read (Go `CheckAccess`). */
+    override fun checkAccess() {
+        val (code, _) = call("$baseUrl/repos/$owner/$repo", "GET", null)
+        when (code) {
+            200 -> return
+            // GitHub answers 404, not 403, for a private repository the token cannot see.
+            401, 403, 404 -> throw RemoteError.Auth("GitHub repository not found, or the token cannot see it (HTTP $code)")
+            else -> throw RemoteError.Offline("GitHub repository check failed (HTTP $code)")
         }
     }
 

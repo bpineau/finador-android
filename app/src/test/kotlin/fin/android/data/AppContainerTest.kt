@@ -61,6 +61,7 @@ class AppContainerTest {
                     object : Backend {
                         override fun fetch() = Fetched(remote, "1")
                         override fun push(data: ByteArray, base: Version?, message: String): Version = error("must not push")
+                        override fun checkAccess() {}
                         override fun describe() = "synthetic remote"
                     }
                 }

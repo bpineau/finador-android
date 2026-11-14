@@ -26,6 +26,13 @@ sealed class RemoteError(message: String, cause: Throwable? = null) : Exception(
  * on a background dispatcher. One network implementation today (GitHub Contents API).
  */
 interface Backend {
+    /**
+     * Verifies the credentials reach the repository, whether or not the file exists yet.
+     * @throws RemoteError.Auth when they do not (including a repository the token cannot see);
+     *  RemoteError.Offline when it cannot be told.
+     */
+    fun checkAccess()
+
     /** @throws RemoteError.Missing if absent; RemoteError.Auth/Offline on failure. */
     fun fetch(): Fetched
 
