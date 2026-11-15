@@ -75,9 +75,11 @@ Do not downgrade Core or import deprecated fingerprint APIs. The 1.4 line has it
 implementation. Raising minSdk to 30 to use the platform prompt alone is a separate product decision;
 the future AndroidX API offers a path that retains older-phone support.
 
-Direct unlock requires positive evidence of an unsecured device and no enrolled/suitable
-authenticator. Errors and unknown device-lock state never become direct access. Every attempt
-checks again; unknown biometric status may try the system prompt, and errors remain retryable.
+Direct unlock requires positive evidence of an unsecured device (`isDeviceSecure` false): with no
+screen lock there is nothing to authenticate against, a prompt can only fail, and refusing would
+lock the holder out of their own ledger. Errors and unknown device-lock state never become direct
+access. Every attempt checks again; on a secured device unknown biometric status may try the
+system prompt, and errors remain retryable.
 API 30+ can use credentials alone when the combined check fails. Prompt callbacks are rebound after
 activity recreation without restarting an existing prompt.
 

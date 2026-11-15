@@ -17,14 +17,17 @@ class UnlockPolicyTest {
         }
     }
 
-    @Test fun confirmedUnsecuredDeviceCanUnlockWithoutEnrollment() {
-        assertEquals(UnlockAction.DIRECT, unlockAction(false, UnlockStatus.NOT_ENROLLED))
-        assertEquals(UnlockAction.DIRECT, unlockAction(false, UnlockStatus.NO_HARDWARE))
+    // No screen lock means no credential: a prompt could only fail, whatever the sensor reports.
+    @Test fun confirmedUnsecuredDeviceAlwaysUnlocksDirectly() {
+        UnlockStatus.entries.forEach { status ->
+            assertEquals(status.name, UnlockAction.DIRECT, unlockAction(false, status))
+        }
     }
 
-    @Test fun unknownAndErrorStatusesNeverBypassAuthentication() {
-        assertEquals(UnlockAction.AUTHENTICATE, unlockAction(false, UnlockStatus.UNKNOWN))
-        assertEquals(UnlockAction.RETRY, unlockAction(false, UnlockStatus.ERROR))
+    @Test fun unknownAndErrorStatusesNeverBypassAuthenticationOnASecuredDevice() {
+        assertEquals(UnlockAction.AUTHENTICATE, unlockAction(true, UnlockStatus.UNKNOWN))
+        assertEquals(UnlockAction.RETRY, unlockAction(true, UnlockStatus.NOT_ENROLLED))
+        assertEquals(UnlockAction.RETRY, unlockAction(null, UnlockStatus.ERROR))
     }
 
     @Test fun aFreshSuccessfulCheckCanRetryAfterAnError() {

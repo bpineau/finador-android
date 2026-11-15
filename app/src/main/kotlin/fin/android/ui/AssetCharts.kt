@@ -3,6 +3,7 @@ package fin.android.ui
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -44,19 +45,25 @@ private fun RangeChips(ranges: List<AssetChartRange>, selected: AssetChartRange,
     ) {
         ranges.forEach { range ->
             val chosen = range == selected
-            Text(
-                range.label,
-                style = MaterialTheme.typography.labelMedium,
-                fontWeight = if (chosen) FontWeight.SemiBold else FontWeight.Normal,
-                color = if (chosen) MaterialTheme.colorScheme.onSecondaryContainer else MaterialTheme.colorScheme.onSurfaceVariant,
-                modifier = Modifier
+            // The 48dp touch target is the Box; the pill hugs the label inside it, centred, so
+            // the target's minimum size never stretches the pill or shifts the text.
+            Box(
+                Modifier
                     .sizeIn(minWidth = 48.dp, minHeight = 48.dp)
                     .clip(RoundedCornerShape(50))
-                    .selectable(selected = chosen, role = Role.Tab, onClick = { onSelect(range) })
-                    .padding(vertical = 8.dp)
-                    .then(if (chosen) Modifier.background(MaterialTheme.colorScheme.secondaryContainer, RoundedCornerShape(50)) else Modifier)
-                    .padding(horizontal = 10.dp, vertical = 7.dp),
-            )
+                    .selectable(selected = chosen, role = Role.Tab, onClick = { onSelect(range) }),
+                contentAlignment = Alignment.Center,
+            ) {
+                Text(
+                    range.label,
+                    style = MaterialTheme.typography.labelMedium,
+                    fontWeight = if (chosen) FontWeight.SemiBold else FontWeight.Normal,
+                    color = if (chosen) MaterialTheme.colorScheme.onSecondaryContainer else MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier
+                        .then(if (chosen) Modifier.background(MaterialTheme.colorScheme.secondaryContainer, RoundedCornerShape(50)) else Modifier)
+                        .padding(horizontal = 10.dp, vertical = 4.dp),
+                )
+            }
         }
     }
 }
