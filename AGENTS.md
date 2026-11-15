@@ -59,7 +59,9 @@ and it outranks features. When in doubt, do less.
 ### (b) No deprecated API, and every warning is a bug.
 
 - DO fix, not silence. A clean recompile prints **zero** `w:` deprecation warnings and `make lint`
-  prints `No issues found`. Both are gates, not aspirations.
+  is green (any warning fails it). Both are gates, not aspirations. The "newer version available"
+  checks are informational on purpose (`app/lint.xml`): an upstream release is not a defect here,
+  and `make outdated` lists them for the yearly wave.
 - DO NOT add `@Suppress`, `@SuppressLint` or a lint baseline to get green. The only allowed
   suppressions live in `app/lint.xml`, each carrying its rationale: read them before "fixing" what
   they cover, and add one only with the same kind of written reason.
@@ -145,7 +147,8 @@ itself, so every target works from a bare shell. Run from the repo root.
 | `make test` | **the main loop**; prints `summary: N tests, 0 failures, 0 errors` | ~1 s warm, ~1 min cold |
 | `make test-class T=Gains` | one class, when you know where you broke it | seconds |
 | `make build` | the debug APK; catches Compose/Android errors `make test` cannot | ~1 min |
-| `make lint` | must print `No issues found`; report in `app/build/reports/lint-results-debug.txt` | ~1 min |
+| `make lint` | fails on any warning; the report ends `No issues found` or `0 errors, 0 warnings, N hints`, in `app/build/reports/lint-results-debug.txt` | ~1 min |
+| `make outdated` | the newer dependency versions lint knows of; informational, never a gate | ~1 min |
 | `make crossimpl` | byte-compat gate vs the Go reference (builds finador first, needs `../finador`) | ~1 min |
 | `make probe` | hits the REAL quote providers from the HOST JVM; opt-in, never part of `make test` | seconds |
 | `make probe-device` | the same probe on a booted emulator or a phone; **the one live check a release owes** | ~1 min |
@@ -432,7 +435,7 @@ Tick every line before saying the work is done.
 
 - [ ] `make test` green: `summary: N tests, 0 failures, 0 errors`.
 - [ ] `make build` green (any change that touches `main`, not only tests).
-- [ ] `make lint` prints `No issues found`, and the compile printed no `w:` deprecation warning.
+- [ ] `make lint` green (no error, no warning; hints allowed), and the compile printed no `w:` deprecation warning.
 - [ ] `make crossimpl` green if anything under `crypto/` or `format/` moved.
 - [ ] No new dependency; or one, with its `docs/maintainability.md` entry written first.
 - [ ] Docs updated in the same commit: this file if an invariant or the architecture moved,

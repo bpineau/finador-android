@@ -1,7 +1,14 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- Deliberate suppressions only - each one documents why the "fix" lint suggests is wrong here.
-     Goal: `lintDebug` reports nothing but version-bump notices, so any new warning is a signal. -->
+<!-- Deliberate severity changes only - each one documents why lint's default is wrong here.
+     Goal: `lintDebug` fails on every warning, so any new warning is a signal. -->
 <lint>
+    <!-- "A newer version is available" depends on what upstream published today, not on this
+         code: as warnings (errors under warningsAsErrors) they turn `make lint` red with no
+         change here. Informational, they stay listed in the report and `make outdated` lists them
+         alone; the yearly wave (README section 6) decides when to bump. -->
+    <issue id="GradleDependency" severity="informational" />
+    <issue id="AndroidGradlePluginVersion" severity="informational" />
+    <issue id="NewerVersionAvailable" severity="informational" />
     <!-- Lint suggests merging mipmap-anydpi-v26 into mipmap-anydpi since minSdk is 26, but AAPT
          then fails to resolve the manifest's mipmap/ic_launcher (tried: build breaks). Adaptive
          icons stay in the conventional -v26 folder. -->

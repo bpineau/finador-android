@@ -65,7 +65,8 @@ What the app is built with, all pinned: **JDK 21**, Gradle **9.9.1**, Android Gr
 make test                 # the main loop: compiles main + test, runs the suite (no device)
 make test-class T=Gains   # one class, when you know where you broke it
 make build                # compile the debug APK (catches Compose/Android errors make test cannot)
-make lint                 # Android Lint; must stay at "No issues found"
+make lint                 # Android Lint; fails on any warning (version hints allowed)
+make outdated             # newer dependency versions lint knows of (informational, never a gate)
 make crossimpl            # byte-compatibility gate against the Go implementation (needs ../finador)
 make probe                # hit the REAL quote providers from the host JVM (never part of make test)
 make probe-device         # the same probe ON a device/emulator: the one live check a release owes
@@ -224,7 +225,7 @@ the merged manifest: AndroidX adds biometric permissions, Startup and ProfileIns
 ```sh
 make test        # the whole unit suite
 make build
-make lint        # must print "No issues found"
+make lint        # green: no error, no warning (version hints allowed)
 make crossimpl   # the .fin file format still matches the Go implementation byte for byte
 make setup-emulator && make emulator && make run    # it RUNS on the new API level
 make probe-device                                   # the providers still answer THAT platform

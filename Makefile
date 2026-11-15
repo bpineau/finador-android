@@ -21,6 +21,7 @@ EMULATOR := $(ANDROID_HOME)/emulator/emulator
 AVD ?= test$(COMPILE_SDK)
 
 RELEASE_APK := app/build/outputs/apk/release/app-release.apk
+LINT_REPORT := app/build/reports/lint-results-debug.txt
 APKSIGNER = $$(ls -d "$(ANDROID_HOME)"/build-tools/* 2>/dev/null | sort -V | tail -1)/apksigner
 ZIPALIGN = $$(ls -d "$(ANDROID_HOME)"/build-tools/* 2>/dev/null | sort -V | tail -1)/zipalign
 # The app version is read from the build file (single source of truth); lazy so it is
@@ -47,7 +48,7 @@ ASSET = $(DIST)/finador-android-v$(VERSION)$(if $(DEBUG_APK),-debug,).apk
 
 .PHONY: help doctor setup setup-emulator preflight test test-class build install run reinstall \
 	release release-apk verify-signature check-signing smoke-release gh-release \
-	gh-release-dry-run lint probe probe-device crossimpl emulator emulator-kill clean
+	gh-release-dry-run lint outdated probe probe-device crossimpl emulator emulator-kill clean
 
 help: ## List available targets
 	@grep -E '^[a-z-]+:.*##' $(MAKEFILE_LIST) | awk -F':.*## ' '{printf "  %-18s %s\n", $$1, $$2}'
@@ -218,8 +219,14 @@ probe-device: preflight ## Run that same probe ON the device/emulator - the ONE 
 	$(GRADLE) connectedDebugAndroidTest
 	@$(ADB) logcat -d -s probe:I -v raw | grep '^probe '
 
-lint: preflight ## Android Lint; report in app/build/reports/lint-results-debug.txt
+lint: preflight ## Android Lint, failing on any warning; report in $(LINT_REPORT)
 	$(GRADLE) lintDebug
+	@tail -1 $(LINT_REPORT)
+
+outdated: preflight ## Newer dependency versions lint knows of; informational, never a gate
+	$(GRADLE) lintDebug
+	@grep -E "\[(GradleDependency|AndroidGradlePluginVersion|NewerVersionAvailable)\]" $(LINT_REPORT) \
+	  | sed "s/^.*: Hint: //" || echo "no newer version known to lint"
 
 crossimpl: preflight ## Cross-implementation gate against the Go reference (builds /tmp/finador first)
 	cd ../finador && go build -trimpath -o /tmp/finador ./cmd/finador

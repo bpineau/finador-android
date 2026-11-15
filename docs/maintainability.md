@@ -118,14 +118,17 @@ is instrumentation-only and reaches neither application APK. No mocking framewor
 is needed; keep Android types out of crypto/domain/format/market/valuation.
 
 `make test` compiles main and tests; `make build` checks APK packaging. Kotlin warnings fail the
-compile, and lint warnings fail `make lint`, whose report must say `No issues found`. Crypto/format
+compile, and lint warnings fail `make lint`. "A newer version is available" checks are
+informational (`app/lint.xml`): they depend on what upstream published, not on this code, so they
+never turn the gate red; `make outdated` lists them for the yearly wave. Crypto/format
 changes require `make crossimpl`; use it for serializer/KDF dependency upgrades too. Pure navigation
 and unlock tests protect policy; device smokes protect rendering, authentication and lifecycle.
 
 ## 8. Platform and deprecation ledger
 
-The only lint exclusions are documented in app/lint.xml: adaptive-icon resource resolution and the
-predictive-back attribute on older API levels. There are no Kotlin deprecation suppressions. Fix new
+The only lint exclusions are documented in app/lint.xml: adaptive-icon resource resolution, the
+predictive-back attribute on older API levels, and the newer-version checks kept informational.
+There are no Kotlin deprecation suppressions. Fix new
 warnings instead of extending exclusions or adding a baseline.
 
 | Platform surface | Handling |
