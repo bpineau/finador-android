@@ -225,8 +225,11 @@ lint: preflight ## Android Lint, failing on any warning; report in $(LINT_REPORT
 
 outdated: preflight ## Newer dependency versions lint knows of; informational, never a gate
 	$(GRADLE) lintDebug
-	@grep -E "\[(GradleDependency|AndroidGradlePluginVersion|NewerVersionAvailable)\]" $(LINT_REPORT) \
-	  | sed "s/^.*: Hint: //" || echo "no newer version known to lint"
+	@test -f "$(LINT_REPORT)" && test -r "$(LINT_REPORT)" || { \
+	  echo "ERROR: cannot read lint report: $(LINT_REPORT)" >&2; exit 1; }
+	@awk '/\[(GradleDependency|AndroidGradlePluginVersion|NewerVersionAvailable)\]/ \
+	  { sub(/^.*: Hint: /, ""); print; found = 1 } \
+	  END { if (!found) print "no newer version known to lint" }' "$(LINT_REPORT)"
 
 crossimpl: preflight ## Cross-implementation gate against the Go reference (builds /tmp/finador first)
 	cd ../finador && go build -trimpath -o /tmp/finador ./cmd/finador

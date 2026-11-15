@@ -79,6 +79,9 @@ profile sourced. Override them if your paths differ: `make test ANDROID_HOME=/op
 `make test` prints `summary: N tests, 0 failures, 0 errors`; the per-test detail is in
 `app/build/test-results/testDebugUnitTest/*.xml` and `app/build/reports/tests/`.
 
+`make outdated` lists version hints or explicitly reports that none are known to lint. Hints never
+fail the command; failures to generate or read the report still return an error.
+
 ---
 
 ## 3. Run it on a phone
