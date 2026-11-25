@@ -45,17 +45,17 @@ else
   note "Homebrew" "not a macOS host: install the JDK and the SDK with your package manager"
 fi
 
-if [ -n "$JAVA_HOME" ] && [ -x "$JAVA_HOME/bin/java" ]; then
+if [ -n "$JAVA_HOME" ] && [ -x "$JAVA_HOME/bin/java" ] && [ -x "$JAVA_HOME/bin/javac" ]; then
   java_v="$("${JAVA_HOME}/bin/java" -version 2>&1 | head -1 | sed 's/.*"\(.*\)".*/\1/')"
   java_vendor="$("${JAVA_HOME}/bin/java" -version 2>&1 | sed -n '2s/ (build.*//p')"
   case "$java_v" in
     "${JDK}"|"${JDK}".*) ok "JDK ${JDK}" "$java_v ${java_vendor:-} ($JAVA_HOME)" ;;
     *) gone "JDK ${JDK}" "found $java_v at $JAVA_HOME, the build wants ${JDK}" \
-            "make setup (or install JDK ${JDK} with your package manager and set JAVA_HOME)" ;;
+            "unset JAVA_HOME and run make setup (or set JAVA_HOME to a full JDK ${JDK})" ;;
   esac
 else
-  gone "JDK ${JDK}" "no java at ${JAVA_HOME:-<JAVA_HOME unset>}" \
-       "make setup (or install JDK ${JDK} with your package manager and set JAVA_HOME)"
+  gone "JDK ${JDK}" "no full JDK at ${JAVA_HOME:-<JAVA_HOME unset>}" \
+       "unset JAVA_HOME and run make setup (or set JAVA_HOME to a full JDK ${JDK})"
 fi
 
 if [ -d "${ANDROID_HOME}/cmdline-tools" ] || [ -d "${ANDROID_HOME}/platforms" ]; then
@@ -81,8 +81,7 @@ else
        "yes | sdkmanager --licenses   # or just: make setup"
 fi
 
-platform="$(ls -d "${ANDROID_HOME}"/platforms/android-"${COMPILE_SDK}"* 2>/dev/null | tail -1)"
-if [ -n "$platform" ]; then
+if platform="$("$ROOT/scripts/environment.sh" platform "$ANDROID_HOME" "$COMPILE_SDK")"; then
   ok "Platform android-${COMPILE_SDK}" "$(basename "$platform")"
 else
   gone "Platform android-${COMPILE_SDK}" "compileSdk ${COMPILE_SDK} is not installed" \

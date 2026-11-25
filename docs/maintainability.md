@@ -215,9 +215,11 @@ Material3, because APIs can become stable. Source errors at a deliberate bump re
 ## 13. Environment and dependency verification
 
 scripts/environment.sh shares JDK/SDK discovery across make, setup and doctor. Explicit overrides
-win, local.properties supplies the SDK when present, and Java discovery uses macOS metadata or
-java on PATH. Doctor installs nothing. Setup installs missing macOS prerequisites or explains the
-Linux package-manager prerequisites, then equips the SDK. It never creates a signing key.
+win, local.properties supplies the SDK when present, and Java discovery selects a full JDK of
+the required major version through macOS metadata or java on PATH. Doctor and setup check for
+android.jar in the base platform requested by compileSdk. Doctor installs nothing. Setup installs
+missing macOS prerequisites or explains the Linux package-manager prerequisites, then equips the
+SDK. It never creates a signing key.
 
 Emulator setup checks the requested flavor and host ABI, with modern/legacy package spellings.
 Startup selects the named AVD, reuses it if running, and bounds boot waiting. Failure prints its

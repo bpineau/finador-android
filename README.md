@@ -100,7 +100,7 @@ Useful afterwards:
 
 ```sh
 adb uninstall fin.android          # clean slate: also wipes the stored config and secrets
-make reinstall                     # fixes the "signatures do not match" error after a release smoke
+ANDROID_SERIAL=YOUR_DEVICE_SERIAL make reinstall  # wipes this device's local data and installs the debug APK
 adb exec-out screencap -p > shot.png
 ```
 
@@ -128,6 +128,10 @@ reuses that AVD if it is already running, prints the emulator log on failure, an
 use the printed serial with `ANDROID_SERIAL=emulator-5554 make run`. A visible window instead of headless:
 `$ANDROID_HOME/emulator/emulator -avd test37` in its own terminal.
 
+`make release && make smoke-release` wipes the app data on the named running AVD and launches the
+release APK there. It selects the AVD even when a phone is connected. `make reinstall` installs the
+debug APK again on that AVD. Set `AVD=name` on these targets when testing another emulator.
+
 ---
 
 ## 5. Release (maintainer only)
@@ -137,7 +141,9 @@ app by its signature: if you lose the key, no future build can ever upgrade an i
 would have to uninstall (losing the local config) and reinstall. It is therefore never in this repo,
 never in a commit, never in a log.
 
-Where it lives:
+Restore the existing release key to publish an update. For a new distribution, generate a key and
+set `RELEASE_CERT_SHA256` in its Makefile to the public certificate digest from
+`make release && make verify-signature`.
 
 ```sh
 # One-time, OUTSIDE the working tree:
@@ -179,7 +185,8 @@ IP and the same minute. `net/Tls.kt` holds that measurement. The device probe is
 `gh-release`, because it needs a booted emulator and the live internet; run it by hand first.
 
 `gh-release` runs `make test` and `make crossimpl`, builds the R8-minified release APK,
-verifies its signature with `apksigner` and its 16 KB ZIP alignment with `zipalign`, stages it as
+checks its signer against the published release certificate with `apksigner`, verifies its 16 KB
+ZIP alignment with `zipalign`, stages it as
 `app/build/dist/finador-android-v<version>.apk` and attaches it to the GitHub release. Re-running is
 safe: an existing tag at `HEAD` is reused, an existing release has its asset replaced.
 

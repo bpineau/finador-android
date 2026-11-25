@@ -172,15 +172,17 @@ why the Makefile prints the summary line itself.
 
 **Emulator.** `make setup-emulator` creates the AVD named after `compileSdk` (`test37` today);
 `make emulator` reuses or boots that AVD headless with a bounded wait, `make run` installs and launches, `make emulator-kill`
-stops it. The AVDs hold no configured state, so the app lands on **Onboarding**: the smoke test
+stops it. `make smoke-release` wipes only the app on the named running AVD, even if a phone is
+connected. The AVDs hold no configured state, so the app lands on **Onboarding**: the smoke test
 verifies boot plus first screen, not an unlocked portfolio. Crashes: `adb logcat -d -s
 AndroidRuntime:E`.
 
 **Commits and releases.** Commit to `master` and push; there are no branches and no PR flow. Design
 rationale lives in commit messages: there is no separate decision log, so write the why there.
 Do NOT tag by hand: a `v*` tag is created by `make gh-release`, which is a real publication (it runs
-`make test` and `make crossimpl`, builds the R8-minified release APK, **verifies its signature with
-`apksigner` and its 16 KB ZIP alignment with `zipalign`**, tags, pushes and creates the GitHub release with the APK attached). It refuses to
+`make test` and `make crossimpl`, builds the R8-minified release APK, **verifies its signature
+and public signer fingerprint with `apksigner` and its 16 KB ZIP alignment with `zipalign`**,
+tags, pushes and creates the GitHub release with the APK attached). It refuses to
 publish a debug-signed APK, since that key is public and cannot upgrade an installed app
 (`DEBUG_APK=1` does it deliberately, named `-debug`). Two cheap probes first: `make check-signing`
 (is a real key configured here? prints no secret) and `make gh-release-dry-run` (everything except

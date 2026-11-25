@@ -31,16 +31,17 @@ have() { command -v "$1" >/dev/null 2>&1; }
 # ---------------------------------------------------------------------------
 say "JDK ${JDK}"
 JAVA_HOME="$("$ROOT/scripts/environment.sh" java)"
-if [ -n "$JAVA_HOME" ] && [ -x "$JAVA_HOME/bin/java" ] &&
+if [ -n "$JAVA_HOME" ] && [ -x "$JAVA_HOME/bin/java" ] && [ -x "$JAVA_HOME/bin/javac" ] &&
    "${JAVA_HOME}/bin/java" -version 2>&1 | head -1 | grep -q "\"${JDK}[.\"]"; then
   echo "already here: $JAVA_HOME"
-elif JH="$(/usr/libexec/java_home -v "$JDK" 2>/dev/null)" && [ -n "$JH" ]; then
-  JAVA_HOME="$JH"; echo "found: $JAVA_HOME"
+elif [ -n "$JAVA_HOME" ]; then
+  echo "ERROR: JAVA_HOME must point to a full JDK ${JDK}. Unset it to use automatic discovery."
+  exit 1
 elif [ "$(uname -s)" = "Darwin" ]; then
   have brew || { echo "Homebrew is required on macOS: see https://brew.sh"; exit 1; }
   echo "installing Temurin ${JDK} (brew cask)"
   brew install --cask "temurin@${JDK}"
-  JAVA_HOME="$(/usr/libexec/java_home -v "$JDK")"
+  JAVA_HOME="$(/usr/libexec/java_home -F -v "$JDK")"
 else
   cat <<EOF
 No JDK ${JDK} found, and this is not macOS, so nothing is installed for you. Install a JDK ${JDK}
@@ -125,7 +126,7 @@ fi
 # Since Android 17 a platform package carries a minor version (`android-37.0`), where API 36 and
 # below are plain (`android-36`). Try the new spelling first and fall back, rather than encoding a
 # naming rule that will change again.
-if ls -d "${ANDROID_HOME}"/platforms/android-"${COMPILE_SDK}"* >/dev/null 2>&1; then
+if "$ROOT/scripts/environment.sh" platform "$ANDROID_HOME" "$COMPILE_SDK" >/dev/null; then
   echo "platforms;android-${COMPILE_SDK}: already here"
 else
   echo "platforms;android-${COMPILE_SDK}: installing"

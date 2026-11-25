@@ -9,7 +9,8 @@ case "${1:-}" in
   java)
     if [ -n "${JAVA_HOME:-}" ]; then printf '%s\n' "$JAVA_HOME"; exit 0; fi
     if [ "$(uname -s)" = Darwin ]; then
-      if java_home="$(/usr/libexec/java_home -v "$JDK" 2>/dev/null)" && [ -n "$java_home" ]; then
+      # Without -F, java_home returns the default JVM even when no version matches.
+      if java_home="$(/usr/libexec/java_home -F -v "$JDK" 2>/dev/null)" && [ -x "$java_home/bin/javac" ]; then
         printf '%s\n' "$java_home"; exit 0
       fi
     fi
@@ -17,7 +18,8 @@ case "${1:-}" in
     if command -v java >/dev/null 2>&1; then
       if java_settings="$(java -XshowSettings:properties -version 2>&1)"; then
         java_home="$(printf '%s\n' "$java_settings" | sed -n 's/^[[:space:]]*java.home = //p')"
-        if [ -n "$java_home" ]; then printf '%s\n' "$java_home"; exit 0; fi
+        version="$(printf '%s\n' "$java_settings" | sed -n 's/^[[:space:]]*java.specification.version = //p')"
+        if [ "$version" = "$JDK" ] && [ -x "$java_home/bin/javac" ]; then printf '%s\n' "$java_home"; exit 0; fi
       fi
     fi
     ;;
@@ -38,5 +40,12 @@ case "${1:-}" in
       printf '%s/Android/Sdk\n' "$HOME"
     fi
     ;;
-  *) echo 'usage: environment.sh java|sdk' >&2; exit 2 ;;
+  platform)
+    # Integer compileSdk targets the base platform, even if a later minor SDK is installed.
+    for platform in "$2/platforms/android-$3.0" "$2/platforms/android-$3"; do
+      if [ -f "$platform/android.jar" ]; then printf '%s\n' "$platform"; exit 0; fi
+    done
+    exit 1
+    ;;
+  *) echo 'usage: environment.sh java|sdk|platform SDK_ROOT COMPILE_SDK' >&2; exit 2 ;;
 esac

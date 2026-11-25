@@ -44,6 +44,8 @@ VERSION = $(shell sed -n 's/.*versionName = "\(.*\)".*/\1/p' app/build.gradle.kt
 # and the asset is then named "-debug" so nobody mistakes it.
 # ---------------------------------------------------------------------------
 DIST := app/build/dist
+# Public certificate of the published APK. A different signing key cannot upgrade existing installs.
+RELEASE_CERT_SHA256 := 69e55f2a91607abb4b5c6a3fd3580bde774f5a26ced6d3c89661f4812c1bf472
 ASSET = $(DIST)/finador-android-v$(VERSION)$(if $(DEBUG_APK),-debug,).apk
 
 .PHONY: help doctor setup setup-emulator preflight test test-class build install run reinstall \
@@ -62,10 +64,10 @@ setup: ## Install whatever `make doctor` reports missing (macOS/Homebrew; says w
 setup-emulator: ## Same, plus the emulator, a system image for the build's compileSdk and the AVD the emulator targets boot (~1.5 GB)
 	@scripts/setup.sh --emulator
 
-# Two file tests, no subprocess beyond one shell: enough to turn "Gradle exploded in 400 lines"
+# A few file checks, no subprocess beyond one shell: enough to turn "Gradle exploded in 400 lines"
 # into "run make doctor". Anything subtler belongs in `make doctor`, which is opt-in.
 preflight:
-	@test -n "$(JAVA_HOME)" && test -x "$(JAVA_HOME)/bin/java" || { \
+	@test -n "$(JAVA_HOME)" && test -x "$(JAVA_HOME)/bin/java" && test -x "$(JAVA_HOME)/bin/javac" || { \
 	  echo "ERROR: no JDK $(JDK) at '$(JAVA_HOME)' - run 'make doctor' (or 'make setup')"; exit 1; }
 	@test -d "$(ANDROID_HOME)/cmdline-tools" -o -d "$(ANDROID_HOME)/platforms" || { \
 	  echo "ERROR: no Android SDK at '$(ANDROID_HOME)' - run 'make doctor' (or 'make setup')"; exit 1; }
@@ -88,15 +90,18 @@ install: preflight ## Build and install the debug APK on the connected device/em
 run: install ## Install, then (re)launch the app
 	$(ADB) shell am start -n fin.android/.ui.MainActivity
 
-reinstall: preflight ## Uninstall then install the debug APK (fixes the signature mismatch after a release smoke)
-	-$(ADB) uninstall fin.android
-	$(GRADLE) installDebug
+reinstall: build ## Wipe and reinstall on the named AVD, or the device explicitly selected with ANDROID_SERIAL
+	@set -e; serial="$${ANDROID_SERIAL:-}"; \
+	  if [ -z "$$serial" ]; then serial=$$(scripts/emulator.sh --serial "$(AVD)"); fi; \
+	  "$(ADB)" -s "$$serial" uninstall fin.android >/dev/null 2>&1 || :; \
+	  "$(ADB)" -s "$$serial" install app/build/outputs/apk/debug/app-debug.apk
 
 release: preflight ## Build the R8-minified release APK (real key when configured, else debug-signed)
 	$(GRADLE) assembleRelease
 	@ls -lh $(RELEASE_APK) | awk '{print "APK: '"$(RELEASE_APK)"' (" $$5 ")"}'
 
 check-signing: ## Say whether a real release keystore is configured on this machine (no secret printed)
+	@case "$(DEBUG_APK)" in ''|1) ;; *) echo "ERROR: DEBUG_APK must be unset or 1"; exit 1 ;; esac
 	@if [ -n "$$FINADOR_STORE_FILE" ]; then \
 	  echo "release keystore: configured (environment)"; \
 	elif grep -qE '^[[:space:]]*FINADOR_STORE_FILE[[:space:]]*=' "$$HOME/.gradle/gradle.properties" 2>/dev/null; then \
@@ -107,13 +112,13 @@ check-signing: ## Say whether a real release keystore is configured on this mach
 	  echo "ERROR: no release keystore configured, so the release build would be DEBUG-signed."; \
 	  echo "A debug-signed APK is signed with a key everyone has and cannot upgrade an installed app."; \
 	  echo; \
-	  echo "One-time setup - create a key OUTSIDE the repo:"; \
+	  echo "Restore the existing release key. Only for a NEW distribution, generate a key:"; \
 	  echo "  keytool -genkeypair -v -keystore \$$HOME/finador-release.jks -alias finador \\"; \
 	  echo "      -keyalg RSA -keysize 4096 -validity 10000"; \
 	  echo "  chmod 600 \$$HOME/finador-release.jks"; \
 	  echo; \
 	  echo "Then declare it in ~/.gradle/gradle.properties (never in this repo):"; \
-	  echo "  FINADOR_STORE_FILE=\$$HOME/finador-release.jks"; \
+	  echo "  FINADOR_STORE_FILE=/absolute/path/to/finador-release.jks"; \
 	  echo "  FINADOR_STORE_PASSWORD=..."; \
 	  echo "  FINADOR_KEY_ALIAS=finador"; \
 	  echo "  FINADOR_KEY_PASSWORD=..."; \
@@ -126,7 +131,7 @@ check-signing: ## Say whether a real release keystore is configured on this mach
 	fi
 
 verify-signature: ## Print the release APK's signing certs (CN=Android Debug means: do NOT publish)
-	$(APKSIGNER) verify --print-certs $(RELEASE_APK)
+	"$(APKSIGNER)" verify --print-certs "$(RELEASE_APK)"
 
 release-apk: check-signing release ## Build, signature-verify and stage the installable APK as app/build/dist/finador-android-v<version>.apk
 	@test -n "$(VERSION)" || { echo "ERROR: cannot read versionName from app/build.gradle.kts"; exit 1; }
@@ -136,34 +141,38 @@ release-apk: check-signing release ## Build, signature-verify and stage the inst
 	  echo "  make setup"; \
 	  exit 1; \
 	}
-	$(APKSIGNER) verify --verbose --print-certs $(RELEASE_APK)
+	@set -e; certs=$$("$(APKSIGNER)" verify --verbose --print-certs "$(RELEASE_APK)"); \
+	  printf '%s\n' "$$certs"; \
+	  if [ "$(DEBUG_APK)" = 1 ]; then \
+	    printf '%s\n' "$$certs" | grep -Eq 'certificate DN: .*CN=Android Debug(,|$$)' || \
+	      { echo "ERROR: DEBUG_APK=1 requires a debug-signed APK"; exit 1; }; \
+	  else \
+	    signer=$$(printf '%s\n' "$$certs" | sed -n 's/.* certificate SHA-256 digest: //p' | sort -u); \
+	    [ "$$signer" = "$(RELEASE_CERT_SHA256)" ] || \
+	      { echo "ERROR: APK signer differs from the published release certificate"; exit 1; }; \
+	  fi
 	@test -x "$(ZIPALIGN)" || { echo "ERROR: zipalign missing - run 'make setup'"; exit 1; }
-	$(ZIPALIGN) -c -P 16 4 $(RELEASE_APK)
-	@if $(APKSIGNER) verify --print-certs $(RELEASE_APK) | grep -q "CN=Android Debug"; then \
-	  if [ -z "$(DEBUG_APK)" ]; then \
-	    echo "ERROR: the built APK is DEBUG-signed - refusing to name it a release."; \
-	    $(MAKE) --no-print-directory check-signing DEBUG_APK=; exit 1; \
-	  fi; \
-	  echo "note: debug-signed, as DEBUG_APK=1 requested"; \
-	elif [ -n "$(DEBUG_APK)" ]; then \
-	  echo "ERROR: DEBUG_APK=1 but the APK is signed with the REAL key - drop the flag."; exit 1; \
-	fi
+	"$(ZIPALIGN)" -c -P 16 4 "$(RELEASE_APK)"
 	@mkdir -p $(DIST)
 	@cp $(RELEASE_APK) "$(ASSET)"
 	@ls -lh "$(ASSET)" | awk '{print "asset: '"$(ASSET)"' (" $$5 ")"}'
 
-smoke-release: ## Install the release APK on the emulator (WIPES app state), launch, check for crashes
-	-$(ADB) uninstall fin.android
-	$(ADB) install $(RELEASE_APK)
-	$(ADB) logcat -c
-	$(ADB) shell am start -n fin.android/.ui.MainActivity
-	sleep 6
-	$(ADB) exec-out screencap -p > /tmp/finador-release-smoke.png
-	@if $(ADB) logcat -d -s AndroidRuntime:E | grep -v '^---------' | grep -q .; then \
-	  echo "SMOKE FAIL - crash in logcat:"; $(ADB) logcat -d -s AndroidRuntime:E | tail -20; exit 1; \
-	else \
-	  echo "SMOKE OK (inspect the screen: /tmp/finador-release-smoke.png)"; \
-	fi
+smoke-release: ## Install the release APK on the named running AVD (WIPES its app state), launch, check for crashes
+	@test -s "$(RELEASE_APK)" || { echo "ERROR: release APK missing - run 'make release'"; exit 1; }
+	@set -e; serial=$$(scripts/emulator.sh --serial "$(AVD)"); \
+	  adb() { "$(ADB)" -s "$$serial" "$$@"; }; \
+	  adb uninstall fin.android >/dev/null 2>&1 || :; \
+	  adb install "$(RELEASE_APK)"; \
+	  adb logcat -c; \
+	  adb shell am start -W -n fin.android/.ui.MainActivity; \
+	  sleep 6; \
+	  adb shell pidof fin.android >/dev/null || { echo "SMOKE FAIL - app exited"; adb logcat -d -s AndroidRuntime:E; exit 1; }; \
+	  adb exec-out screencap -p > /tmp/finador-release-smoke.png; \
+	  crashes=$$(adb logcat -d -s AndroidRuntime:E); \
+	  if printf '%s\n' "$$crashes" | grep -v '^---------' | grep -q .; then \
+	    echo "SMOKE FAIL - crash in logcat:"; printf '%s\n' "$$crashes" | tail -20; exit 1; \
+	  fi; \
+	  echo "SMOKE OK (inspect the screen: /tmp/finador-release-smoke.png)"
 
 gh-release: ## End-to-end release of v<versionName>: tests, cross-impl gate, signed APK, tag+push, GitHub release with the APK attached. Bump versionName/versionCode + commit first. NOTES=file.md for hand-written notes; DEBUG_APK=1 to attach a debug-signed APK on purpose.
 	$(MAKE) gh-release-dry-run
@@ -238,8 +247,8 @@ crossimpl: preflight ## Cross-implementation gate against the Go reference (buil
 emulator: ## Boot the headless test emulator and wait until it is ready (override the AVD with AVD=name)
 	@scripts/emulator.sh "$(AVD)"
 
-emulator-kill: ## Shut the emulator down
-	$(ADB) emu kill
+emulator-kill: ## Shut the named running AVD down (override with AVD=name)
+	@serial=$$(scripts/emulator.sh --serial "$(AVD)") && "$(ADB)" -s "$$serial" emu kill
 
 clean: preflight ## Delete build outputs
 	$(GRADLE) clean
