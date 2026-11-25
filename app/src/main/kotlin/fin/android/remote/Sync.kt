@@ -1,5 +1,6 @@
 package fin.android.remote
 
+import fin.android.format.BadPasswordOrCorruptException
 import fin.android.format.Conflict
 import fin.android.format.Ledger
 import fin.android.crypto.Bytes
@@ -70,68 +71,57 @@ class Sync(
     /** [Backend.checkAccess]; touches neither the working copy nor the state. */
     fun checkAccess() = backend.checkAccess()
 
-    /**
-     * Pulls into the working copy if online and stale (missing copy, past readPullAfter).
-     *
-     * A DIRTY working copy is never pulled over: it carries records the remote has never seen, and
-     * a pull writes the remote bytes verbatim - this path holds no passphrase, so it cannot merge
-     * either side. Reconciling the two is [mutate]'s and [sync]'s job, and both do merge; until one
-     * of them runs, reading a slightly stale unpushed copy is strictly better than losing it.
-     */
-    fun pullIfStale() {
+    fun hasLocalCopy(): Boolean = workingCopy.exists() || AtomicFile.backupOf(workingCopy).exists()
+
+    /** Null only when GitHub confirmed the file is missing and there is no local ledger. */
+    fun openIfPresent(passphrase: String): Ledger? {
+        recoverLoneBackup(passphrase)?.let { return it }
         val st = state()
-        val sinceLastPull = st.lastPull?.let { runCatching { Duration.between(Instant.parse(it), now()) }.getOrNull() }
-        // Fresh only within [0, readPullAfter): a future lastPull (clock skew / restored backup) is
-        // treated as stale rather than suppressing pulls forever.
-        val fresh = workingCopy.exists() && sinceLastPull != null &&
-            !sinceLastPull.isNegative && sinceLastPull < readPullAfter
-        if (fresh) return
-        if (st.dirty && workingCopy.exists()) return
-        try {
-            val f = backend.fetch()
-            writeCopy(f.data)
-            saveState(st.copy(sha = f.version, lastPull = now().toString(), dirty = false,
-                synced = digest(f.data), authError = null))
-        } catch (e: RemoteError.Missing) {
-            // No remote file yet - keep whatever local copy exists (possibly none).
-        } catch (e: RemoteError.Offline) {
-            if (!workingCopy.exists()) throw e // can't read without any copy
-        } catch (e: RemoteError.Auth) {
-            // A rejected token must not lock the user out of their local data: record it (the UI
-            // shows a persistent re-login banner) and read the local copy. Without any copy there
-            // is nothing to show - let the error surface.
-            saveState(st.copy(authError = e.message))
-            if (!workingCopy.exists()) throw e
+        val age = st.lastPull?.let { runCatching { Duration.between(Instant.parse(it), now()) }.getOrNull() }
+        val fresh = age != null && !age.isNegative && age < readPullAfter
+        if (!workingCopy.exists() || (!st.dirty && !fresh)) {
+            try {
+                val fetched = backend.fetch()
+                return installFetched(fetched, passphrase, st)
+            } catch (_: RemoteError.Missing) {
+                if (!workingCopy.exists()) return null
+            } catch (e: RemoteError.Offline) {
+                if (!workingCopy.exists()) throw e
+            } catch (e: RemoteError.Auth) {
+                saveState(st.copy(authError = e.message))
+                if (!workingCopy.exists()) throw e
+            }
+        }
+        return try {
+            Ledger.open(workingCopy.readBytes(), passphrase)
+        } catch (e: BadPasswordOrCorruptException) {
+            if (!AtomicFile.backupOf(workingCopy).exists()) throw e
+            try { recoverBackup(passphrase) } catch (_: BadPasswordOrCorruptException) { throw e }
         }
     }
 
-    /**
-     * Opens the ledger for reading, pulling first if stale.
-     *
-     * A working copy that does not open falls back to the `.bak` [writeCopy] keeps. The copy is
-     * written on every pull, mutate and sync, so a build older than the atomic write could leave a
-     * truncated one behind, and the dirty guard then forbids healing it by pulling. When the backup
-     * opens, it is promoted and the state marked DIRTY: whatever it holds may already be on the
-     * remote or may not, and a merge - union plus last-writer-wins - is the one reconciliation that
-     * cannot drop either side. A wrong passphrase fails on both files and surfaces as itself.
-     */
-    fun openForRead(passphrase: String): Ledger {
-        pullIfStale()
-        require(workingCopy.exists()) { "no local copy and remote unavailable" }
-        return try {
-            Ledger.open(workingCopy.readBytes(), passphrase)
-        } catch (e: Exception) {
-            val bak = AtomicFile.backupOf(workingCopy)
-            if (!bak.exists()) throw e
-            val recovered = try {
-                Ledger.open(bak.readBytes(), passphrase)
-            } catch (_: Exception) {
-                throw e // the backup is no better: report the working copy's own failure
-            }
-            saveState(state().copy(dirty = true))
-            AtomicFile.write(workingCopy, bak.readBytes())
-            recovered
-        }
+    private fun recoverLoneBackup(passphrase: String): Ledger? =
+        if (!workingCopy.exists() && AtomicFile.backupOf(workingCopy).exists()) recoverBackup(passphrase) else null
+
+    private fun recoverBackup(passphrase: String): Ledger {
+        val bytes = AtomicFile.backupOf(workingCopy).readBytes()
+        val recovered = Ledger.open(bytes, passphrase)
+        saveState(state().copy(dirty = true))
+        AtomicFile.write(workingCopy, bytes)
+        return recovered
+    }
+
+    /** Verify the remote bytes before replacing either the working copy or its last good backup. */
+    private fun installFetched(f: Fetched, passphrase: String, st: SyncState): Ledger {
+        val opened = Ledger.open(f.data, passphrase)
+        writeCopy(f.data)
+        saveState(st.copy(sha = f.version, lastPull = now().toString(), dirty = false,
+            synced = digest(f.data), authError = null))
+        return opened
+    }
+
+    fun openForRead(passphrase: String): Ledger = requireNotNull(openIfPresent(passphrase)) {
+        "no local copy and remote unavailable"
     }
 
     /**
@@ -144,39 +134,40 @@ class Sync(
         resolve: (Conflict) -> Int = { 0 },
         fn: (Ledger) -> Ledger,
     ): SyncOutcome {
+        recoverLoneBackup(passphrase)
         var st = state()
-        // Pull fresh first so we mutate on top of the latest remote (best-effort when online). An
-        // UNPUSHED local copy is merged with the remote rather than replaced by it: overwriting it
-        // would drop every record an offline (or auth-rejected) write left behind, which the dirty
-        // flag exists to protect.
-        try {
+        val current = try {
             val f = backend.fetch()
-            if (st.dirty && workingCopy.exists()) {
-                val merged = Ledger.open(workingCopy.readBytes(), passphrase)
-                    .merge(Ledger.open(f.data, passphrase), resolve)
-                saveState(st.copy(dirty = true))
-                writeCopy(merged.toBytes())
-            } else {
-                writeCopy(f.data)
-                st = st.copy(dirty = false, synced = digest(f.data))
-            }
+            val remote = Ledger.open(f.data, passphrase)
             st = st.copy(sha = f.version, lastPull = now().toString(), authError = null)
-            saveState(st)
-        } catch (e: RemoteError.Missing) {
+            if (st.dirty && workingCopy.exists()) {
+                Ledger.open(workingCopy.readBytes(), passphrase).merge(remote, resolve)
+            } else remote
+        } catch (_: RemoteError.Missing) {
             st = st.copy(sha = null)
-        } catch (e: RemoteError.Offline) {
-            // proceed on the local copy
+            null
+        } catch (_: RemoteError.Offline) {
+            null
         } catch (e: RemoteError.Auth) {
-            // proceed on the local copy; the push below will fail too and keep the change dirty
+            st = st.copy(authError = e.message)
+            null
         }
-
-        require(workingCopy.exists()) { "no local copy to mutate and remote unavailable" }
-        var local = fn(Ledger.open(workingCopy.readBytes(), passphrase))
-        var bytes = local.toBytes() // serialize once; re-derived only after a merge
+        val local = fn(current ?: Ledger.open(workingCopy.readBytes(), passphrase))
+        val bytes = local.toBytes()
         st = st.copy(dirty = true)
-        saveState(st) // the dirty guard must survive interruption BEFORE publishing new bytes
+        saveState(st)
         writeCopy(bytes)
+        return pushSaved(local, bytes, st, passphrase, message, resolve)
+    }
 
+    /** Retry only the push and merge. The user's mutation has already been written exactly once. */
+    private fun pushSaved(
+        saved: Ledger, savedBytes: ByteArray, savedState: SyncState, passphrase: String,
+        message: String, resolve: (Conflict) -> Int,
+    ): SyncOutcome {
+        var st = savedState
+        var local = saved
+        var bytes = savedBytes
         /** The change is written locally but could not reach the remote: keep it dirty.
          *  [authError] records a token rejection; an offline failure preserves any existing one. */
         fun keptLocally(message: String, authError: String? = st.authError): SyncOutcome {
@@ -194,12 +185,19 @@ class Sync(
                 // Going offline (or losing auth) mid-reconcile must still honor the dirty guarantee.
                 val remote = try {
                     backend.fetch()
+                } catch (_: RemoteError.Missing) {
+                    st = st.copy(sha = null)
+                    return@repeat
                 } catch (off: RemoteError.Offline) {
                     return keptLocally("saved locally (offline) - will push later")
                 } catch (auth: RemoteError.Auth) {
                     return keptLocally("saved locally - GitHub token rejected, re-login to push", auth.message)
                 }
-                local = local.merge(Ledger.open(remote.data, passphrase), resolve)
+                local = try {
+                    local.merge(Ledger.open(remote.data, passphrase), resolve)
+                } catch (e: Exception) {
+                    return keptLocally("saved locally - cannot merge remote ledger: ${e.message}")
+                }
                 bytes = local.toBytes()
                 writeCopy(bytes)
                 st = st.copy(sha = remote.version)
@@ -215,6 +213,7 @@ class Sync(
 
     /** Force pull (and push if there are unpushed local changes). */
     fun sync(passphrase: String, resolve: (Conflict) -> Int = { 0 }): SyncOutcome {
+        recoverLoneBackup(passphrase)
         var st = state()
         val fetched = try {
             backend.fetch()
@@ -228,46 +227,25 @@ class Sync(
         }
         st = st.copy(authError = null) // the fetch went through: auth is healthy again
 
-        if (!st.dirty) {
-            if (fetched != null) {
-                writeCopy(fetched.data)
-                saveState(st.copy(sha = fetched.version, lastPull = now().toString(), synced = digest(fetched.data)))
-            } else if (workingCopy.exists()) {
-                // remote missing but we have a local copy → first push (guard offline like elsewhere)
-                try {
-                    val bytes = workingCopy.readBytes()
-                    saveState(st.copy(dirty = true))
-                    val newSha = backend.push(bytes, null, "finador-android: initial push")
-                    saveState(st.copy(sha = newSha, lastPull = now().toString(), synced = digest(bytes)))
-                } catch (e: RemoteError.Offline) {
-                    return SyncOutcome(pushed = false, dirty = true, message = "offline")
-                }
-            }
+        if (fetched != null && (!st.dirty || !workingCopy.exists())) {
+            installFetched(fetched, passphrase, st)
             return SyncOutcome(pushed = false, dirty = false, message = "up to date")
         }
+        if (!hasLocalCopy() && fetched == null) {
+            return SyncOutcome(pushed = false, dirty = st.dirty, message = "no ledger to sync")
+        }
 
-        // dirty: reconcile local with remote and push
-        var local = Ledger.open(workingCopy.readBytes(), passphrase)
+        val localBytes = workingCopy.readBytes()
+        var local = Ledger.open(localBytes, passphrase)
+        var bytes = localBytes
+        st = st.copy(dirty = true, sha = fetched?.version)
         if (fetched != null) {
             local = local.merge(Ledger.open(fetched.data, passphrase), resolve)
-            st = st.copy(sha = fetched.version)
-        } else {
-            st = st.copy(sha = null)
+            bytes = local.toBytes()
         }
-        val bytes = local.toBytes()
-        saveState(st.copy(dirty = true))
-        writeCopy(bytes)
-        return try {
-            val newSha = backend.push(bytes, st.sha, "finador-android: sync")
-            saveState(st.copy(sha = newSha, lastPull = now().toString(), dirty = false, synced = digest(bytes)))
-            SyncOutcome(pushed = true, dirty = false, message = "synced")
-        } catch (e: RemoteError.Offline) {
-            saveState(st.copy(dirty = true))
-            SyncOutcome(pushed = false, dirty = true, message = "offline - will push later")
-        } catch (e: RemoteError.Auth) {
-            saveState(st.copy(dirty = true, authError = e.message))
-            SyncOutcome(pushed = false, dirty = true, message = "saved locally - GitHub token rejected, re-login to push")
-        }
+        saveState(st)
+        if (fetched != null) writeCopy(bytes)
+        return pushSaved(local, bytes, st, passphrase, "finador-android: sync", resolve)
     }
 
     /**

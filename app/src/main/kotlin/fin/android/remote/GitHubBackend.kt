@@ -10,7 +10,8 @@ import kotlinx.serialization.json.Json
  * GitHub Contents API transport (pure HTTPS, no `git` binary). Each push is one commit, so the
  * repo history shows the append-log deltas. The repo holds only the encrypted `.fin`.
  *
- * Caveat: the Contents endpoint caps blobs at ~1 MB; the ledger (no market cache) stays well under.
+ * Above 1 MB, Contents returns metadata only. Fetching the blob by its SHA keeps the bytes and
+ * the version used for the next conditional push together if the branch moves during the read.
  */
 class GitHubBackend(
     private val owner: String,
@@ -21,14 +22,27 @@ class GitHubBackend(
     private val baseUrl: String = "https://api.github.com",
 ) : Backend {
 
+    private val repoUrl = "$baseUrl/repos/${Http.escapePath(owner)}/${Http.escapePath(repo)}"
+    private val contentsUrl = "$repoUrl/contents/" + path.split('/').joinToString("/") { Http.escapePath(it) }
+
     override fun fetch(): Fetched {
-        val url = Http.url("$baseUrl/repos/$owner/$repo/contents/$path", "ref" to branch)
-        val (code, body) = call(url, "GET", null)
+        val url = Http.url(contentsUrl, "ref" to branch)
+        val (code, body) = call(url, "GET", null, accept = "application/vnd.github.object+json")
         when (code) {
             200 -> {
-                val r = json.decodeFromString(ContentsResponse.serializer(), body)
-                val raw = B64.decode(r.content) // GitHub wraps base64 at 60 cols; B64.decode strips whitespace
-                return Fetched(raw, r.sha)
+                var response = json.decodeFromString(ContentsResponse.serializer(), body)
+                if (response.encoding == "none") {
+                    val sha = response.sha
+                    val (blobCode, blob) = call("$repoUrl/git/blobs/${Http.escapePath(sha)}", "GET", null)
+                    when (blobCode) {
+                        200 -> response = json.decodeFromString(ContentsResponse.serializer(), blob)
+                        401, 403 -> throw RemoteError.Auth(authMessage(blobCode))
+                        else -> throw RemoteError.Offline("GitHub blob unavailable (HTTP $blobCode)")
+                    }
+                    require(response.sha == sha) { "GitHub returned a different blob version" }
+                }
+                require(response.encoding == "base64") { "Unsupported GitHub content encoding" }
+                return Fetched(B64.decode(response.content), response.sha)
             }
             404 -> throw RemoteError.Missing()
             401, 403 -> throw RemoteError.Auth(authMessage(code))
@@ -37,9 +51,8 @@ class GitHubBackend(
     }
 
     override fun push(data: ByteArray, base: Version?, message: String): Version {
-        val url = "$baseUrl/repos/$owner/$repo/contents/$path"
         val payload = PutRequest(message = message, content = B64.encode(data), sha = base, branch = branch)
-        val (code, body) = call(url, "PUT", json.encodeToString(PutRequest.serializer(), payload))
+        val (code, body) = call(contentsUrl, "PUT", json.encodeToString(PutRequest.serializer(), payload))
         when (code) {
             200, 201 -> return json.decodeFromString(PutResponse.serializer(), body).content.sha
             409, 422 -> throw RemoteError.Conflict()
@@ -53,7 +66,7 @@ class GitHubBackend(
 
     /** The repository metadata, which any token able to read its contents may read (Go `CheckAccess`). */
     override fun checkAccess() {
-        val (code, _) = call("$baseUrl/repos/$owner/$repo", "GET", null)
+        val (code, _) = call(repoUrl, "GET", null)
         when (code) {
             200 -> return
             // GitHub answers 404, not 403, for a private repository the token cannot see.
@@ -65,11 +78,14 @@ class GitHubBackend(
     override fun describe(): String = "github:$owner/$repo/$path@$branch"
 
     /** Executes with one retry on 5xx/429 or IO error; surfaces transport failures as Offline. */
-    private fun call(url: String, method: String, body: String?): Pair<Int, String> {
+    private fun call(
+        url: String, method: String, body: String?, accept: String = "application/vnd.github+json",
+    ): Pair<Int, String> {
         val headers = mapOf(
             "Authorization" to "Bearer $token",
-            "Accept" to "application/vnd.github+json",
-            "X-GitHub-Api-Version" to "2022-11-28",
+            // GitHub moves unversioned clients to its oldest supported API on retirement.
+            // An installed APK with a pinned, retired version gets HTTP 410 on every request.
+            "Accept" to accept,
         )
         val resp = Http.send(
             url,
@@ -93,7 +109,7 @@ class GitHubBackend(
 }
 
 @Serializable
-private data class ContentsResponse(val content: String, val sha: String)
+private data class ContentsResponse(val content: String, val sha: String, val encoding: String = "base64")
 
 @Serializable
 private data class PutRequest(

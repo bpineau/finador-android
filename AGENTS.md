@@ -341,8 +341,9 @@ Each of these cost real debugging once. Symptom, cause, what to do.
   the next sync MERGES it.
 - **A fetch overwrote local records.** It must not: a `dirty` working copy holds records the remote
   has never seen. `Sync.mutate` merges the fetched remote INTO it rather than writing the remote
-  bytes over it, and `pullIfStale` skips the pull entirely while dirty, since that path has no
-  passphrase to merge with. Asserted by `remote/SyncTest`'s two "unpushed local change" tests.
+  bytes over it. A read of a dirty copy stays local. Before installing a clean fetch, the reader
+  authenticates the remote ledger with the passphrase. An unsupported format is a hard error and
+  never triggers backup recovery. A lone backup is recovered as dirty before any fetch.
   Dirty is persisted BEFORE changed or recovered ledger bytes are installed. `SyncState.synced`
   fingerprints the exact bytes fetched or pushed; a mismatch is dirty even if a saved flag says
   clean. Missing state with an existing copy is also dirty. Legacy valid state without a fingerprint
@@ -351,6 +352,7 @@ Each of these cost real debugging once. Symptom, cause, what to do.
   its backup that existed before it. First connection requires online repository access and a
   successful file lookup: only a confirmed missing file permits creating a ledger. Never create
   one after a transport failure, since its new file id cannot merge with an existing remote.
+  A newly created ledger must reach the remote before onboarding accepts its configuration.
   Reconnecting an existing working copy still works offline. Onboarding verifies the passphrase
   before replacing saved settings or secrets. The empty ledger an attempt started itself IS discarded
   (`AppContainer.discardCheckout`):
@@ -374,7 +376,9 @@ Each of these cost real debugging once. Symptom, cause, what to do.
   quantities/amounts, trades with zero quantity, and trades/dividends without an asset. Zero amounts
   remain valid (including free shares). A security statement needs positive buy/sell quantity in that
   account at its date, including same-day buys, as Go `CheckSecurityStatement` requires. Editing a
-  transaction excludes its previous version from that check. Reading old files stays unchanged.
+  transaction excludes its previous version from that check. After fetching, transaction entry checks
+  the selected account still exists, and editors refuse to recreate a remotely deleted account or
+  asset. Reading old files stays unchanged.
 - **Truncated settings prevent startup.** Remote configuration is atomic and keeps a last good
   backup. An unreadable current file recovers it; if both are unreadable, onboarding opens without
   deleting local ledgers or secrets. Forget removes both configuration files after checkout migration.

@@ -3,6 +3,7 @@ package fin.android.storage
 import org.junit.Assert.assertArrayEquals
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertThrows
 import org.junit.Assert.assertTrue
 import org.junit.Before
 import org.junit.Test
@@ -38,6 +39,14 @@ class AtomicFileTest {
         AtomicFile.write(f, "second".toByteArray(), backup = true)
         assertEquals("second", f.readText())
         assertEquals("first", AtomicFile.backupOf(f).readText())
+    }
+
+    @Test fun failedReplacementPreservesThePreviousDestination() {
+        // A rename cannot replace a directory with a regular file. Even an empty directory
+        // must survive this failure, as must a regular ledger on a failed rename.
+        assertTrue(f.mkdir())
+        assertThrows(java.io.IOException::class.java) { AtomicFile.writeText(f, "new") }
+        assertTrue(f.isDirectory)
     }
 
     /** A temporary left by a write that died is overwritten, never appended to. */

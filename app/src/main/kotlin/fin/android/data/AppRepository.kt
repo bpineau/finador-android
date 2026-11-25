@@ -100,23 +100,19 @@ class AppRepository(
             // A repository the token cannot see answers 404 to the file fetch as well, which would
             // read as "no ledger yet" and start an empty one beside the real one (Go `remote login`).
             try { sync.checkAccess() } catch (e: RemoteError.Offline) {
-                if (!wc.exists()) throw e
+                if (!sync.hasLocalCopy()) throw e
             }
             // Without a local copy, only a confirmed missing remote file permits creation.
             // A failed lookup could hide an existing ledger with a different immutable file id.
-            // pullIfStale already tolerates offline access when a working copy exists.
-            sync.pullIfStale()
-
-            if (!wc.exists()) {
-                wc.parentFile?.mkdirs()
+            val opened = sync.openIfPresent(pass) ?: run {
                 created = true
                 AtomicFile.write(wc, Ledger.create(pass).toBytes())
-                sync.sync(pass) // first push; auth/permission errors surface here, not swallowed
-                sync.state().authError?.let { error(it) }
+                val firstPush = sync.sync(pass)
+                check(firstPush.pushed) {
+                    sync.state().authError ?: "Could not create the remote ledger. Check the connection, branch and write permission."
+                }
+                sync.openForRead(pass)
             }
-            // Authenticate before changing saved settings/secrets. A failed reconnect retains all
-            // existing working bytes and backups, including records never pushed to GitHub.
-            val opened = sync.openForRead(pass)
             container.saveConfig(cfg)
             container.secretStore.putPat(token.trim())
             container.secretStore.putPassphrase(pass)
@@ -209,6 +205,7 @@ class AppRepository(
         qty: BigDecimal, amount: BigDecimal, ccy: String, note: String?,
     ): Result<SyncOutcome> = exclusive {
         mutateLocked("add ${kind.name}") {
+            require(accountId in it.book.accounts) { "Unknown account: $accountId" }
             it.addTransaction(date, accountId, assetId, kind, qty, Money(amount, ccy), note?.ifBlank { null })
         }
     }
@@ -220,7 +217,10 @@ class AppRepository(
 
     /** Edits an existing account in place (same id, last-writer-wins). */
     suspend fun editAccount(id: String, name: String, ccy: String, tax: TaxRule, aliases: List<String>): Result<SyncOutcome> = exclusive {
-        mutateLocked("edit account") { it.putAccount(Account(id, name, ccy, tax, aliases)) }
+        mutateLocked("edit account") {
+            require(id in it.book.accounts) { "Unknown account: $id" }
+            it.putAccount(Account(id, name, ccy, tax, aliases))
+        }
     }
 
     /** Deletes an account; refused (Result.failure) if a transaction still references it. */
@@ -244,6 +244,7 @@ class AppRepository(
         aliases: List<String>, ccy: String, group: String?, withholding: Double?,
     ): Result<SyncOutcome> = exclusive {
         mutateLocked("edit asset") {
+            require(id in it.book.assets) { "Unknown asset: $id" }
             it.putAsset(Asset(id, kind, name, ticker, isin, aliases, ccy, group, withholding))
         }
     }

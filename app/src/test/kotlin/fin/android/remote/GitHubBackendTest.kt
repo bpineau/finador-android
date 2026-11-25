@@ -3,6 +3,8 @@ package fin.android.remote
 import fin.android.crypto.B64
 import fin.android.net.FakeHttpServer
 import org.junit.After
+import org.junit.Assert.assertArrayEquals
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertThrows
 import org.junit.Assert.assertTrue
@@ -31,6 +33,33 @@ class GitHubBackendTest {
         val req = server.takeRequest()
         assertEquals("GET", req.method)
         assertEquals("Bearer tok", req.getHeader("Authorization"))
+        assertNull(req.getHeader("X-GitHub-Api-Version"))
+    }
+
+    @Test
+    fun largeLedgerReadsTheExactBlobNamedByTheContentsResponse() {
+        val bytes = ByteArray(1_048_577) { 'x'.code.toByte() }
+        val sha = "f".repeat(40)
+        server.enqueue(FakeHttpServer.FakeResponse().setBody("""{"encoding":"none","content":"","sha":"$sha"}"""))
+        server.enqueue(FakeHttpServer.FakeResponse().setBody(
+            """{"encoding":"base64","content":"${B64.encode(bytes)}","sha":"$sha"}"""))
+        val fetched = backend().fetch()
+        assertArrayEquals(bytes, fetched.data)
+        assertEquals(sha, fetched.version)
+        assertEquals("application/vnd.github.object+json", server.takeRequest().getHeader("Accept"))
+        assertEquals("/repos/o/r/git/blobs/$sha", server.takeRequest().path)
+    }
+
+    @Test
+    fun fetchAndPushAddressTheSameEscapedLedgerPath() {
+        val remote = GitHubBackend("o", "r", "archive/a #1?.fin", "topic/nested", "tok", server.url("").trimEnd('/'))
+        server.enqueue(FakeHttpServer.FakeResponse().setBody("""{"content":"YQ==","sha":"s"}"""))
+        remote.fetch()
+        server.enqueue(FakeHttpServer.FakeResponse().setBody("""{"content":{"sha":"s2"}}"""))
+        remote.push(byteArrayOf(1), "s", "edit")
+        val path = "/repos/o/r/contents/archive/a%20%231%3F.fin"
+        assertEquals("$path?ref=topic%2Fnested", server.takeRequest().path)
+        assertEquals(path, server.takeRequest().path)
     }
 
     @Test

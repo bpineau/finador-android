@@ -187,6 +187,13 @@ the static checks from runtime verification.
    [current rollout and distribution paths](https://developer.android.com/developer-verification)
    before changing distribution. A regional store rollout does not imply all GitHub installs
    are currently blocked.
+6. GitHub sync uses the default REST API version. GitHub advances that default when a version
+   retires. A dated version header would leave older APKs receiving HTTP 410 at retirement.
+   Check changes to repository metadata, Contents and Git blobs during the yearly review.
+   Contents returns metadata alone for files above 1 MB. The app then reads the immutable blob
+   by SHA so a concurrent push cannot separate the returned bytes from their version.
+   [GitHub API version lifecycle](https://docs.github.com/en/rest/about-the-rest-api/api-versions)
+   and [Contents limits](https://docs.github.com/en/rest/repos/contents#get-repository-content).
 
 ## 10. Maintenance boundaries
 

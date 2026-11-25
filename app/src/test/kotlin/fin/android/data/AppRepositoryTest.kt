@@ -87,6 +87,43 @@ class AppRepositoryTest {
         } finally { dir.deleteRecursively() }
     }
 
+    @Test fun transactionRejectsAnAccountDeletedRemotelyWhileTheFormWasOpen() = runBlocking {
+        val dir = Files.createTempDirectory("repository-deleted-account").toFile()
+        try {
+            val original = Ledger.create(pass, t = 1, m = 8)
+                .putAccount(Account("account", "CTO Meridia", "USD", TaxRule.None))
+            val remote = Remote(original.toBytes())
+            val container = AppContainer(dir, File(dir, "cache"), InMemorySecretStore()) { _, _ -> remote }
+            val repo = AppRepository(container, clock)
+            repo.onboard("synthetic-owner", "ledger-store", "portfolio.fin", "master", "token", pass).getOrThrow()
+            val deleted = original.deleteAccount("account").toBytes()
+            remote.data = deleted
+            val result = repo.addTransaction(day, "account", null, TxKind.deposit, BigDecimal.ZERO,
+                BigDecimal.TEN, "USD", null)
+            assertTrue(result.isFailure)
+            assertArrayEquals(deleted, remote.data)
+        } finally { dir.deleteRecursively() }
+    }
+
+    @Test fun staleEditorsCannotResurrectDeletedAccountsOrAssets() = runBlocking {
+        val dir = Files.createTempDirectory("repository-deleted-entities").toFile()
+        try {
+            val original = Ledger.create(pass, t = 1, m = 8)
+                .putAccount(Account("account", "CTO Meridia", "USD", TaxRule.None))
+                .putAsset(Asset("asset", AssetKind.SECURITY, "Synthetic Fund", ccy = "USD"))
+            val remote = Remote(original.toBytes())
+            val container = AppContainer(dir, File(dir, "cache"), InMemorySecretStore()) { _, _ -> remote }
+            val repo = AppRepository(container, clock)
+            repo.onboard("synthetic-owner", "ledger-store", "portfolio.fin", "master", "token", pass).getOrThrow()
+            val deleted = original.deleteAccount("account").deleteAsset("asset").toBytes()
+            remote.data = deleted
+            assertTrue(repo.editAccount("account", "New name", "USD", TaxRule.None, emptyList()).isFailure)
+            assertTrue(repo.editAsset("asset", AssetKind.SECURITY, "New name", null, null,
+                emptyList(), "USD", null, null).isFailure)
+            assertArrayEquals(deleted, remote.data)
+        } finally { dir.deleteRecursively() }
+    }
+
     @Test fun invalidRepositoryTransactionNeverReachesWorkingCopy() = runBlocking {
         val dir = Files.createTempDirectory("repository-validation").toFile()
         try {
@@ -227,6 +264,22 @@ class AppRepositoryTest {
             return "1"
         }
         override fun describe() = "synthetic new remote"
+    }
+
+    @Test fun firstPushMustSucceedBeforeOnboardingSavesANewLedger() = runBlocking {
+        val dir = Files.createTempDirectory("repository-initial-conflict").toFile()
+        try {
+            val remote = object : Backend by NewRemote() {
+                override fun push(data: ByteArray, base: Version?, message: String): Version =
+                    throw RemoteError.Conflict()
+            }
+            val container = AppContainer(dir, File(dir, "cache"), InMemorySecretStore()) { _, _ -> remote }
+            val repo = AppRepository(container, clock)
+            val result = repo.onboard("synthetic-owner", "ledger-store", "portfolio.fin", "master", "token", pass)
+            assertTrue(result.isFailure)
+            assertFalse(container.loadConfig().isGithub)
+            assertFalse(container.workingCopy(cfg).exists())
+        } finally { dir.deleteRecursively() }
     }
 
     @Test fun failedFirstPushLeavesNothingThatRefusesAnotherPassphrase() = runBlocking {

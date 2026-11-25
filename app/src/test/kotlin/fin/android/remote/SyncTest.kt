@@ -2,7 +2,11 @@ package fin.android.remote
 
 import fin.android.domain.Money
 import fin.android.domain.TxKind
+import fin.android.format.BadPasswordOrCorruptException
+import fin.android.format.UnsupportedFormatException
 import fin.android.format.Ledger
+import org.junit.Assert.assertArrayEquals
+import org.junit.Assert.assertThrows
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotNull
@@ -67,6 +71,56 @@ class SyncTest {
         l.addTransaction(LocalDate.parse("2026-01-01"), "acc", null, TxKind.deposit, BigDecimal.ZERO, Money(BigDecimal("100"), "EUR"))
     private fun addWithdraw(l: Ledger) =
         l.addTransaction(LocalDate.parse("2026-02-01"), "acc", null, TxKind.withdraw, BigDecimal.ZERO, Money(BigDecimal("40"), "EUR"))
+
+    @Test fun unreadableRemoteNeverReplacesTheWorkingCopyOrItsBackup() {
+        val bytes = emptyLedgerBytes()
+        val backup = File(wc.path + ".bak")
+        for (op in listOf("read", "mutate", "sync")) {
+            wc.writeBytes(bytes)
+            backup.writeBytes(bytes)
+            st.writeText("""{"sha":"1","dirty":false}""")
+            val remote = FakeBackend().apply { data = "incomplete".toByteArray() }
+            val sync = sync(remote)
+            assertThrows(op, BadPasswordOrCorruptException::class.java) {
+                when (op) {
+                    "read" -> sync.openForRead(pw)
+                    "mutate" -> sync.mutate(pw, "deposit", fn = ::addDeposit)
+                    else -> sync.sync(pw)
+                }
+            }
+            assertArrayEquals(op, bytes, wc.readBytes())
+            assertArrayEquals(op, bytes, backup.readBytes())
+            assertEquals(op, "1", sync.state().sha)
+        }
+    }
+
+    @Test fun futureLocalFormatIsNeverRolledBackToAnOlderBackup() {
+        val bytes = emptyLedgerBytes()
+        val future = bytes.decodeToString().replace("\"v\":3", "\"v\":4").encodeToByteArray()
+        wc.writeBytes(future)
+        File(wc.path + ".bak").writeBytes(bytes)
+        assertThrows(UnsupportedFormatException::class.java) { sync(FakeBackend()).openForRead(pw) }
+        assertArrayEquals(future, wc.readBytes())
+    }
+
+    @Test fun aLoneBackupIsRecoveredBeforeFetchingRemoteRecords() {
+        val base = emptyLedgerBytes()
+        val local = addDeposit(Ledger.open(base, pw)).toBytes()
+        File(wc.path + ".bak").writeBytes(local)
+        val remote = FakeBackend().apply { data = base }
+        assertEquals(1, sync(remote).openForRead(pw).book.txs.size)
+        assertArrayEquals(local, wc.readBytes())
+        assertTrue(sync(remote).state().dirty)
+    }
+
+    @Test fun remoteDeletionDuringConflictRetryKeepsOneSavedTransaction() {
+        val remote = FakeBackend().apply { data = emptyLedgerBytes(); conflictNext = true }
+        sync(remote).openForRead(pw)
+        remote.beforePush = { remote.data = null; remote.beforePush = null }
+        val outcome = sync(remote).mutate(pw, "deposit", fn = ::addDeposit)
+        assertTrue(outcome.pushed)
+        assertEquals(1, Ledger.open(remote.data!!, pw).book.txs.size)
+    }
 
     @Test
     fun openForReadPullsWhenAbsent() {
@@ -202,7 +256,7 @@ class SyncTest {
         // And the conservative reading is load-bearing: the local copy is not pulled over.
         val local = addDeposit(Ledger.open(emptyLedgerBytes(), pw)).toBytes()
         wc.writeBytes(local)
-        sync(be).pullIfStale()
+        sync(be).openForRead(pw)
         assertEquals("the unpushed record must survive", 1, Ledger.open(wc.readBytes(), pw).book.txs.size)
     }
 
@@ -274,13 +328,13 @@ class SyncTest {
 
     @Test fun changedBytesOverrideCleanStateOnEveryAccessPath() {
         for (access in listOf("read", "mutate", "sync")) {
-            wc.delete(); st.delete()
+            wc.delete(); st.delete(); File(wc.path + ".bak").delete()
             val be = FakeBackend().apply { data = emptyLedgerBytes(); version = 1 }
             val original = sync(be).openForRead(pw)
             wc.writeBytes(addDeposit(original).toBytes()) // save landed without a state update
             assertTrue("$access detects bytes the remote never received", sync(be).state().dirty)
             when (access) {
-                "read" -> Sync(be, wc, st, Duration.ZERO).pullIfStale()
+                "read" -> Sync(be, wc, st, Duration.ZERO).openForRead(pw)
                 "mutate" -> sync(be).mutate(pw, "withdraw", fn = ::addWithdraw)
                 else -> sync(be).sync(pw)
             }
@@ -305,7 +359,7 @@ class SyncTest {
         val base = emptyLedgerBytes()
         val be = FakeBackend().apply { data = base; version = 1 }
         wc.writeBytes(addDeposit(Ledger.open(base, pw)).toBytes())
-        sync(be).pullIfStale()
+        sync(be).openForRead(pw)
         assertEquals(1, Ledger.open(wc.readBytes(), pw).book.txs.size)
         assertTrue(sync(be).state().dirty)
     }

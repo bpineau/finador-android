@@ -4,6 +4,7 @@ package fin.android.storage
 
 import java.io.File
 import java.io.FileOutputStream
+import java.io.IOException
 
 /**
  * Replaces a file's contents in one step: write a temporary sibling, flush it to the storage, then
@@ -40,26 +41,24 @@ object AtomicFile {
      */
     fun write(file: File, data: ByteArray, backup: Boolean = false) {
         file.parentFile?.mkdirs()
-        val tmp = File(file.parentFile, file.name + TMP)
-        FileOutputStream(tmp).use {
-            it.write(data)
-            it.flush()
-            it.fd.sync() // the bytes must be on the storage BEFORE the rename publishes them
-        }
         if (backup && file.exists()) {
-            val bak = File(file.parentFile, file.name + BAK)
-            bak.delete()
-            file.copyTo(bak, overwrite = true)
+            replace(backupOf(file)) { out -> file.inputStream().use { it.copyTo(out) } }
         }
-        if (!tmp.renameTo(file)) {
-            // Some filesystems refuse to rename over an existing file. Falling back to a
-            // delete-then-rename reopens the window this exists to close, so it is the last resort
-            // and the backup above is what covers it.
-            file.delete()
-            if (!tmp.renameTo(file)) {
-                tmp.delete()
-                throw java.io.IOException("could not replace ${file.name}")
+        replace(file) { it.write(data) }
+    }
+
+    private inline fun replace(file: File, write: (FileOutputStream) -> Unit) {
+        val tmp = File(file.parentFile, file.name + TMP)
+        try {
+            FileOutputStream(tmp).use { out ->
+                write(out)
+                out.fd.sync()
             }
+            // On Android, rename replaces an existing regular file atomically. If the
+            // filesystem refuses, its existing copy is the only safe outcome.
+            if (!tmp.renameTo(file)) throw IOException("could not replace ${file.name}")
+        } finally {
+            tmp.delete()
         }
     }
 
